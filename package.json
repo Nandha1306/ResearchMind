@@ -1,5 +1,5 @@
 {
-  "name": "reserchmind",
+  "name": "researchmind",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -17,11 +17,13 @@
   },
   "homepage": "https://github.com/Nandha1306/ResearchMind#readme",
   "description": "",
-  "name": "researchmind",
   "private": true,
   "workspaces": [
     "frontend",
     "services/*",
     "packages/*"
-  ]
+  ],
+  "dependencies": {
+    "winston": "^3.19.0"
+  }
 }

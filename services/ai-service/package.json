@@ -1,5 +1,5 @@
 {
-  "name": "auth-service",
+  "name": "ai-service",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -9,21 +9,19 @@
   "author": "",
   "license": "ISC",
   "description": "",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "helmet": "^8.2.0",
+    "morgan": "^1.11.0",
+    "winston": "^3.19.0"
+  },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
-    "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
-    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.9.3",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
-  },
-  "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "cookie-parser": "^1.4.7",
-    "jsonwebtoken": "^9.0.3",
-    "mongoose": "^9.7.0",
-    "redis": "^6.0.0"
   }
 }
