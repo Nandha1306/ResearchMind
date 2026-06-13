@@ -1,0 +1,17 @@
+$kind: http-request
+url: http://localhost:5002/api/workspaces
+method: POST
+body:
+  type: json
+  content: "{\r
+
+    \  \"name\": \"ResearchMind Team\",\r
+
+    \  \"description\": \"Main workspace\"\r
+
+    }"
+auth:
+  type: bearer
+  credentials:
+    token: "{{json_web_token_12hp}}"
+order: 3073468395770855

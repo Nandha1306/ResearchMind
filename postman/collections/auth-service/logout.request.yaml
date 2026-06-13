@@ -1,4 +1,12 @@
 $kind: http-request
-url: ""
-method: GET
+name: logout
+url: http://localhost:5001/api/auth/logout
+method: POST
+body:
+  type: json
+  content: "{\r
+
+    \    \"refreshToken\": \"{{json_web_token_07r3}}\"\r
+
+    }"
 order: 4484509349708725

@@ -1,4 +1,12 @@
 $kind: http-request
-url: ""
-method: GET
+name: token-refresh
+url: http://localhost:5001/api/auth/refresh
+method: POST
+body:
+  type: json
+  content: "{\r
+
+    \    \"refreshToken\": \"{{json_web_token_0nhk}}\"\r
+
+    }"
 order: 4454661033798021

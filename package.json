@@ -24,10 +24,12 @@
     "packages/*"
   ],
   "dependencies": {
+    "mongoose": "^9.7.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
+    "@types/mongoose": "^5.11.96",
     "@types/morgan": "^1.9.10"
   }
 }

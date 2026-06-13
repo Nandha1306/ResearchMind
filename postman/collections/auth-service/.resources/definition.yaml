@@ -1,2 +1,11 @@
 $kind: collection
 name: auth-service
+variables:
+  - key: json_web_token_0nhk
+    secret: true
+  - key: json_web_token_07r3
+    secret: true
+  - key: json_web_token_12hp
+    secret: true
+  - key: supabase_service_role_api_key_0mrv
+    secret: true
