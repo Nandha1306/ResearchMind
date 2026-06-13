@@ -1,0 +1,100 @@
+# =========================
+# Dependencies
+# =========================
+
+node_modules/
+.pnp
+.pnp.js
+
+# =========================
+# Build Outputs
+# =========================
+
+dist/
+build/
+dist-ssr/
+coverage/
+*.tsbuildinfo
+
+# =========================
+# Environment Variables
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+# Logs
+# =========================
+
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# =========================
+# IDE / Editors
+# =========================
+
+.vscode/*
+!.vscode/extensions.json
+
+.idea/
+
+# =========================
+# OS Files
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+# Temporary Files
+# =========================
+
+tmp/
+temp/
+.cache/
+
+# =========================
+# Docker
+# =========================
+
+docker-data/
+
+# =========================
+# Testing
+# =========================
+
+coverage/
+.nyc_output/
+
+# =========================
+# Misc
+# =========================
+
+*.local
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.pid
+*.seed
+*.pid.lock
+
+# =========================
+# Frontend
+# =========================
+
+frontend/.vite/
+
+# =========================
+# Generated Files
+# =========================
+
+*.tgz
