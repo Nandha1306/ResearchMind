@@ -1,56 +1,77 @@
-import React from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import React, { useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { LoginPage } from "../pages/LoginPage";
 import { RegisterPage } from "../pages/RegisterPage";
+import { CreateWorkspacePage } from "../pages/CreateWorkspacePage";
 import { ProtectedRoute } from "./ProtectedRoute";
-import { useAuthStore } from "../store/auth.store";
-import { LogOut } from "lucide-react";
+import { useWorkspaceStore } from "../store/workspace.store";
+import { Loader2 } from "lucide-react";
 
-// Simple Dummy Dashboard & Workspace Creation views to avoid routing to blank pages
-const DashboardDummy: React.FC = () => {
-  const { user, logout } = useAuthStore();
-  return (
-    <div className="min-h-screen bg-[#0A0A0A] text-[#EDEDEE] flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full bg-[#111111] border border-[#2A2A2A] rounded-xl p-8 space-y-6 text-center">
-        <div className="w-16 h-16 rounded-2xl bg-[#7C6AF7] flex items-center justify-center text-white text-[28px] font-bold mx-auto">
-          R
-        </div>
-        <div>
-          <h1 className="text-[22px] font-semibold text-[#EDEDEE]">Welcome to ResearchMind</h1>
-          <p className="text-[#8B8B8F] text-[13px] mt-1">Hello, {user?.name || "Student"} ({user?.email})</p>
-        </div>
-        <div className="bg-[#1A1A1A] p-4 rounded-lg text-left space-y-2 text-[13px]">
-          <p className="text-[#8B8B8F]"><strong className="text-[#EDEDEE]">Role:</strong> Engineering Student</p>
-          <p className="text-[#8B8B8F]"><strong className="text-[#EDEDEE]">Status:</strong> Authenticated Session Active</p>
-        </div>
-        <div className="pt-2">
-          <button
-            onClick={() => logout()}
-            className="w-full h-10 border border-[#EF4444] text-[#EF4444] hover:bg-[rgba(239,68,68,0.06)] rounded-md font-medium text-[14px] transition-colors flex items-center justify-center gap-2"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Sign Out</span>
-          </button>
-        </div>
+// Guard: If unauthenticated, redirect to login.
+// If authenticated and has workspaces, let them pass. If 0 workspaces, force redirect to /create-workspace.
+const OnboardingGuard: React.FC = () => {
+  const { workspaces, fetchWorkspaces, isLoading } = useWorkspaceStore();
+
+  useEffect(() => {
+    fetchWorkspaces();
+  }, [fetchWorkspaces]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-[#7C6AF7]" />
+        <span className="text-muted-foreground text-[13px]">Verifying workspaces...</span>
       </div>
-    </div>
-  );
+    );
+  }
+
+  if (workspaces.length === 0) {
+    return <Navigate to="/create-workspace" replace />;
+  }
+
+  return <Outlet />;
 };
 
-const CreateWorkspaceDummy: React.FC = () => {
-  const { logout } = useAuthStore();
+// Guard: If authenticated and user already has workspaces, redirect to /dashboard.
+// Otherwise, let them access /create-workspace to onboarding.
+const CreateWorkspaceGuard: React.FC = () => {
+  const { workspaces, fetchWorkspaces, isLoading } = useWorkspaceStore();
+
+  useEffect(() => {
+    fetchWorkspaces();
+  }, [fetchWorkspaces]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-[#7C6AF7]" />
+        <span className="text-muted-foreground text-[13px]">Checking workspace status...</span>
+      </div>
+    );
+  }
+
+  if (workspaces.length > 0) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <Outlet />;
+};
+
+import { AppShell } from "../layouts/AppShell";
+import { OverviewPage } from "../pages/OverviewPage";
+
+// Generic placeholder page to render for sub-routes under development
+const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
   return (
-    <div className="min-h-screen bg-[#0A0A0A] text-[#EDEDEE] flex flex-col items-center justify-center p-6">
-      <div className="max-w-md w-full bg-[#111111] border border-[#2A2A2A] rounded-xl p-8 space-y-6 text-center">
-        <h1 className="text-[22px] font-semibold text-[#EDEDEE]">Create a New Workspace</h1>
-        <p className="text-[#8B8B8F] text-[13px]">Setup your AI research repository to start uploading papers.</p>
-        <button
-          onClick={() => logout()}
-          className="w-full h-10 border border-[#EF4444] text-[#EF4444] hover:bg-[rgba(239,68,68,0.06)] rounded-md font-medium text-[14px] transition-colors flex items-center justify-center gap-2"
-        >
-          <LogOut className="w-4 h-4" />
-          <span>Sign Out</span>
-        </button>
+    <div className="p-6 flex flex-col items-center justify-center min-h-[calc(100vh-3.5rem)] text-center bg-bg-base text-text-primary">
+      <div className="max-w-md space-y-4 p-8 bg-bg-surface border border-border-default rounded-xl shadow-lg">
+        <div className="w-12 h-12 rounded-xl bg-accent-bg flex items-center justify-center text-accent-primary font-bold text-lg mx-auto">
+          RM
+        </div>
+        <h2 className="text-xl font-bold text-text-primary mt-4">{title}</h2>
+        <p className="text-[13px] text-text-secondary leading-relaxed">
+          The <strong>{title}</strong> module is currently in development. It will soon connect to the ResearchMind AI backend infrastructure to provide full research automation workflows.
+        </p>
       </div>
     </div>
   );
@@ -66,8 +87,27 @@ export const AppRouter: React.FC = () => {
 
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>
-          <Route path="/dashboard" element={<DashboardDummy />} />
-          <Route path="/create-workspace" element={<CreateWorkspaceDummy />} />
+          {/* Dashboard Guard: verify user has at least 1 workspace */}
+          <Route element={<OnboardingGuard />}>
+            {/* App Layout Shell wrapping all authenticated dashboard pages */}
+            <Route element={<AppShell />}>
+              <Route path="/dashboard" element={<OverviewPage />} />
+              <Route path="/dashboard/tasks" element={<PlaceholderPage title="Tasks Workflow" />} />
+              <Route path="/dashboard/documents" element={<PlaceholderPage title="Documents Directory" />} />
+              <Route path="/dashboard/sources" element={<PlaceholderPage title="Data Sources" />} />
+              <Route path="/dashboard/analytics" element={<PlaceholderPage title="Analytics Insight" />} />
+              <Route path="/dashboard/ai-researcher" element={<PlaceholderPage title="AI Researcher Agent" />} />
+              <Route path="/dashboard/literature-review" element={<PlaceholderPage title="Literature Review Summarizer" />} />
+              <Route path="/dashboard/meeting-notes" element={<PlaceholderPage title="Meeting Notes Transcriber" />} />
+              <Route path="/dashboard/report-drafter" element={<PlaceholderPage title="Report Drafter Copilot" />} />
+              <Route path="/dashboard/settings" element={<PlaceholderPage title="Workspace Settings" />} />
+            </Route>
+          </Route>
+
+          {/* Onboarding Guard: redirect user to dashboard if they already have workspace(s) */}
+          <Route element={<CreateWorkspaceGuard />}>
+            <Route path="/create-workspace" element={<CreateWorkspacePage />} />
+          </Route>
         </Route>
 
         {/* Default Redirects */}

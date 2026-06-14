@@ -1,6 +1,7 @@
 import express from "express";
 
 import workspaceRoutes from "./routes/workspace.routes";
+import { errorMiddleware } from "../../../packages/shared/errors/error.middleware";
 
 const app = express();
 
@@ -14,5 +15,7 @@ app.get("/health", (_, res) => {
     service: "workspace-service",
   });
 });
+
+app.use(errorMiddleware);
 
 export default app;

@@ -1,8 +1,8 @@
 import { Workspace } from "../models/Workspace";
 import { CreateWorkspaceDto } from "../types/workspace.types";
 import { generateInviteCode } from "../utils/invite-code";
+import { AppError } from "../../../../packages/shared/errors/AppError";
 
-/** Create a new workspace for the authenticated user. */
 /** Create a new workspace for the authenticated user. */
 export const createWorkspace = async (
   ownerId: string,
@@ -40,11 +40,17 @@ export const joinWorkspace = async (
   });
 
   if (!workspace) {
-    throw new Error("Invalid invite code");
+    throw new AppError(
+      "Invalid invite code",
+      404
+    );
   }
 
   if (workspace.members.includes(userId)) {
-    throw new Error("Already a member");
+    throw new AppError(
+      "Already a member",
+      400
+    );
   }
 
   workspace.members.push(userId);

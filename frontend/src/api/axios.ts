@@ -78,10 +78,15 @@ axiosInstance.interceptors.response.use(
           refreshToken,
         });
 
-        const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data.data;
+        const newAccessToken = response.data.data.accessToken;
 
-        // Save new tokens
-        useAuthStore.getState().setTokens(newAccessToken, newRefreshToken);
+        const newRefreshToken =
+          response.data.data.refreshToken ?? refreshToken;
+
+        useAuthStore.getState().setTokens(
+          newAccessToken,
+          newRefreshToken
+        );
 
         // Resume all failed requests
         processQueue(null, newAccessToken);

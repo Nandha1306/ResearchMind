@@ -34,8 +34,12 @@ app.use(
 
 app.use(
   "/api/workspaces",
-  authenticate,
+  authenticate
+);
+
+app.use(
   createProxyMiddleware({
+    pathFilter: "/api/workspaces",
     target: process.env.WORKSPACE_SERVICE_URL,
     changeOrigin: true,
   })

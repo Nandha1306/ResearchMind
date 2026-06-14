@@ -2,13 +2,27 @@ import { Router } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
 import { create, getAll, join } from "../controllers/workspace.controller";
 
+import { validate } from "../../../../packages/validation/validation";
+import { createWorkspaceSchema , joinWorkspaceSchema } from "../../../../packages/validation/schemas/workspace.schema";
+
 const router = Router();
 
 /** Create a workspace. */
-router.post("/", authenticate, create);
+router.post(
+  "/",
+  authenticate,
+  validate(createWorkspaceSchema),
+  create
+);
+
 /** Get all workspaces for current user. */
 router.get("/", authenticate, getAll);
 /**** Join a workspace using invite code. */
-router.post("/join", authenticate, join);
+router.post(
+  "/join",
+  authenticate,
+  validate(joinWorkspaceSchema),
+  join
+);
 
 export default router;

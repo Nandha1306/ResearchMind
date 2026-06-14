@@ -1,64 +1,37 @@
 import { Response } from "express";
 import { AuthRequest } from "../middlewares/auth.middleware";
-import { createWorkspace, getUserWorkspaces, joinWorkspace  } from "../services/workspace.service";
+import { createWorkspace, getUserWorkspaces, joinWorkspace } from "../services/workspace.service";
+import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 
-/** Handle workspace creation requests. */
-export const create = async (
-  req: AuthRequest,
-  res: Response
-) => {
-  try {
+export const create = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
     const workspace = await createWorkspace(
       req.user!.userId,
       req.body
     );
 
-    return res.status(201).json({
+    res.status(201).json({
       success: true,
       data: workspace,
     });
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Workspace creation failed",
-    });
   }
-};
+);
 
-/** Return all workspaces for the authenticated user. */
-export const getAll = async (
-  req: AuthRequest,
-  res: Response
-) => {
-  try {
+export const getAll = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
     const workspaces = await getUserWorkspaces(
       req.user!.userId
     );
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       data: workspaces,
     });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to fetch workspaces",
-    });
   }
-};
+);
 
-/** Join a workspace using an invite code. */
-export const join = async (
-  req: AuthRequest,
-  res: Response
-) => {
-  try {
+export const join = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
     const { inviteCode } = req.body;
 
     const workspace = await joinWorkspace(
@@ -66,17 +39,9 @@ export const join = async (
       inviteCode
     );
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       data: workspace,
     });
-  } catch (error) {
-    return res.status(400).json({
-      success: false,
-      message:
-        error instanceof Error
-          ? error.message
-          : "Failed to join workspace",
-    });
   }
-};
+);
