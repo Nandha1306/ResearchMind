@@ -38,3 +38,7 @@ docker_process.md
 
 # Docs
 docs
+
+# Uploads & Test Artifacts
+uploads/
+test_files/

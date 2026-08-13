@@ -2,7 +2,7 @@
   "name": "document-service",
   "version": "1.0.0",
   "main": "index.js",
- "scripts": {
+  "scripts": {
     "dev": "nodemon",
     "build": "tsc",
     "start": "node dist/server.js"
@@ -17,12 +17,14 @@
     "helmet": "^8.2.0",
     "mongoose": "^9.7.1",
     "morgan": "^1.11.0",
+    "multer": "^2.2.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/morgan": "^1.9.10",
+    "@types/multer": "^2.2.0",
     "@types/node": "^25.9.4",
     "nodemon": "^3.1.14",
     "ts-node": "^10.9.2",
