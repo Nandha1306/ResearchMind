@@ -1,0 +1,305 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "ResearchMind Document Service API",
+    "version": "1.0.0",
+    "description": "API documentation for Document Service managing uploads, text extraction, Cloudinary storage, and metadata."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5003",
+      "description": "Document Service Direct"
+    },
+    {
+      "url": "http://localhost:5000",
+      "description": "API Gateway"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "CreateDocumentDto": {
+        "type": "object",
+        "required": ["workspaceId", "uploadedBy", "originalName", "fileType", "fileSize"],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "uploadedBy": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e456"
+          },
+          "originalName": {
+            "type": "string",
+            "example": "research_paper.pdf"
+          },
+          "fileType": {
+            "type": "string",
+            "enum": ["pdf", "docx"],
+            "example": "pdf"
+          },
+          "fileSize": {
+            "type": "number",
+            "example": 102400
+          },
+          "cloudinaryUrl": {
+            "type": "string",
+            "example": "https://res.cloudinary.com/demo/raw/upload/v12345/research_paper.pdf"
+          },
+          "cloudinaryPublicId": {
+            "type": "string",
+            "example": "researchmind/documents/research_paper.pdf"
+          },
+          "extractedText": {
+            "type": "string",
+            "example": "Extracted text content from the document..."
+          }
+        }
+      },
+      "DocumentResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e789"
+          },
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "uploadedBy": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e456"
+          },
+          "originalName": {
+            "type": "string",
+            "example": "research_paper.pdf"
+          },
+          "fileType": {
+            "type": "string",
+            "example": "pdf"
+          },
+          "fileSize": {
+            "type": "number",
+            "example": 102400
+          },
+          "cloudinaryUrl": {
+            "type": "string",
+            "example": "https://res.cloudinary.com/demo/raw/upload/v12345/research_paper.pdf"
+          },
+          "cloudinaryPublicId": {
+            "type": "string",
+            "example": "researchmind/documents/research_paper.pdf"
+          },
+          "extractedText": {
+            "type": "string",
+            "example": "Parsed text from PDF..."
+          },
+          "embeddingStatus": {
+            "type": "string",
+            "enum": ["pending", "indexing", "indexed", "failed"],
+            "example": "pending"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/documents/upload": {
+      "post": {
+        "summary": "Upload a PDF or DOCX file, extract text, upload to Cloudinary, and save metadata",
+        "tags": ["Documents"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "workspaceId"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "PDF or DOCX document file (Max 10MB)"
+                  },
+                  "workspaceId": {
+                    "type": "string",
+                    "description": "ID of the workspace to assign the document to"
+                  },
+                  "uploadedBy": {
+                    "type": "string",
+                    "description": "User ID of the uploader"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document uploaded, parsed, and metadata created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "message": { "type": "string", "example": "Document uploaded successfully" },
+                    "data": { "$ref": "#/components/schemas/DocumentResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request (Missing file or workspaceId / Unsupported file format)"
+          }
+        }
+      }
+    },
+    "/api/documents": {
+      "post": {
+        "summary": "Create document metadata record in MongoDB",
+        "tags": ["Documents"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocumentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Document metadata saved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/DocumentResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error"
+          }
+        }
+      }
+    },
+    "/api/documents/workspace/{workspaceId}": {
+      "get": {
+        "summary": "Get all documents for a workspace",
+        "tags": ["Documents"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Workspace ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of workspace documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/DocumentResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/documents/{id}": {
+      "get": {
+        "summary": "Get single document metadata by ID",
+        "tags": ["Documents"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Document ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document details returned successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/DocumentResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          }
+        }
+      }
+    }
+  }
+}

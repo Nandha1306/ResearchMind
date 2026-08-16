@@ -59,3 +59,16 @@ export const joinWorkspace = async (
 
   return workspace;
 };
+
+/** Check whether a user belongs to a workspace. */
+export const isWorkspaceMember = async (
+  workspaceId: string,
+  userId: string
+) => {
+  const workspace = await Workspace.findOne({
+    _id: workspaceId,
+    members: userId,
+  });
+
+  return Boolean(workspace);
+};

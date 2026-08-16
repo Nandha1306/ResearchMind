@@ -42,7 +42,6 @@ const workspaceSchema = new Schema<IWorkspace>(
   }
 );
 
-export const Workspace = mongoose.model<IWorkspace>(
-  "Workspace",
-  workspaceSchema
-);
+export const Workspace =
+  mongoose.models.Workspace ||
+  mongoose.model<IWorkspace>("Workspace", workspaceSchema);

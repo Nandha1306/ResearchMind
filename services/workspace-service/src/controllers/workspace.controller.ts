@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { AuthRequest } from "../middlewares/auth.middleware";
-import { createWorkspace, getUserWorkspaces, joinWorkspace } from "../services/workspace.service";
+import { createWorkspace, getUserWorkspaces, joinWorkspace, isWorkspaceMember} from "../services/workspace.service";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 
 export const create = asyncHandler(
@@ -42,6 +42,25 @@ export const join = asyncHandler(
     res.status(200).json({
       success: true,
       data: workspace,
+    });
+  }
+);
+
+/** Check whether the authenticated user belongs to a workspace. */
+export const checkMembership = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const workspaceId = req.params.workspaceId as string;
+
+    const isMember = await isWorkspaceMember(
+      workspaceId,
+      req.user!.userId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: {
+        isMember,
+      },
     });
   }
 );

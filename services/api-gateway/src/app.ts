@@ -27,7 +27,7 @@ app.use(apiRateLimiter);
 app.use(
   createProxyMiddleware({
     pathFilter: "/api/auth",
-    target: process.env.AUTH_SERVICE_URL,
+    target: process.env.AUTH_SERVICE_URL || "http://localhost:5001",
     changeOrigin: true,
   })
 );
@@ -40,7 +40,20 @@ app.use(
 app.use(
   createProxyMiddleware({
     pathFilter: "/api/workspaces",
-    target: process.env.WORKSPACE_SERVICE_URL,
+    target: process.env.WORKSPACE_SERVICE_URL || "http://localhost:5002",
+    changeOrigin: true,
+  })
+);
+
+app.use(
+  "/api/documents",
+  authenticate
+);
+
+app.use(
+  createProxyMiddleware({
+    pathFilter: "/api/documents",
+    target: process.env.DOCUMENT_SERVICE_URL || "http://localhost:5003",
     changeOrigin: true,
   })
 );
