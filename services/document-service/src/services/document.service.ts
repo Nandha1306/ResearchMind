@@ -18,13 +18,14 @@ export const uploadToCloudinary = async (
   fileExtension?: string
 ) => {
   const resourceType = fileExtension === "pdf" ? "image" : "raw";
+  const publicId = fileName.replace(/\.(pdf|docx)$/i, "");
 
   const result = await cloudinary.uploader.upload(
     filePath,
     {
       resource_type: resourceType,
       folder: "researchmind/documents",
-      public_id: fileName,
+      public_id: publicId,
     }
   );
 
