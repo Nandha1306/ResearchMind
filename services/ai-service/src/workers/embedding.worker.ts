@@ -3,6 +3,7 @@ import { EmbeddingJob } from "../types/embedding.types";
 
 import { chunkText } from "../services/chunking.service";
 import { generateEmbeddings } from "../services/embedding.service";
+import { upsertDocumentEmbeddings } from "../services/vector-service";
 
 const EMBEDDING_QUEUE = "researchmind:embedding:jobs";
 
@@ -59,12 +60,19 @@ const processEmbeddingJob = async (
     `Generated ${embeddings.length} embeddings for document ${job.documentId}`
   );
 
-  for (const result of embeddings) {
-    console.log({
-      chunkIndex: result.index,
-      dimension: result.embedding.length,
+  const result =
+    await upsertDocumentEmbeddings({
+      documentId: job.documentId,
+      workspaceId: job.workspaceId,
+      uploadedBy: job.uploadedBy,
+      fileType: job.fileType,
+      chunks,
+      embeddings,
     });
-  }
+
+  console.log(
+    `Stored ${result.vectorCount} vectors in Pinecone namespace ${result.workspaceId}`
+  );
 };
 
 /** Start the long-running Redis embedding worker. */

@@ -2,7 +2,7 @@ import { voyageEmbeddings, VOYAGE_EMBEDDING_DIMENSION, VOYAGE_MODEL } from "../c
 
 const EMBEDDING_BATCH_SIZE = 20;
 
-interface EmbeddingResult {
+export interface EmbeddingResult {
   index: number;
   embedding: number[];
 }
