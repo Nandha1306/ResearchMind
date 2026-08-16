@@ -7,4 +7,5 @@ export interface CreateDocumentDto {
   cloudinaryUrl?: string;
   cloudinaryPublicId?: string;
   extractedText?: string;
+  embeddingStatus?: "pending" | "indexing" | "indexed" | "failed";
 }

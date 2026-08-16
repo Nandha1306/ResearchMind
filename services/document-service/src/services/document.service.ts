@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import mongoose from "mongoose";
 import { Document } from "../models/Document";
 import { CreateDocumentDto } from "../types/document.types";
 import { Request, Response } from "express";
@@ -13,12 +14,15 @@ import { addEmbeddingJob } from "../queues/embedding.queue";
 /** Upload a document file to Cloudinary. */
 export const uploadToCloudinary = async (
   filePath: string,
-  fileName: string
+  fileName: string,
+  fileExtension?: string
 ) => {
+  const resourceType = fileExtension === "pdf" ? "image" : "raw";
+
   const result = await cloudinary.uploader.upload(
     filePath,
     {
-      resource_type: "raw",
+      resource_type: resourceType,
       folder: "researchmind/documents",
       public_id: fileName,
     }
@@ -108,7 +112,8 @@ export const uploadDocument = asyncHandler(
       const cloudinaryFile =
         await uploadToCloudinary(
           req.file.path,
-          req.file.filename
+          req.file.filename,
+          fileExtension
         );
 
       const document =
@@ -129,6 +134,7 @@ export const uploadDocument = asyncHandler(
           cloudinaryPublicId:
             cloudinaryFile.publicId,
           extractedText,
+          embeddingStatus: "indexed",
         });
 
       try {
@@ -179,5 +185,8 @@ export const getWorkspaceDocuments = async (
 export const getDocumentById = async (
   documentId: string
 ) => {
+  if (!mongoose.Types.ObjectId.isValid(documentId)) {
+    return null;
+  }
   return Document.findById(documentId);
 };

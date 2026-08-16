@@ -59,6 +59,7 @@ const CreateWorkspaceGuard: React.FC = () => {
 
 import { AppShell } from "../layouts/AppShell";
 import { OverviewPage } from "../pages/OverviewPage";
+import { DocumentsPage } from "../pages/DocumentsPage";
 
 // Generic placeholder page to render for sub-routes under development
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
@@ -93,7 +94,7 @@ export const AppRouter: React.FC = () => {
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<OverviewPage />} />
               <Route path="/dashboard/tasks" element={<PlaceholderPage title="Tasks Workflow" />} />
-              <Route path="/dashboard/documents" element={<PlaceholderPage title="Documents Directory" />} />
+              <Route path="/dashboard/documents" element={<DocumentsPage />} />
               <Route path="/dashboard/sources" element={<PlaceholderPage title="Data Sources" />} />
               <Route path="/dashboard/analytics" element={<PlaceholderPage title="Analytics Insight" />} />
               <Route path="/dashboard/ai-researcher" element={<PlaceholderPage title="AI Researcher Agent" />} />
