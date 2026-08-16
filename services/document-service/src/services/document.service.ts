@@ -120,11 +120,7 @@ export const uploadDocument = asyncHandler(
       const document =
         await createDocument({
           workspaceId,
-          uploadedBy:
-            (req as any).user?.userId ||
-            (req as any).user?.id ||
-            req.body.uploadedBy ||
-            "unknown",
+          uploadedBy: userId,
           originalName:
             req.file.originalname,
           fileType:

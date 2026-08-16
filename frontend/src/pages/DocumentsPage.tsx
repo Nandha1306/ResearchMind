@@ -8,6 +8,8 @@ import { DocumentSkeleton } from "../components/documents/DocumentSkeleton";
 import { DocumentEmptyState } from "../components/documents/DocumentEmptyState";
 import { DocumentErrorState } from "../components/documents/DocumentErrorState";
 import { UploadDocumentModal } from "../components/documents/UploadDocumentModal";
+import { PdfViewerModal } from "../components/documents/PdfViewerModal";
+import type { DocumentItem } from "../types/document.types";
 import { Plus, FileText, Sparkles } from "lucide-react";
 import { Button } from "../components/ui/button";
 
@@ -21,6 +23,7 @@ export const DocumentsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterOption>("all");
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [selectedPdf, setSelectedPdf] = useState<DocumentItem | null>(null);
 
   // Client-side local search & filter algorithm
   const filteredDocuments = useMemo(() => {
@@ -94,7 +97,10 @@ export const DocumentsPage: React.FC = () => {
 
           {/* Document Grid or No Results Message */}
           {filteredDocuments.length > 0 ? (
-            <DocumentGrid documents={filteredDocuments} />
+            <DocumentGrid
+              documents={filteredDocuments}
+              onSelectDocument={(doc) => setSelectedPdf(doc)}
+            />
           ) : (
             <div className="p-8 bg-[#111111] border border-[#2A2A2A] rounded-xl text-center space-y-3">
               <div className="w-10 h-10 rounded-xl bg-[#1A1A1A] text-[#8B8B8F] flex items-center justify-center mx-auto">
@@ -125,6 +131,14 @@ export const DocumentsPage: React.FC = () => {
         onUpload={handleUploadSubmit}
         isUploading={uploadMutation.isPending}
       />
+
+      {/* 4. In-App PDF Viewer Modal */}
+      {selectedPdf && (
+        <PdfViewerModal
+          document={selectedPdf}
+          onClose={() => setSelectedPdf(null)}
+        />
+      )}
     </div>
   );
 };

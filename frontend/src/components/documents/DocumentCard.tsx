@@ -6,19 +6,34 @@ import { FileText, FileType, ExternalLink, Calendar, HardDrive } from "lucide-re
 
 interface DocumentCardProps {
   document: DocumentItem;
+  onSelect?: (document: DocumentItem) => void;
 }
 
-export const DocumentCard: React.FC<DocumentCardProps> = ({ document }) => {
+export const DocumentCard: React.FC<DocumentCardProps> = ({
+  document,
+  onSelect,
+}) => {
   const isPdf = document.fileType === "pdf";
-  const fileUrl = document.cloudinaryUrl || "#";
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (isPdf && onSelect) {
+      e.preventDefault();
+      onSelect(document);
+    }
+  };
 
   return (
     <a
-      href={fileUrl}
-      target="_blank"
+      href={document.cloudinaryUrl || "#"}
+      target={isPdf ? "_self" : "_blank"}
       rel="noopener noreferrer"
+      onClick={handleClick}
       className="bg-[#111111] border border-[#2A2A2A] rounded-xl p-4 flex flex-col justify-between hover:bg-[#141414] hover:border-[#3A3A3A] transition-all duration-200 group cursor-pointer select-none space-y-4 shadow-sm block text-left text-inherit no-underline"
-      title={document.cloudinaryUrl ? `Open ${document.originalName} in new tab` : "No document URL"}
+      title={
+        isPdf
+          ? `View ${document.originalName} in-app`
+          : `Open ${document.originalName} in new tab`
+      }
     >
       {/* Top Row: Icon + Status Badge */}
       <div className="flex items-start justify-between gap-3">

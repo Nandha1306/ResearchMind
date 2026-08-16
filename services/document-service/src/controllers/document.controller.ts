@@ -86,10 +86,17 @@ export const getDocument = asyncHandler(
 /** Create document metadata and store in MongoDB. */
 export const createDocumentHandler = asyncHandler(
   async (req: any, res: Response) => {
-    const userId = req.user?.userId || req.user?.id || req.body.uploadedBy;
+    const userId = req.user?.userId || req.user?.id;
     const { workspaceId } = req.body;
 
-    if (userId && workspaceId) {
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    if (workspaceId) {
       const isMember = await checkWorkspaceMembership(
         workspaceId,
         userId,
@@ -104,7 +111,10 @@ export const createDocumentHandler = asyncHandler(
       }
     }
 
-    const document = await createDocument(req.body);
+    const document = await createDocument({
+      ...req.body,
+      uploadedBy: userId,
+    });
     res.status(201).json({
       success: true,
       data: document,
