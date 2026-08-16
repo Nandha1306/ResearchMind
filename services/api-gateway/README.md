@@ -1,19 +1,20 @@
 # API Gateway (`api-gateway`)
 
-Central reverse proxy and entry point for client requests in the **ResearchMind** microservices ecosystem.
+Central reverse proxy, authentication verification, and API router for the **ResearchMind** microservices ecosystem.
 
 ---
 
 ## 1. Purpose
-The API Gateway handles incoming HTTP requests, applies global rate limiting, security headers, CORS policies, validates JWT access tokens for protected endpoints, and routes traffic downstream to individual microservices.
+The API Gateway serves as the single public HTTP entry point (`http://localhost:5000/api`). It applies rate limiting, security headers via Helmet, CORS policies, validates JWT access tokens, and routes traffic downstream to target microservices.
 
 ---
 
 ## 2. Responsibilities
-- Proxying `/api/auth/*` to Auth Service.
-- Authenticating and proxying `/api/workspaces/*` to Workspace Service.
-- Enforcing global rate limiting (100 requests per 15 minutes per IP).
-- Hosting interactive Swagger UI documentation at `/api-docs`.
+- Proxying `/api/auth/*` traffic to Auth Service (port 5001).
+- Authenticating and proxying `/api/workspaces/*` traffic to Workspace Service (port 5002).
+- Authenticating and proxying `/api/documents/*` traffic to Document Service (port 5003).
+- Enforcing global sliding window rate limiting (100 requests per 15 minutes per IP).
+- Hosting interactive Swagger UI documentation at `/api-docs/`.
 - Standardizing HTTP response headers with Helmet.
 
 ---
@@ -25,7 +26,7 @@ api-gateway/
 │   ├── middlewares/
 │   │   ├── auth.middleware.ts        # JWT token verification middleware
 │   │   └── rate-limit.middleware.ts  # Express rate limiting configuration
-│   ├── app.ts                        # Express application & proxy definitions
+│   ├── app.ts                        # Express application & proxy route definitions
 │   ├── server.ts                     # HTTP server startup script
 │   └── swagger.json                  # OpenAPI 3.0 static specification
 ├── package.json
@@ -36,17 +37,18 @@ api-gateway/
 
 ## 4. API Endpoints
 
-### Gateway Native Endpoints
+### Native Gateway Endpoints
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | `GET` | `/health` | Gateway health check status | No |
 | `GET` | `/api-docs` | Interactive Swagger API UI | No |
 
-### Proxied Routes
-| Match Path | Target Service | Auth Middleware | Target URL Variable |
-|------------|----------------|-----------------|---------------------|
-| `/api/auth/*` | Auth Service | Public (No Gateway Check) | `AUTH_SERVICE_URL` |
-| `/api/workspaces/*` | Workspace Service | Gateway `authenticate()` (JWT) | `WORKSPACE_SERVICE_URL` |
+### Proxied Microservice Routes
+| Match Path | Target Service | Auth Middleware | Default Target URL |
+|------------|----------------|-----------------|--------------------|
+| `/api/auth/*` | Auth Service | Public (Gateway pass-through) | `http://127.0.0.1:5001` |
+| `/api/workspaces/*` | Workspace Service | Gateway `authenticate()` (JWT) | `http://127.0.0.1:5002` |
+| `/api/documents/*` | Document Service | Gateway `authenticate()` (JWT) | `http://127.0.0.1:5003` |
 
 ---
 
@@ -57,18 +59,18 @@ api-gateway/
 | `PORT` | Gateway listening port | `5000` | Yes |
 | `AUTH_SERVICE_URL` | Downstream Auth Service URL | `http://127.0.0.1:5001` | Yes |
 | `WORKSPACE_SERVICE_URL` | Downstream Workspace Service URL | `http://127.0.0.1:5002` | Yes |
-| `JWT_ACCESS_SECRET` | Secret key for JWT verification | `supersecretkey` | Yes |
+| `DOCUMENT_SERVICE_URL` | Downstream Document Service URL | `http://127.0.0.1:5003` | Yes |
+| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | `researchmind_access_secret` | Yes |
 
 ---
 
 ## 6. Dependencies
-- **`express`**: Base web framework.
+- **`express`**: Base HTTP framework.
 - **`http-proxy-middleware`**: Downstream request proxying.
 - **`express-rate-limit`**: Rate limiting middleware.
+- **`jsonwebtoken`**: JWT signature verification.
 - **`swagger-ui-express`**: Renders Swagger UI at `/api-docs`.
-- **`helmet`**: Security headers management.
-- **`cors`**: Enables cross-origin requests.
-- **`morgan`**: Development request logging.
+- **`helmet`**: Security header management.
 
 ---
 
@@ -80,9 +82,9 @@ npm install
 # Run dev server with live reload
 npm run dev
 
-# Build TypeScript to JavaScript
+# Build TypeScript to dist/
 npm run build
 
-# Start production server
+# Start compiled production server
 npm run start
 ```

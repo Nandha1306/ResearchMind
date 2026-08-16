@@ -1615,37 +1615,37 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ## 16. Phase-by-Phase Build Plan
 
-### 🟦 Phase 1 — Foundation (Week 1–2)
+### 🟦 Phase 1 — Foundation (Week 1–2) — [STATUS: 100% COMPLETE & VERIFIED]
 **Goal:** All services boot. Auth works end to end.
 
-- [ ] Set up monorepo folder structure
-- [ ] Initialize all 6 services (Express + nodemon + Winston)
-- [ ] Docker Compose: MongoDB + Redis
-- [ ] Auth Service: register, login, JWT, refresh, logout
-- [ ] Workspace CRUD (create, invite, join)
-- [ ] API Gateway: routing + JWT middleware + rate limiting
-- [ ] React app (Vite + Tailwind + shadcn/ui)
-- [ ] Login, Register, Workspace creation pages
-- [ ] Axios instance with auto token refresh interceptor
-- [ ] Protected routes
+- [x] Set up monorepo folder structure
+- [x] Initialize services (Express + TypeScript + Winston)
+- [x] Docker Compose: MongoDB + Redis
+- [x] Auth Service: register, login, JWT, refresh, logout
+- [x] Workspace CRUD (create, invite, join)
+- [x] API Gateway: routing + JWT middleware + rate limiting
+- [x] React app (Vite + Tailwind CSS + Lucide Icons)
+- [x] Login, Register, Workspace onboarding pages
+- [x] Axios instance with auto token refresh interceptor
+- [x] Protected routes
 
-✅ **Checkpoint:** Register → create workspace → see empty dashboard.
+✅ **Checkpoint:** Register → create workspace → see dashboard. (VERIFIED)
 
 ---
 
-### 🟦 Phase 2 — Document Ingestion (Week 3)
+### 🟦 Phase 2 — Document Ingestion (Week 3) — [STATUS: 100% COMPLETE & VERIFIED]
 **Goal:** Upload documents, extract text, view them in-app.
 
-- [ ] Doc Service: upload endpoint with Multer
-- [ ] PDF text extraction (pdf-parse)
-- [ ] DOCX text extraction (mammoth)
-- [ ] Store file on Cloudinary
-- [ ] Document library page (grid view with file type icons)
-- [ ] In-app PDF viewer (react-pdf)
-- [ ] Embedding status badge (pending / indexed)
-- [ ] Redis queue for embedding jobs (producer side)
+- [x] Doc Service: upload endpoint with Multer (`POST /api/documents/upload`)
+- [x] PDF text extraction (`pdf-parse`)
+- [x] DOCX text extraction (`mammoth`)
+- [x] Store file on Cloudinary (`image` asset type for PDFs, `raw` for DOCX)
+- [x] Document library page (grid view with file type icons, search, filters)
+- [x] In-app PDF viewer (`react-pdf` in-app modal with page controls & zoom)
+- [x] Embedding status badge (`pending` / `indexed`)
+- [x] Redis queue for embedding jobs (producer side `researchmind:embedding:jobs`)
 
-✅ **Checkpoint:** Upload a PDF, see it in document library, text extracted and stored.
+✅ **Checkpoint:** Upload a PDF, see it in document library, text extracted and stored. (VERIFIED)
 
 ---
 
