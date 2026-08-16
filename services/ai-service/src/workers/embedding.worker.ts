@@ -2,6 +2,7 @@ import redisWorker from "../config/redis-worker";
 import { EmbeddingJob } from "../types/embedding.types";
 
 import { chunkText } from "../services/chunking.service";
+import { generateEmbeddings } from "../services/embedding.service";
 
 const EMBEDDING_QUEUE = "researchmind:embedding:jobs";
 
@@ -43,12 +44,25 @@ const processEmbeddingJob = async (
     `Document ${job.documentId} split into ${chunks.length} chunks`
   );
 
-  for (const chunk of chunks) {
+  if (chunks.length === 0) {
+    throw new Error(
+      `Document ${job.documentId} contains no usable text`
+    );
+  }
+
+  const embeddings =
+    await generateEmbeddings(
+      chunks.map((chunk) => chunk.text)
+    );
+
+  console.log(
+    `Generated ${embeddings.length} embeddings for document ${job.documentId}`
+  );
+
+  for (const result of embeddings) {
     console.log({
-      index: chunk.index,
-      tokenCount: chunk.tokenCount,
-      preview:
-        chunk.text.slice(0, 120) + "...",
+      chunkIndex: result.index,
+      dimension: result.embedding.length,
     });
   }
 };
