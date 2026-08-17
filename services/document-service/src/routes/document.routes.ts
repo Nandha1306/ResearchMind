@@ -1,14 +1,11 @@
 import { Router } from "express";
-import {
-  getDocuments,
-  getDocument,
-  createDocumentHandler,
-} from "../controllers/document.controller";
+import { getDocuments, getDocument, createDocumentHandler } from "../controllers/document.controller";
 import { validate } from "../../../../packages/validation/validation";
 import { createDocumentSchema } from "../../../../packages/validation/schemas/document.schema";
 import { upload } from "../middlewares/upload.middleware";
 import { uploadDocument } from "../controllers/upload.controller";
 import { authenticate } from "../../../auth-service/src/middlewares/auth.middleware";
+import { updateEmbeddingStatus } from "../controllers/document.controller";
 
 const router = Router();
 
@@ -40,6 +37,11 @@ router.post(
   authenticate,
   upload.single("file"),
   uploadDocument
+);
+
+router.patch(
+  "/:id/embedding-status",
+  updateEmbeddingStatus
 );
 
 export default router;

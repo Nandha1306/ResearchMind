@@ -73,13 +73,62 @@ export const upsertDocumentEmbeddings = async ({
     };
   });
 
+  const PINECONE_BATCH_SIZE = 100;
+
+  for (
+    let start = 0;
+    start < vectors.length;
+    start += PINECONE_BATCH_SIZE
+  ) {
+    const batch = vectors.slice(
+        start,
+        start + PINECONE_BATCH_SIZE
+  );
+
   await pineconeIndex
     .namespace(workspaceId)
-    .upsert(vectors);
+    .upsert(batch);
+
+    console.log(
+        `Upserted Pinecone vectors ${start}-${
+        start + batch.length - 1
+        }`
+    );
+  }
 
   return {
     documentId,
     workspaceId,
     vectorCount: vectors.length,
   };
+};
+
+/** Delete all existing vectors belonging to a document. */
+export const deleteDocumentEmbeddings = async (
+  workspaceId: string,
+  documentId: string
+) => {
+  try {
+    await pineconeIndex
+      .namespace(workspaceId)
+      .deleteMany({
+        documentId: {
+          $eq: documentId,
+        },
+      });
+  } catch (error: any) {
+    const is404 =
+      error?.name === "PineconeNotFoundError" ||
+      error?.status === 404 ||
+      (typeof error?.message === "string" && error.message.includes("404"));
+
+    if (is404) {
+      console.log(
+        `No existing vectors found in namespace "${workspaceId}" for document "${documentId}" (404 ignored)`
+      );
+      return;
+    }
+
+    throw error;
+  }
 };

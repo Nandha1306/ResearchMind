@@ -1,11 +1,9 @@
 import { Response } from "express";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
-import {
-  getWorkspaceDocuments,
-  getDocumentById,
-  createDocument,
-} from "../services/document.service";
+import { getWorkspaceDocuments, getDocumentById, createDocument } from "../services/document.service";
 import { checkWorkspaceMembership } from "../utils/workspace-checker";
+import { Document } from "../models/Document";
+import { AppError } from "../../../../packages/shared/errors/AppError";
 
 /** Return all documents for a workspace. */
 export const getDocuments = asyncHandler(
@@ -121,3 +119,53 @@ export const createDocumentHandler = asyncHandler(
     });
   }
 );
+
+/** Update the embedding processing status for a document. */
+export const updateEmbeddingStatus = async (
+  req: any,
+  res: Response
+) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  const allowedStatuses = [
+    "pending",
+    "indexing",
+    "indexed",
+    "failed",
+  ];
+
+  if (!allowedStatuses.includes(status)) {
+    throw new AppError(
+      "Invalid embedding status",
+      400
+    );
+  }
+
+  const document =
+    await Document.findByIdAndUpdate(
+      id,
+      {
+        embeddingStatus: status,
+      },
+      {
+        new: true,
+      }
+    );
+
+  if (!document) {
+    throw new AppError(
+      "Document not found",
+      404
+    );
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      documentId: document._id,
+      embeddingStatus:
+        document.embeddingStatus,
+    },
+  });
+};

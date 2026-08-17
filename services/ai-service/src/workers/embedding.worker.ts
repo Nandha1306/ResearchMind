@@ -3,7 +3,9 @@ import { EmbeddingJob } from "../types/embedding.types";
 
 import { chunkText } from "../services/chunking.service";
 import { generateEmbeddings } from "../services/embedding.service";
-import { upsertDocumentEmbeddings } from "../services/vector-service";
+
+import { deleteDocumentEmbeddings, upsertDocumentEmbeddings } from "../services/vector-service";
+import { updateDocumentEmbeddingStatus } from "../services/document-status.service";
 
 const EMBEDDING_QUEUE = "researchmind:embedding:jobs";
 
@@ -26,53 +28,98 @@ const isValidEmbeddingJob = (
   );
 };
 
-/** Process a single embedding job from the Redis queue. */
+/** Process a single document embedding job. */
 const processEmbeddingJob = async (
   job: EmbeddingJob
 ) => {
-  console.log("Embedding job received:", {
-    documentId: job.documentId,
-    workspaceId: job.workspaceId,
-    fileType: job.fileType,
-    textLength: job.extractedText.length,
-  });
+  const {
+    documentId,
+    workspaceId,
+    uploadedBy,
+    fileType,
+    extractedText,
+  } = job;
 
-  const chunks = await chunkText(
-    job.extractedText
-  );
-
-  console.log(
-    `Document ${job.documentId} split into ${chunks.length} chunks`
-  );
-
-  if (chunks.length === 0) {
-    throw new Error(
-      `Document ${job.documentId} contains no usable text`
+  try {
+    console.log(
+      `Starting embedding processing for document ${documentId}`
     );
+
+    await updateDocumentEmbeddingStatus(
+      documentId,
+      "indexing"
+    );
+
+    const chunks = await chunkText(
+      extractedText
+    );
+
+    if (chunks.length === 0) {
+      throw new Error(
+        "Document contains no usable text"
+      );
+    }
+
+    console.log(
+      `Document ${documentId} split into ${chunks.length} chunks`
+    );
+
+    const embeddings =
+      await generateEmbeddings(
+        chunks.map((chunk) => chunk.text)
+      );
+
+    console.log(
+      `Generated ${embeddings.length} embeddings`
+    );
+
+    await deleteDocumentEmbeddings(
+      workspaceId,
+      documentId
+    );
+
+    const result =
+      await upsertDocumentEmbeddings({
+        documentId,
+        workspaceId,
+        uploadedBy,
+        fileType,
+        chunks,
+        embeddings,
+      });
+
+    console.log(
+      `Stored ${result.vectorCount} vectors in Pinecone`
+    );
+
+    await updateDocumentEmbeddingStatus(
+      documentId,
+      "indexed"
+    );
+
+    console.log(
+      `Document ${documentId} indexing completed`
+    );
+  } catch (error) {
+    console.error(
+      `Embedding processing failed for document ${documentId}:`,
+      error
+    );
+
+    try {
+      await updateDocumentEmbeddingStatus(
+        documentId,
+        "failed"
+      );
+    } catch (statusError) {
+      console.error(
+        `Failed to update document ${documentId} status to failed:`,
+        statusError
+      );
+    }
+
+    throw error;
   }
-
-  const embeddings =
-    await generateEmbeddings(
-      chunks.map((chunk) => chunk.text)
-    );
-
-  console.log(
-    `Generated ${embeddings.length} embeddings for document ${job.documentId}`
-  );
-
-  const result =
-    await upsertDocumentEmbeddings({
-      documentId: job.documentId,
-      workspaceId: job.workspaceId,
-      uploadedBy: job.uploadedBy,
-      fileType: job.fileType,
-      chunks,
-      embeddings,
-    });
-
-  console.log(
-    `Stored ${result.vectorCount} vectors in Pinecone namespace ${result.workspaceId}`
-  );
 };
 
 /** Start the long-running Redis embedding worker. */
