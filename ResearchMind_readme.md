@@ -1649,7 +1649,7 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ---
 
-### 🟦 Phase 3 — RAG Pipeline (Week 4) — [STATUS: RETRIEVAL MILESTONE COMPLETE]
+### 🟦 Phase 3 — RAG Pipeline (Week 4) — [STATUS: BACKEND 100% COMPLETE]
 **Goal:** AI can answer questions from uploaded documents.
 
 - [x] Set up Pinecone project + index (`researchmind`)
@@ -1658,9 +1658,10 @@ useUIStore           // sidebarOpen, activeModal, theme
 - [x] Voyage AI embedding API integration (`voyage-4`)
 - [x] Upsert chunks to Pinecone with metadata & workspace namespace isolation
 - [x] Vector delete on document delete (`deleteDocumentEmbeddings`)
-- [/] `/ai/search` endpoint (Retrieval milestone complete: query embedding → Pinecone vector search → Top-K chunks. Next: LLM prompt + SSE streaming)
-- [ ] Semantic search page with streaming answer + source citations
-- [ ] AI session logged to MongoDB
+- [x] `/ai/search` endpoint (Retrieval debugging endpoint)
+- [x] `/ai/query` endpoint (Grok LLM prompt + SSE token streaming + source citations)
+- [x] AI session logged to MongoDB (`AISession` model & persistence)
+- [ ] Semantic search page with streaming answer + source citations (Frontend)
 
 ✅ **Checkpoint:** Upload 3 papers, ask "What models are compared?", get a grounded answer with citations.
 

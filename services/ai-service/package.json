@@ -26,7 +26,9 @@
     "express": "^5.2.1",
     "helmet": "^8.2.0",
     "ioredis": "^5.11.1",
+    "mongoose": "^9.9.3",
     "morgan": "^1.11.0",
+    "openai": "^7.5.0",
     "winston": "^3.19.0"
   },
   "devDependencies": {

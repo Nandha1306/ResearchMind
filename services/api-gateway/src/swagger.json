@@ -669,7 +669,7 @@
     },
     "/api/ai/search": {
       "post": {
-        "summary": "Perform semantic search over workspace documents using Voyage AI embeddings & Pinecone vector search",
+        "summary": "Perform semantic search over workspace documents (Retrieval debug endpoint)",
         "tags": ["AI & Search"],
         "security": [
           {
@@ -702,6 +702,49 @@
                       }
                     }
                   }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or invalid search parameters"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Not a member of this workspace"
+          }
+        }
+      }
+    },
+    "/api/ai/query": {
+      "post": {
+        "summary": "Execute full end-to-end RAG query with Grok LLM streaming via Server-Sent Events (SSE)",
+        "tags": ["AI & Search"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SemanticSearchDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Server-Sent Events (SSE) stream containing start, token, sources, done, and error events",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "example": "event: start\ndata: {\"query\":\"Which exercise demonstrates abstraction?\"}\n\nevent: token\ndata: {\"text\":\"Exercise\"}\n\nevent: sources\ndata: {\"sources\":[...]}\n\nevent: done\ndata: {\"sessionId\":\"60d5ecb8b5c9c22b88e1e999\"}\n\n"
                 }
               }
             }
