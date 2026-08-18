@@ -22,10 +22,11 @@ export const authenticate = (
     }
 
     const token = authHeader.split(" ")[1];
+    const secret = process.env.JWT_ACCESS_SECRET || "researchmind_access_secret";
 
     jwt.verify(
       token,
-      process.env.JWT_ACCESS_SECRET!
+      secret
     ) as JwtPayload;
 
     next();

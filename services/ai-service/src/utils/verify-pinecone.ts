@@ -1,12 +1,7 @@
-import {
-  pinecone,
-  PINECONE_INDEX_NAME,
-} from "../config/pinecone";
+import { pinecone, PINECONE_INDEX_NAME } from "../config/pinecone";
 
-export const verifyPineconeIndex =
-  async () => {
-    const indexList =
-      await pinecone.listIndexes();
+export const verifyPineconeIndex = async () => {
+  const indexList = await pinecone.listIndexes();
 
     const index = indexList.indexes?.find(
       (item) =>

@@ -1,0 +1,142 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "ResearchMind AI Service API",
+    "version": "1.0.0",
+    "description": "AI & RAG Semantic Search Service for ResearchMind"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:5005",
+      "description": "AI Microservice Direct Port"
+    },
+    {
+      "url": "http://localhost:5000",
+      "description": "API Gateway"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "SemanticSearchDto": {
+        "type": "object",
+        "required": ["workspaceId", "query"],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "query": {
+            "type": "string",
+            "example": "Which exercise demonstrates abstraction?"
+          },
+          "topK": {
+            "type": "number",
+            "example": 5,
+            "default": 5
+          }
+        }
+      },
+      "RetrievedChunkResponse": {
+        "type": "object",
+        "properties": {
+          "documentId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e789"
+          },
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "chunkIndex": {
+            "type": "number",
+            "example": 0
+          },
+          "text": {
+            "type": "string",
+            "example": "Abstraction is the process of hiding internal implementation details..."
+          },
+          "score": {
+            "type": "number",
+            "example": 0.892
+          },
+          "fileType": {
+            "type": "string",
+            "enum": ["pdf", "docx"],
+            "example": "pdf"
+          }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "tags": ["Health"],
+        "responses": {
+          "200": {
+            "description": "AI service is healthy"
+          }
+        }
+      }
+    },
+    "/api/ai/search": {
+      "post": {
+        "summary": "Perform semantic search over workspace documents",
+        "tags": ["AI & Search"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SemanticSearchDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Retrieved semantically relevant document chunks successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RetrievedChunkResponse"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden - Not a member of this workspace"
+          }
+        }
+      }
+    }
+  }
+}

@@ -12,12 +12,11 @@ import { authenticate } from "./middlewares/auth.middleware";
 const app = express();
 
 app.use(cors());
-// Disable helmet's Content Security Policy (CSP) for swagger docs if needed, or configure helmet properly.
-// Swagger UI uses inline styles and scripts, which helmet blocks by default.
-// Let's configure helmet to allow or disable CSP, or just let helmet exclude /api-docs, or disable CSP for helmet.
-app.use(helmet({
-  contentSecurityPolicy: false,
-}));
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+  })
+);
 app.use(morgan("dev"));
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
@@ -32,10 +31,7 @@ app.use(
   })
 );
 
-app.use(
-  "/api/workspaces",
-  authenticate
-);
+app.use("/api/workspaces", authenticate);
 
 app.use(
   createProxyMiddleware({
@@ -45,15 +41,22 @@ app.use(
   })
 );
 
-app.use(
-  "/api/documents",
-  authenticate
-);
+app.use("/api/documents", authenticate);
 
 app.use(
   createProxyMiddleware({
     pathFilter: "/api/documents",
     target: process.env.DOCUMENT_SERVICE_URL || "http://localhost:5003",
+    changeOrigin: true,
+  })
+);
+
+app.use("/api/ai", authenticate);
+
+app.use(
+  createProxyMiddleware({
+    pathFilter: "/api/ai",
+    target: process.env.AI_SERVICE_URL || "http://localhost:5006",
     changeOrigin: true,
   })
 );

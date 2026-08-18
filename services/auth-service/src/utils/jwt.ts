@@ -4,6 +4,9 @@ interface TokenPayload {
   userId: string;
 }
 
+const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || "researchmind_access_secret";
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || "researchmind_refresh_secret";
+
 /** Access token options */
 const accessOptions: SignOptions = {
   expiresIn: (process.env.ACCESS_TOKEN_EXPIRES as any) || "15m",
@@ -18,7 +21,7 @@ const refreshOptions: SignOptions = {
 export const generateAccessToken = (payload: TokenPayload): string => {
   return jwt.sign(
     payload,
-    process.env.JWT_ACCESS_SECRET as string,
+    JWT_ACCESS_SECRET,
     accessOptions
   );
 };
@@ -27,7 +30,7 @@ export const generateAccessToken = (payload: TokenPayload): string => {
 export const generateRefreshToken = (payload: TokenPayload): string => {
   return jwt.sign(
     payload,
-    process.env.JWT_REFRESH_SECRET as string,
+    JWT_REFRESH_SECRET,
     refreshOptions
   );
 };
@@ -36,7 +39,7 @@ export const generateRefreshToken = (payload: TokenPayload): string => {
 export const verifyAccessToken = (token: string): TokenPayload => {
   return jwt.verify(
     token,
-    process.env.JWT_ACCESS_SECRET as string
+    JWT_ACCESS_SECRET
   ) as TokenPayload;
 };
 
@@ -44,6 +47,6 @@ export const verifyAccessToken = (token: string): TokenPayload => {
 export const verifyRefreshToken = (token: string): TokenPayload => {
   return jwt.verify(
     token,
-    process.env.JWT_REFRESH_SECRET as string
+    JWT_REFRESH_SECRET
   ) as TokenPayload;
 };

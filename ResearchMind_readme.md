@@ -1649,16 +1649,16 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ---
 
-### 🟦 Phase 3 — RAG Pipeline (Week 4)
+### 🟦 Phase 3 — RAG Pipeline (Week 4) — [STATUS: RETRIEVAL MILESTONE COMPLETE]
 **Goal:** AI can answer questions from uploaded documents.
 
-- [ ] Set up Pinecone project + index
-- [ ] Embedding worker (consumes Redis queue)
-- [ ] Chunking algorithm with overlap
-- [ ] Voyage AI embedding API integration
-- [ ] Upsert chunks to Pinecone with metadata
-- [ ] Vector delete on document delete
-- [ ] `/ai/search` endpoint: embed query → Pinecone search → build prompt → SSE stream
+- [x] Set up Pinecone project + index (`researchmind`)
+- [x] Embedding worker (consumes Redis queue `researchmind:embedding:jobs`)
+- [x] Chunking algorithm with paragraph overlap
+- [x] Voyage AI embedding API integration (`voyage-4`)
+- [x] Upsert chunks to Pinecone with metadata & workspace namespace isolation
+- [x] Vector delete on document delete (`deleteDocumentEmbeddings`)
+- [/] `/ai/search` endpoint (Retrieval milestone complete: query embedding → Pinecone vector search → Top-K chunks. Next: LLM prompt + SSE streaming)
 - [ ] Semantic search page with streaming answer + source citations
 - [ ] AI session logged to MongoDB
 

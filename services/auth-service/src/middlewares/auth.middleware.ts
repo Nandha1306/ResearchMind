@@ -26,11 +26,12 @@ export const authenticate = (
   }
 
   const token = authHeader.split(" ")[1];
+  const jwtSecret = process.env.JWT_ACCESS_SECRET || "researchmind_access_secret";
 
   try {
     const decoded = jwt.verify(
       token,
-      process.env.JWT_ACCESS_SECRET!
+      jwtSecret
     ) as {
       userId: string;
     };
