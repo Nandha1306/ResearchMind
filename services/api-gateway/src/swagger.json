@@ -231,6 +231,187 @@
             "example": "pdf"
           }
         }
+      },
+      "CreateBoardDto": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Sprint 1 Board"
+          }
+        }
+      },
+      "UpdateBoardDto": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "Updated Board Name"
+          }
+        }
+      },
+      "BoardResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e789"
+          },
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "name": {
+            "type": "string",
+            "example": "Sprint 1 Board"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "CreateTaskDto": {
+        "type": "object",
+        "required": ["boardId", "title"],
+        "properties": {
+          "boardId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e789"
+          },
+          "title": {
+            "type": "string",
+            "example": "Implement user authentication flow"
+          },
+          "description": {
+            "type": "string",
+            "example": "Add JWT token rotation and auth middleware"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["todo", "in_progress", "done"],
+            "example": "todo"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "example": "high"
+          },
+          "assigneeId": {
+            "type": "string",
+            "nullable": true,
+            "example": "60d5ecb8b5c9c22b88e1e456"
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "parentTaskId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateTaskDto": {
+        "type": "object",
+        "properties": {
+          "boardId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["todo", "in_progress", "done"]
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high"]
+          },
+          "assigneeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "parentTaskId": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "TaskResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e999"
+          },
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "boardId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e789"
+          },
+          "title": {
+            "type": "string",
+            "example": "Implement user authentication flow"
+          },
+          "description": {
+            "type": "string",
+            "example": "Add JWT token rotation and auth middleware"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["todo", "in_progress", "done"],
+            "example": "in_progress"
+          },
+          "priority": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "example": "high"
+          },
+          "assigneeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "dueDate": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "parentTaskId": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdBy": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e456"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       }
     }
   },
@@ -664,6 +845,261 @@
           "404": {
             "description": "Document not found"
           }
+        }
+      }
+    },
+    "/api/tasks/workspaces/{workspaceId}/boards": {
+      "post": {
+        "summary": "Create a new Kanban board inside a workspace",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Workspace ID" }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateBoardDto" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Board created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/BoardResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Validation error" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden - Not a member of this workspace" }
+        }
+      },
+      "get": {
+        "summary": "Get all Kanban boards for a workspace",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" }, "description": "Workspace ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of workspace boards",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/BoardResponse" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden" }
+        }
+      }
+    },
+    "/api/tasks/workspaces/{workspaceId}/boards/{id}": {
+      "get": {
+        "summary": "Get single board by ID",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Board details returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/BoardResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Board not found" }
+        }
+      },
+      "patch": {
+        "summary": "Update board by ID",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateBoardDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Board updated successfully" },
+          "404": { "description": "Board not found" }
+        }
+      },
+      "delete": {
+        "summary": "Delete board by ID",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Board deleted successfully" },
+          "404": { "description": "Board not found" }
+        }
+      }
+    },
+    "/api/tasks/workspaces/{workspaceId}/tasks": {
+      "post": {
+        "summary": "Create a new task inside a workspace board",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CreateTaskDto" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Task created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/TaskResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Validation error or invalid board/parent task reference" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden" }
+        }
+      },
+      "get": {
+        "summary": "Get all tasks for a workspace (optionally filtered by boardId)",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "boardId", "in": "query", "required": false, "schema": { "type": "string" }, "description": "Filter tasks by Board ID" }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of workspace tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TaskResponse" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/tasks/workspaces/{workspaceId}/tasks/{id}": {
+      "get": {
+        "summary": "Get single task by ID",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Task details returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/TaskResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Task not found" }
+        }
+      },
+      "patch": {
+        "summary": "Update task by ID",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdateTaskDto" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Task updated successfully" },
+          "404": { "description": "Task not found" }
+        }
+      },
+      "delete": {
+        "summary": "Delete task by ID",
+        "tags": ["Tasks & Boards"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Task deleted successfully" },
+          "404": { "description": "Task not found" }
         }
       }
     },

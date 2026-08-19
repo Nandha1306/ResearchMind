@@ -51,6 +51,16 @@ app.use(
   })
 );
 
+app.use("/api/tasks", authenticate);
+
+app.use(
+  createProxyMiddleware({
+    pathFilter: "/api/tasks",
+    target: process.env.TASK_SERVICE_URL || "http://localhost:5004",
+    changeOrigin: true,
+  })
+);
+
 app.use("/api/ai", authenticate);
 
 app.use(
