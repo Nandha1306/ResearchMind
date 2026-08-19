@@ -1,12 +1,14 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useWorkspaceStore } from "../../store/workspace.store";
+import { useWorkspaceDocuments } from "../../hooks/useDocuments";
 import {
   Sparkles,
   SearchCode,
   FileCheck,
   Send,
   ArrowRight,
-  ClipboardList,
+  BookOpen,
 } from "lucide-react";
 
 interface RightContextPanelProps {
@@ -15,19 +17,18 @@ interface RightContextPanelProps {
 }
 
 export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible }) => {
+  const navigate = useNavigate();
   const { currentWorkspace } = useWorkspaceStore();
+  const workspaceId = currentWorkspace?._id;
+  const { data: documents = [] } = useWorkspaceDocuments(workspaceId);
+
   const [chatMessage, setChatMessage] = useState("");
 
   const handleSendChat = (e: React.FormEvent) => {
     e.preventDefault();
     if (!chatMessage.trim()) return;
-    // UI only for now
-    alert(`Mini AI Chat: "${chatMessage}" query sent to ResearchMind AI assistant!`);
+    navigate("/dashboard/ai-researcher");
     setChatMessage("");
-  };
-
-  const handleQuickAction = (actionName: string) => {
-    alert(`Quick Action: "${actionName}" triggered!`);
   };
 
   if (!isVisible) return null;
@@ -58,7 +59,7 @@ export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible 
               <div>
                 <span className="block text-[10px] font-semibold text-text-muted">INDEXED</span>
                 <span className="block text-[14px] font-bold text-text-primary mt-0.5">
-                  18 Sources
+                  {documents.length} Sources
                 </span>
               </div>
               <div>
@@ -71,27 +72,6 @@ export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible 
           </div>
         </div>
 
-        {/* AI Insight Summary Card */}
-        <div className="space-y-3">
-          <div className="flex items-center gap-1.5 text-accent-primary">
-            <Sparkles className="w-3.5 h-3.5 fill-accent-primary" />
-            <span className="text-[11px] font-bold uppercase tracking-widest">AI Status Summary</span>
-          </div>
-
-          <div className="p-4 bg-accent-bg/40 border border-accent-primary/20 rounded-xl space-y-3">
-            <h4 className="text-[12px] font-bold text-text-primary">
-              Analysis Pending Core Data
-            </h4>
-            <p className="text-[12px] text-text-secondary leading-relaxed">
-              Primary thesis suggests high feasibility of microgrid node deployment in rural zones, pending updated meteorological solar irradiance grids.
-            </p>
-            <div className="flex items-center text-[11px] font-semibold text-accent-primary cursor-pointer hover:text-accent-hover transition-colors gap-1">
-              <span>View full recommendations</span>
-              <ArrowRight className="w-3 h-3" />
-            </div>
-          </div>
-        </div>
-
         {/* Quick Actions */}
         <div className="space-y-3">
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary">
@@ -99,34 +79,34 @@ export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible 
           </h3>
           <div className="space-y-2">
             <button
-              onClick={() => handleQuickAction("Compare Evidence")}
-              className="w-full h-9 flex items-center justify-between px-3 text-[12px] font-medium text-text-primary bg-bg-elevated border border-border-subtle hover:border-accent-primary/40 rounded-lg text-left transition-colors"
+              onClick={() => navigate("/dashboard/ai-researcher")}
+              className="w-full h-9 flex items-center justify-between px-3 text-[12px] font-medium text-text-primary bg-bg-elevated border border-border-subtle hover:border-accent-primary/40 rounded-lg text-left transition-colors cursor-pointer"
             >
               <span className="flex items-center gap-2">
                 <SearchCode className="w-4 h-4 text-accent-primary" />
-                Compare Evidence
+                AI Researcher Q&A
               </span>
               <ArrowRight className="w-3 h-3 text-text-muted" />
             </button>
 
             <button
-              onClick={() => handleQuickAction("Draft Advisor Update")}
-              className="w-full h-9 flex items-center justify-between px-3 text-[12px] font-medium text-text-primary bg-bg-elevated border border-border-subtle hover:border-accent-primary/40 rounded-lg text-left transition-colors"
+              onClick={() => navigate("/dashboard/documents")}
+              className="w-full h-9 flex items-center justify-between px-3 text-[12px] font-medium text-text-primary bg-bg-elevated border border-border-subtle hover:border-accent-primary/40 rounded-lg text-left transition-colors cursor-pointer"
+            >
+              <span className="flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-[#38BDF8]" />
+                Browse Documents
+              </span>
+              <ArrowRight className="w-3 h-3 text-text-muted" />
+            </button>
+
+            <button
+              onClick={() => navigate("/dashboard/documents")}
+              className="w-full h-9 flex items-center justify-between px-3 text-[12px] font-medium text-text-primary bg-bg-elevated border border-border-subtle hover:border-accent-primary/40 rounded-lg text-left transition-colors cursor-pointer"
             >
               <span className="flex items-center gap-2">
                 <FileCheck className="w-4 h-4 text-success" />
-                Draft Advisor Update
-              </span>
-              <ArrowRight className="w-3 h-3 text-text-muted" />
-            </button>
-
-            <button
-              onClick={() => handleQuickAction("Create Action Items")}
-              className="w-full h-9 flex items-center justify-between px-3 text-[12px] font-medium text-text-primary bg-bg-elevated border border-border-subtle hover:border-accent-primary/40 rounded-lg text-left transition-colors"
-            >
-              <span className="flex items-center gap-2">
-                <ClipboardList className="w-4 h-4 text-warning" />
-                Create Action Items
+                Upload New Document
               </span>
               <ArrowRight className="w-3 h-3 text-text-muted" />
             </button>
