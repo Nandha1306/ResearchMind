@@ -60,6 +60,7 @@ const CreateWorkspaceGuard: React.FC = () => {
 import { AppShell } from "../layouts/AppShell";
 import { OverviewPage } from "../pages/OverviewPage";
 import { DocumentsPage } from "../pages/DocumentsPage";
+import { SemanticSearchPage } from "../pages/SemanticSearchPage";
 
 // Generic placeholder page to render for sub-routes under development
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
@@ -97,7 +98,8 @@ export const AppRouter: React.FC = () => {
               <Route path="/dashboard/documents" element={<DocumentsPage />} />
               <Route path="/dashboard/sources" element={<PlaceholderPage title="Data Sources" />} />
               <Route path="/dashboard/analytics" element={<PlaceholderPage title="Analytics Insight" />} />
-              <Route path="/dashboard/ai-researcher" element={<PlaceholderPage title="AI Researcher Agent" />} />
+              <Route path="/dashboard/ai-researcher" element={<SemanticSearchPage />} />
+              <Route path="/app/workspace/:id/search" element={<SemanticSearchPage />} />
               <Route path="/dashboard/literature-review" element={<PlaceholderPage title="Literature Review Summarizer" />} />
               <Route path="/dashboard/meeting-notes" element={<PlaceholderPage title="Meeting Notes Transcriber" />} />
               <Route path="/dashboard/report-drafter" element={<PlaceholderPage title="Report Drafter Copilot" />} />

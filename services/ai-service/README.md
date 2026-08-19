@@ -71,4 +71,3 @@ npm run dev:worker
 
 # Typecheck TypeScript
 npx tsc --noEmit
-```

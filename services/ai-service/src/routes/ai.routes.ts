@@ -8,6 +8,7 @@ import {
 import {
   searchHandler,
   queryStreamHandler,
+  getSessionsHandler,
 } from "../controllers/query.controller";
 
 const router = Router();
@@ -26,6 +27,13 @@ router.post(
   authenticate,
   validate(ragQuerySchema),
   queryStreamHandler
+);
+
+/** GET /api/ai/sessions/workspace/:workspaceId - Recent Q&A sessions for workspace */
+router.get(
+  "/sessions/workspace/:workspaceId",
+  authenticate,
+  getSessionsHandler
 );
 
 export default router;
