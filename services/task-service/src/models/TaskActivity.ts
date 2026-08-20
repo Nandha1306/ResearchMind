@@ -1,70 +1,40 @@
 import { Schema, model } from "mongoose";
 
-const taskSchema = new Schema(
+export interface TaskActivityDocument {
+  workspaceId: string;
+  taskId: Schema.Types.ObjectId | string;
+  userId: string;
+  action: "created" | "status_changed" | "assigned" | "due_date_set" | "priority_changed" | "comment";
+  payload?: Record<string, any>;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+const taskActivitySchema = new Schema(
   {
     workspaceId: {
       type: String,
       required: true,
       index: true,
     },
-
-    boardId: {
-      type: Schema.Types.ObjectId,
-      ref: "Board",
-      required: true,
-      index: true,
-    },
-
-    title: {
-      type: String,
-      required: true,
-      trim: true,
-      minlength: 1,
-      maxlength: 200,
-    },
-
-    description: {
-      type: String,
-      default: "",
-      trim: true,
-      maxlength: 5000,
-    },
-
-    status: {
-      type: String,
-      enum: ["todo", "in_progress", "done"],
-      default: "todo",
-      index: true,
-    },
-
-    priority: {
-      type: String,
-      enum: ["low", "medium", "high"],
-      default: "medium",
-      index: true,
-    },
-
-    assigneeId: {
-      type: String,
-      default: null,
-      index: true,
-    },
-
-    dueDate: {
-      type: Date,
-      default: null,
-    },
-
-    parentTaskId: {
+    taskId: {
       type: Schema.Types.ObjectId,
       ref: "Task",
-      default: null,
+      required: true,
       index: true,
     },
-
-    createdBy: {
+    userId: {
       type: String,
       required: true,
+    },
+    action: {
+      type: String,
+      enum: ["created", "status_changed", "assigned", "due_date_set", "priority_changed", "comment"],
+      required: true,
+    },
+    payload: {
+      type: Schema.Types.Mixed,
+      default: {},
     },
   },
   {
@@ -72,9 +42,9 @@ const taskSchema = new Schema(
   }
 );
 
-taskSchema.index({
+taskActivitySchema.index({
   workspaceId: 1,
-  boardId: 1,
+  taskId: 1,
 });
 
-export const Task = model("Task", taskSchema);
+export const TaskActivity = model("TaskActivity", taskActivitySchema);

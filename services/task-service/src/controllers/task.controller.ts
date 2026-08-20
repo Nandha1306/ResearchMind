@@ -156,6 +156,9 @@ export const updateTaskHandler =
     const workspaceId =
       getWorkspaceId(req);
 
+    const userId =
+      getUserId(req);
+
     const {
       title,
       description,
@@ -171,6 +174,7 @@ export const updateTaskHandler =
       await updateTask(
         workspaceId,
         req.params.id as string,
+        userId,
         {
           title,
           description,

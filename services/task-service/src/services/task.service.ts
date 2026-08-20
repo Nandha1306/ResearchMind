@@ -1,5 +1,7 @@
 import { Board } from "../models/Board";
 import { Task, TaskDocument } from "../models/Task";
+import { createActivity } from "./task-activity.service";
+import { detectTaskActivityChanges } from "./task-activity-diff.service";
 
 interface CreateTaskInput {
   workspaceId: string;
@@ -81,7 +83,7 @@ export const createTask = async ({
     }
   }
 
-  return Task.create({
+  const task = await Task.create({
     workspaceId,
     boardId,
     title,
@@ -93,6 +95,16 @@ export const createTask = async ({
     parentTaskId,
     createdBy,
   });
+
+  await createActivity({
+    workspaceId,
+    taskId: task._id.toString(),
+    userId: createdBy,
+    action: "created",
+    payload: {},
+  });
+
+  return task;
 };
 
 /**
@@ -137,6 +149,7 @@ export const getTaskById = async (
 export const updateTask = async (
   workspaceId: string,
   taskId: string,
+  userId: string,
   data: Partial<
     Pick<
       TaskDocument,
@@ -151,6 +164,15 @@ export const updateTask = async (
     >
   >
 ) => {
+  const existingTask = await Task.findOne({
+    _id: taskId,
+    workspaceId,
+  });
+
+  if (!existingTask) {
+    return null;
+  }
+
   if (data.boardId) {
     const boardExists =
       await ensureBoardInWorkspace(
@@ -175,7 +197,7 @@ export const updateTask = async (
     }
   }
 
-  return Task.findOneAndUpdate(
+  const updatedTask = await Task.findOneAndUpdate(
     {
       _id: taskId,
       workspaceId,
@@ -187,7 +209,28 @@ export const updateTask = async (
       new: true,
       runValidators: true,
     }
-  ).lean();
+  );
+
+  if (!updatedTask) {
+    return null;
+  }
+
+  const changes = detectTaskActivityChanges(
+    existingTask,
+    updatedTask
+  );
+
+  for (const change of changes) {
+    await createActivity({
+      workspaceId,
+      taskId,
+      userId,
+      action: change.action,
+      payload: change.payload,
+    });
+  }
+
+  return updatedTask.toObject();
 };
 
 /**
