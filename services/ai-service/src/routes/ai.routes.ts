@@ -11,6 +11,10 @@ import {
   getSessionsHandler,
 } from "../controllers/query.controller";
 
+import { summarizeMeeting } from "../controllers/meeting.controller";
+import { summarizeMeetingSchema } from "../../../../packages/validation/schemas/ai.schema";
+import { requireWorkspaceMembership } from "../middlewares/workspace.middleware";
+
 const router = Router();
 
 /** POST /api/ai/search - Pure vector retrieval debugging endpoint */
@@ -34,6 +38,14 @@ router.get(
   "/sessions/workspace/:workspaceId",
   authenticate,
   getSessionsHandler
+);
+
+router.post(
+  "/summarize-meeting",
+  authenticate,
+  requireWorkspaceMembership,
+  validate(summarizeMeetingSchema),
+  summarizeMeeting
 );
 
 export default router;

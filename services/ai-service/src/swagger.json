@@ -43,6 +43,40 @@
           }
         }
       },
+      "SummarizeMeetingDto": {
+        "type": "object",
+        "required": ["workspaceId", "text"],
+        "properties": {
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "text": {
+            "type": "string",
+            "example": "Meeting date: August 20, 2026. Attendees: Nandha, Priya and Arjun..."
+          }
+        }
+      },
+      "MeetingActionItem": {
+        "type": "object",
+        "properties": {
+          "task": { "type": "string", "example": "Run final benchmark comparison" },
+          "assignee": { "type": "string", "example": "Arjun" },
+          "due": { "type": "string", "example": "2026-08-25" }
+        }
+      },
+      "MeetingSummaryResponse": {
+        "type": "object",
+        "properties": {
+          "meeting_date": { "type": "string", "example": "2026-08-20" },
+          "attendees": { "type": "array", "items": { "type": "string" }, "example": ["Nandha", "Priya", "Arjun"] },
+          "summary": { "type": "string", "example": "Team reviewed progress and assigned documentation updates." },
+          "decisions": { "type": "array", "items": { "type": "string" }, "example": ["Finish task activity implementation"] },
+          "action_items": { "type": "array", "items": { "$ref": "#/components/schemas/MeetingActionItem" } },
+          "open_questions": { "type": "array", "items": { "type": "string" }, "example": ["Do AI tasks need manual approval?"] },
+          "next_meeting": { "type": "string", "example": "2026-08-25" }
+        }
+      },
       "RetrievedChunkResponse": {
         "type": "object",
         "properties": {
@@ -87,6 +121,47 @@
         }
       }
     },
+    "/api/ai/summarize-meeting": {
+      "post": {
+        "summary": "Summarize raw meeting notes into structured summary and action items using Grok LLM",
+        "tags": ["AI & Summarizer"],
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SummarizeMeetingDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Structured meeting summary generated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": { "$ref": "#/components/schemas/MeetingSummaryResponse" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Validation failure" },
+          "401": { "description": "Unauthorized - Missing or invalid JWT" },
+          "403": { "description": "Forbidden - Not a member of this workspace" },
+          "500": { "description": "Unexpected server error" }
+        }
+      }
+    },
     "/api/ai/search": {
       "post": {
         "summary": "Perform semantic search over workspace documents (Retrieval debug endpoint)",
@@ -126,15 +201,9 @@
               }
             }
           },
-          "400": {
-            "description": "Bad Request"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - Not a member of this workspace"
-          }
+          "400": { "description": "Bad Request" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden - Not a member of this workspace" }
         }
       }
     },
@@ -169,15 +238,9 @@
               }
             }
           },
-          "400": {
-            "description": "Bad Request"
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "403": {
-            "description": "Forbidden - Not a member of this workspace"
-          }
+          "400": { "description": "Bad Request" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden - Not a member of this workspace" }
         }
       }
     }

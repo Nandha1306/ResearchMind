@@ -5,10 +5,12 @@ import { validate } from "../../../../packages/validation/validation";
 import {
   createTaskSchema,
   updateTaskSchema,
+  bulkCreateTasksSchema,
 } from "../../../../packages/validation/schemas/task.schema";
 
 import {
   createTaskHandler,
+  bulkCreateTasksHandler,
   getWorkspaceTasksHandler,
   getTaskHandler,
   updateTaskHandler,
@@ -25,6 +27,14 @@ router.post(
   requireWorkspaceMembership,
   validate(createTaskSchema),
   createTaskHandler
+);
+
+router.post(
+  "/workspaces/:workspaceId/tasks/bulk",
+  authenticate,
+  requireWorkspaceMembership,
+  validate(bulkCreateTasksSchema),
+  bulkCreateTasksHandler
 );
 
 router.get(

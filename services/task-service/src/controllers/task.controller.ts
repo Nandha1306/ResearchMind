@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 
 import {
   createTask,
+  bulkCreateTasks,
   getWorkspaceTasks,
   getTaskById,
   updateTask,
@@ -9,6 +10,8 @@ import {
 } from "../services/task.service";
 
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
+import { AuthRequest } from "../../../auth-service/src/middlewares/auth.middleware";
 
 const getUserId = (req: Request): string => {
   const user = (req as any).user;
@@ -102,6 +105,30 @@ export const createTaskHandler = async (
     data: task,
   });
 };
+
+export const bulkCreateTasksHandler = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const workspaceId =
+      getWorkspaceId(req);
+
+    const userId =
+      getUserId(req);
+
+    const { tasks } = req.body;
+
+    const createdTasks =
+      await bulkCreateTasks({
+        workspaceId,
+        tasks,
+        createdBy: userId,
+      });
+
+    res.status(201).json({
+      success: true,
+      data: createdTasks,
+    });
+  }
+);
 
 export const getWorkspaceTasksHandler =
   async (

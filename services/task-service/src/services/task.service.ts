@@ -2,6 +2,7 @@ import { Board } from "../models/Board";
 import { Task, TaskDocument } from "../models/Task";
 import { createActivity } from "./task-activity.service";
 import { detectTaskActivityChanges } from "./task-activity-diff.service";
+import { AppError } from "../../../../packages/shared/errors/AppError";
 
 interface CreateTaskInput {
   workspaceId: string;
@@ -105,6 +106,106 @@ export const createTask = async ({
   });
 
   return task;
+};
+
+export const bulkCreateTasks = async ({
+  workspaceId,
+  tasks,
+  createdBy,
+}: {
+  workspaceId: string;
+  tasks: Array<{
+    boardId: string;
+    title: string;
+    description?: string;
+    status?: "todo" | "in_progress" | "done";
+    priority?: "low" | "medium" | "high";
+    assigneeId?: string | null;
+    dueDate?: string | null;
+    parentTaskId?: string | null;
+  }>;
+  createdBy: string;
+}) => {
+  /*
+   * Phase 1: Pre-validate the entire batch.
+   *
+   * IMPORTANT:
+   * No Task documents or TaskActivity documents are written
+   * during this phase.
+   */
+
+  for (const task of tasks) {
+    const boardExists = await ensureBoardInWorkspace(
+      workspaceId,
+      task.boardId
+    );
+
+    if (!boardExists) {
+      throw new AppError(
+        `Board "${task.boardId}" does not belong to this workspace`,
+        400
+      );
+    }
+
+    if (task.parentTaskId) {
+      const parentExists =
+        await ensureParentTaskInWorkspace(
+          workspaceId,
+          task.parentTaskId
+        );
+
+      if (!parentExists) {
+        throw new AppError(
+          `Parent task "${task.parentTaskId}" does not belong to this workspace`,
+          400
+        );
+      }
+    }
+  }
+
+  /*
+   * Phase 2: All validation has passed.
+   *
+   * Now create the tasks using the existing createTask()
+   * business logic so TaskActivity records are generated
+   * exactly like normal task creation.
+   */
+
+  const createdTasks = [];
+
+  for (const task of tasks) {
+    const createdTask = await createTask({
+      workspaceId,
+      boardId: task.boardId,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      priority: task.priority,
+      assigneeId: task.assigneeId,
+      dueDate: task.dueDate
+        ? new Date(task.dueDate)
+        : null,
+      parentTaskId: task.parentTaskId,
+      createdBy,
+    });
+
+    /*
+     * This should theoretically never fail because the
+     * same board/parent validation was already performed.
+     *
+     * Keep the guard as defense-in-depth.
+     */
+    if (!createdTask) {
+      throw new AppError(
+        `Failed to create task "${task.title}"`,
+        400
+      );
+    }
+
+    createdTasks.push(createdTask);
+  }
+
+  return createdTasks;
 };
 
 /**

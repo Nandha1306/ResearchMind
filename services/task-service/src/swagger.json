@@ -110,6 +110,20 @@
           }
         }
       },
+      "BulkCreateTasksDto": {
+        "type": "object",
+        "required": ["tasks"],
+        "properties": {
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CreateTaskDto"
+            },
+            "minItems": 1,
+            "maxItems": 50
+          }
+        }
+      },
       "UpdateTaskDto": {
         "type": "object",
         "properties": {
@@ -410,6 +424,46 @@
               }
             }
           }
+        }
+      }
+    },
+    "/api/tasks/workspaces/{workspaceId}/tasks/bulk": {
+      "post": {
+        "summary": "Bulk create tasks inside workspace boards with prevalidation and activity logging",
+        "tags": ["Tasks"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BulkCreateTasksDto" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "All tasks created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TaskResponse" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Validation error or prevalidation failure for board/parent references" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden - Not a member of this workspace" }
         }
       }
     },
