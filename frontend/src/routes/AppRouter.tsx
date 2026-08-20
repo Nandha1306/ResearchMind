@@ -61,6 +61,7 @@ import { AppShell } from "../layouts/AppShell";
 import { OverviewPage } from "../pages/OverviewPage";
 import { DocumentsPage } from "../pages/DocumentsPage";
 import { SemanticSearchPage } from "../pages/SemanticSearchPage";
+import { MeetingSummarizerPage } from "../pages/MeetingSummarizerPage";
 
 // Generic placeholder page to render for sub-routes under development
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
@@ -101,7 +102,7 @@ export const AppRouter: React.FC = () => {
               <Route path="/dashboard/ai-researcher" element={<SemanticSearchPage />} />
               <Route path="/app/workspace/:id/search" element={<SemanticSearchPage />} />
               <Route path="/dashboard/literature-review" element={<PlaceholderPage title="Literature Review Summarizer" />} />
-              <Route path="/dashboard/meeting-notes" element={<PlaceholderPage title="Meeting Notes Transcriber" />} />
+              <Route path="/dashboard/meeting-notes" element={<MeetingSummarizerPage />} />
               <Route path="/dashboard/report-drafter" element={<PlaceholderPage title="Report Drafter Copilot" />} />
               <Route path="/dashboard/settings" element={<PlaceholderPage title="Workspace Settings" />} />
             </Route>

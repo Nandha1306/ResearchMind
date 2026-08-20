@@ -1,6 +1,7 @@
 import axiosInstance, { API_URL } from "./axios";
 import { useAuthStore } from "../store/auth.store";
 import type { AISessionHistoryItem } from "../utils/sse";
+import type { MeetingSummary, SummarizeMeetingRequest } from "../types/task.types";
 
 export interface AIQueryRequest {
   workspaceId: string;
@@ -77,4 +78,12 @@ export const searchWorkspaceVectors = async (
 ): Promise<VectorSearchResult[]> => {
   const response = await axiosInstance.post("/ai/search", request);
   return response.data.data || [];
+};
+
+/** Summarize raw meeting notes into structured summary and action items using Grok LLM. */
+export const summarizeMeeting = async (
+  request: SummarizeMeetingRequest
+): Promise<MeetingSummary> => {
+  const response = await axiosInstance.post("/ai/summarize-meeting", request);
+  return response.data.data;
 };
