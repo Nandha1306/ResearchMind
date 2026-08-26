@@ -1,7 +1,8 @@
 import React, { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuthStore } from "../../store/auth.store";
 import { useWorkspaceStore } from "../../store/workspace.store";
+import { CreateWorkspaceModal } from "../workspace/CreateWorkspaceModal";
 import {
   Brain,
   LayoutDashboard,
@@ -25,11 +26,11 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse }) => {
   const location = useLocation();
-  const navigate = useNavigate();
   
   const { user } = useAuthStore();
   const { workspaces, currentWorkspace, setCurrentWorkspace } = useWorkspaceStore();
   const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
+  const [isCreateWorkspaceModalOpen, setIsCreateWorkspaceModalOpen] = useState(false);
 
   // Active workspace role lookup
   const userRole = React.useMemo(() => {
@@ -150,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse 
                     <button
                       onClick={() => {
                         setShowWorkspaceDropdown(false);
-                        navigate("/create-workspace");
+                        setIsCreateWorkspaceModalOpen(true);
                       }}
                       className="w-full h-8 flex items-center justify-center gap-1.5 rounded bg-accent-primary hover:bg-accent-hover text-white text-[11px] font-semibold transition-colors cursor-pointer"
                     >
@@ -284,6 +285,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse 
           )}
         </div>
       </div>
+
+      {/* Create Workspace Modal */}
+      <CreateWorkspaceModal
+        isOpen={isCreateWorkspaceModalOpen}
+        onClose={() => setIsCreateWorkspaceModalOpen(false)}
+      />
     </aside>
   );
 };

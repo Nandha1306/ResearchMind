@@ -17,7 +17,7 @@ export interface Workspace {
 
 export interface WorkspaceCreationPayload {
   name: string;
-  description: string;
+  description?: string;
 }
 
 export interface WorkspaceJoinPayload {
