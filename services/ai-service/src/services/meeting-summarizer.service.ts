@@ -5,6 +5,11 @@ import {
 import {
   meetingSummarySchema,
 } from "../../../../packages/validation/schemas/ai.schema";
+import {
+  LlmUnavailableError,
+  isLlmUnavailableError,
+  logLlmFailure,
+} from "../errors/llm.error";
 
 const MEETING_SUMMARY_SYSTEM_PROMPT = `
 You are ResearchMind's meeting summarization engine.
@@ -60,9 +65,8 @@ const extractResponseContent = (response: any): string => {
   const content = response?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string" || !content.trim()) {
-    throw new Error(
-      "Grok returned an empty meeting summary response"
-    );
+    logLlmFailure("meeting summary", "empty_content");
+    throw new LlmUnavailableError("empty_content");
   }
 
   return content.trim();
@@ -130,6 +134,9 @@ ${normalizedText}
         ],
 
         temperature: 0.2,
+      },
+      {
+        timeout: Number(process.env.LLM_REQUEST_TIMEOUT_MS || 60_000),
       });
 
     const rawContent =
@@ -143,48 +150,41 @@ ${normalizedText}
     try {
       parsed = JSON.parse(cleanedContent);
     } catch {
-      throw new Error(
-        "Grok returned invalid JSON for meeting summary"
-      );
+      // Malformed model output is a failure, never a partially-usable summary.
+      logLlmFailure("meeting summary", "malformed_content");
+      throw new LlmUnavailableError("malformed_content");
     }
 
     const validationResult =
       meetingSummarySchema.safeParse(parsed);
 
     if (!validationResult.success) {
+      // Log the shape mismatch server-side only — the flattened Zod issues can
+      // echo model output and must not be returned to the client.
       console.error(
-        "Invalid meeting summary returned by Grok:",
+        "Invalid meeting summary structure returned by the LLM:",
         validationResult.error.flatten()
       );
 
-      throw new Error(
-        "Grok returned an invalid meeting summary structure"
-      );
+      logLlmFailure("meeting summary", "malformed_content");
+      throw new LlmUnavailableError("malformed_content");
     }
 
     return validationResult.data;
   } catch (error) {
+    // Already-classified failures pass through unchanged.
+    if (isLlmUnavailableError(error)) {
+      throw error;
+    }
+
     if (
       error instanceof Error &&
-      (
-        error.message.includes(
-          "Meeting notes cannot be empty"
-        ) ||
-        error.message.includes(
-          "Grok returned"
-        )
-      )
+      error.message.includes("Meeting notes cannot be empty")
     ) {
       throw error;
     }
 
-    console.error(
-      "Meeting summarization failed:",
-      error
-    );
-
-    throw new Error(
-      "Failed to generate meeting summary"
-    );
+    logLlmFailure("meeting summary", "request_failed", error);
+    throw new LlmUnavailableError("request_failed", { cause: error });
   }
 };

@@ -20,8 +20,17 @@ export type AIStreamEvent =
   | { type: "start"; query: string }
   | { type: "token"; text: string }
   | { type: "sources"; sources: AISource[] }
-  | { type: "done"; sessionId: string }
-  | { type: "error"; message: string };
+  /**
+   * Terminal success. `unverifiedCitations` lists any `[Source N]` markers the
+   * model wrote that do not correspond to a retrieved chunk.
+   */
+  | { type: "done"; sessionId: string; unverifiedCitations: number[] }
+  /**
+   * Terminal failure. `partial` is true when tokens were already streamed
+   * before the failure, meaning the rendered text is an incomplete real answer
+   * rather than a complete one.
+   */
+  | { type: "error"; message: string; partial: boolean };
 
 /** Parse raw SSE text chunks into structured AIStreamEvent objects using a buffer. */
 export class SSEStreamParser {
@@ -64,9 +73,19 @@ export class SSEStreamParser {
         } else if (eventType === "sources") {
           events.push({ type: "sources", sources: parsed.sources || [] });
         } else if (eventType === "done") {
-          events.push({ type: "done", sessionId: parsed.sessionId || "" });
+          events.push({
+            type: "done",
+            sessionId: parsed.sessionId || "",
+            unverifiedCitations: Array.isArray(parsed.unverifiedCitations)
+              ? parsed.unverifiedCitations
+              : [],
+          });
         } else if (eventType === "error") {
-          events.push({ type: "error", message: parsed.message || "An error occurred during RAG stream" });
+          events.push({
+            type: "error",
+            message: parsed.message || "An error occurred during RAG stream",
+            partial: parsed.partial === true,
+          });
         }
       } catch (err) {
         console.warn("Failed to parse SSE event payload:", dataStr, err);

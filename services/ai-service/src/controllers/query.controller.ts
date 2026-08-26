@@ -89,8 +89,15 @@ export const queryStreamHandler = asyncHandler(
         emitEvent,
       });
     } catch (err: any) {
+      // Last-resort guard. runRagStreamQuery emits its own typed error events;
+      // anything reaching here is unexpected, so log it server-side and send a
+      // fixed message — never `err.message`, which can carry provider payloads,
+      // connection strings or stack detail.
       console.error("RAG stream handler error:", err);
-      emitEvent("error", { message: err.message || "RAG pipeline failed" });
+      emitEvent("error", {
+        message: "AI service is temporarily unavailable. Please try again.",
+        partial: false,
+      });
     } finally {
       res.end();
     }

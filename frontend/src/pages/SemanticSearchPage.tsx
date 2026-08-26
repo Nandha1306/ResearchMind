@@ -46,6 +46,8 @@ export const SemanticSearchPage: React.FC = () => {
     sessionId,
     isStreaming,
     error,
+    answerIsPartial,
+    unverifiedCitations,
     history,
     historyLoading,
     submitQuery,
@@ -230,8 +232,11 @@ export const SemanticSearchPage: React.FC = () => {
             </div>
           )}
 
-          {/* 3. AI Answer Result Card */}
-          {(isStreaming || answer || activeQuery) && (
+          {/* 3. AI Answer Result Card.
+               Rendered only when a stream is running or real text arrived — a
+               failed generation with no output must not render an empty
+               "AI Grounded Response" shell. */}
+          {(isStreaming || answer) && (
             <div className="bg-[#111111] border border-[#2A2A2A] rounded-xl p-5 space-y-4 shadow-xl animate-in fade-in duration-200">
               {/* Query Badge */}
               <div className="flex items-center gap-2 border-b border-[#222225] pb-3">
@@ -244,7 +249,13 @@ export const SemanticSearchPage: React.FC = () => {
               {/* Streaming Content Display */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-[#8B8B8F]">
-                  <span>AI Grounded Response</span>
+                  <span className={error ? "text-[#FF9999]" : undefined}>
+                    {error
+                      ? answerIsPartial
+                        ? "Incomplete response — generation failed"
+                        : "Response unavailable"
+                      : "AI Grounded Response"}
+                  </span>
                   {isStreaming && (
                     <span className="flex items-center gap-1.5 text-[#7C6AF7]">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -263,6 +274,23 @@ export const SemanticSearchPage: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {/* Citation integrity warning: the answer referenced source
+                   numbers that were never retrieved. Shown rather than silently
+                   editing the answer, so the reader can judge it. */}
+              {unverifiedCitations.length > 0 && (
+                <div className="p-3 rounded-lg bg-[#2A2318] border border-[#F59E0B]/40 flex items-start gap-2.5 text-[12px]">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-[#F59E0B]" />
+                  <p className="text-[#FCD34D] leading-relaxed">
+                    This answer referenced{" "}
+                    {unverifiedCitations.map((n) => `[Source ${n}]`).join(", ")}, which
+                    {unverifiedCitations.length === 1 ? " was" : " were"} not part of the
+                    retrieved context. Treat{" "}
+                    {unverifiedCitations.length === 1 ? "that citation" : "those citations"} as
+                    unverified.
+                  </p>
+                </div>
+              )}
 
               {/* Source Citations Section */}
               {sources.length > 0 && (

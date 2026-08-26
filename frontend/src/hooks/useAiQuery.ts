@@ -14,6 +14,10 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** True when generation failed after some tokens had already been rendered. */
+  const [answerIsPartial, setAnswerIsPartial] = useState(false);
+  /** `[Source N]` markers the answer used that were never actually retrieved. */
+  const [unverifiedCitations, setUnverifiedCitations] = useState<number[]>([]);
 
   const [history, setHistory] = useState<AISessionHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -32,6 +36,8 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
     setSessionId(null);
     setIsStreaming(false);
     setError(null);
+    setAnswerIsPartial(false);
+    setUnverifiedCitations([]);
   }, [workspaceId]);
 
   // Load session history from MongoDB
@@ -98,6 +104,8 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
       setSources([]);
       setSessionId(null);
       setError(null);
+      setAnswerIsPartial(false);
+      setUnverifiedCitations([]);
       setIsStreaming(true);
 
       const parser = new SSEStreamParser();
@@ -124,9 +132,13 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
               setSources(ev.sources || []);
             } else if (ev.type === "done") {
               setSessionId(ev.sessionId);
+              setUnverifiedCitations(ev.unverifiedCitations);
               setIsStreaming(false);
             } else if (ev.type === "error") {
+              // Terminal failure: no sessionId is set, so the UI can never
+              // present this as a completed answer.
               setError(ev.message);
+              setAnswerIsPartial(ev.partial);
               setIsStreaming(false);
             }
           }
@@ -141,8 +153,10 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
             setSources(ev.sources || []);
           } else if (ev.type === "done") {
             setSessionId(ev.sessionId);
+            setUnverifiedCitations(ev.unverifiedCitations);
           } else if (ev.type === "error") {
             setError(ev.message);
+            setAnswerIsPartial(ev.partial);
           }
         }
 
@@ -173,6 +187,8 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
     setSources(item.sources || []);
     setSessionId(item._id);
     setError(null);
+    setAnswerIsPartial(false);
+    setUnverifiedCitations([]);
     setIsStreaming(false);
   }, [cancelStream]);
 
@@ -183,6 +199,8 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
     setSources([]);
     setSessionId(null);
     setError(null);
+    setAnswerIsPartial(false);
+    setUnverifiedCitations([]);
   }, [cancelStream]);
 
   return {
@@ -192,6 +210,8 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
     sessionId,
     isStreaming,
     error,
+    answerIsPartial,
+    unverifiedCitations,
     history,
     historyLoading,
     submitQuery,
