@@ -27,6 +27,7 @@ import {
 } from "../api/task.api";
 import type { Board, Task } from "../types/task.types";
 import { TaskDetailModal } from "../components/kanban/TaskDetailModal";
+import { CreateTaskModal } from "../components/kanban/CreateTaskModal";
 import { Button } from "../components/ui/button";
 import {
   Columns3,
@@ -40,6 +41,7 @@ import {
   CircleDot,
   GripVertical,
   Plus,
+  ListPlus,
   X,
 } from "lucide-react";
 
@@ -285,6 +287,9 @@ export const KanbanPage: React.FC = () => {
     setTasks((prev) => prev.filter((t) => t._id !== deletedTaskId));
   };
 
+  // Task Creation State (normal top-level task)
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState<boolean>(false);
+
   // Board Creation State
   const [isCreateBoardOpen, setIsCreateBoardOpen] = useState<boolean>(false);
   const [newBoardName, setNewBoardName] = useState<string>("");
@@ -292,6 +297,8 @@ export const KanbanPage: React.FC = () => {
 
   // Loading & Error States
   const [boardsLoading, setBoardsLoading] = useState<boolean>(false);
+  const [boardsError, setBoardsError] = useState<string | null>(null);
+  const [boardsReloadKey, setBoardsReloadKey] = useState<number>(0);
   const [tasksLoading, setTasksLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -305,11 +312,13 @@ export const KanbanPage: React.FC = () => {
     useSensor(KeyboardSensor)
   );
 
-  // 1. Fetch Real Boards when Workspace changes
+  // 1. Fetch Real Boards when Workspace changes.
+  // `boardsReloadKey` lets the Create Task dialog retry a failed board load.
   useEffect(() => {
     setTasks([]);
     setSelectedBoardId("");
     setError(null);
+    setBoardsError(null);
 
     if (!currentWorkspace?._id) {
       setBoards([]);
@@ -319,6 +328,7 @@ export const KanbanPage: React.FC = () => {
     const fetchBoards = async () => {
       setBoardsLoading(true);
       setError(null);
+      setBoardsError(null);
       try {
         const workspaceBoards = await getWorkspaceBoards(currentWorkspace._id);
         setBoards(workspaceBoards);
@@ -329,6 +339,7 @@ export const KanbanPage: React.FC = () => {
         const message =
           err.response?.data?.message || err.message || "Failed to load boards";
         setError(message);
+        setBoardsError(message);
         setBoards([]);
       } finally {
         setBoardsLoading(false);
@@ -336,7 +347,7 @@ export const KanbanPage: React.FC = () => {
     };
 
     fetchBoards();
-  }, [currentWorkspace?._id]);
+  }, [currentWorkspace?._id, boardsReloadKey]);
 
   // 2. Fetch Tasks when Selected Board changes
   useEffect(() => {
@@ -366,6 +377,21 @@ export const KanbanPage: React.FC = () => {
 
     fetchTasks();
   }, [currentWorkspace?._id, selectedBoardId]);
+
+  // Created-task handler: insert into the live Kanban state so the new task is
+  // visible immediately, with no refetch and no full page reload. A task created
+  // on a different board is persisted but simply isn't part of this view.
+  const handleTaskCreated = (createdTask: Task) => {
+    if (createdTask.boardId === selectedBoardId) {
+      setTasks((prev) =>
+        prev.some((t) => t._id === createdTask._id) ? prev : [...prev, createdTask]
+      );
+    } else {
+      // Follow the user to the board they explicitly chose; the board effect
+      // refetches that board's tasks, which will include this one.
+      setSelectedBoardId(createdTask.boardId);
+    }
+  };
 
   // Create Board Handler
   const handleCreateBoard = async (e: React.FormEvent) => {
@@ -528,10 +554,19 @@ export const KanbanPage: React.FC = () => {
 
               <Button
                 onClick={() => setIsCreateBoardOpen(true)}
-                className="bg-[#7C6AF7] hover:bg-[#6b58f5] text-white text-xs font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5"
+                variant="outline"
+                className="text-xs font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>New Board</span>
+              </Button>
+
+              <Button
+                onClick={() => setIsCreateTaskOpen(true)}
+                className="bg-[#7C6AF7] hover:bg-[#6b58f5] text-white text-xs font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-md shadow-[#7C6AF7]/20 cursor-pointer"
+              >
+                <ListPlus className="w-3.5 h-3.5" />
+                <span>Create Task</span>
               </Button>
             </div>
           ) : (
@@ -570,7 +605,7 @@ export const KanbanPage: React.FC = () => {
           <div className="space-y-1">
             <h3 className="text-base font-bold text-text-primary">No Boards Found</h3>
             <p className="text-xs text-text-secondary max-w-sm">
-              This workspace currently has no Kanban boards. Create a board now to manage workflows or convert meeting action items into tasks.
+              This workspace currently has no Kanban boards. Create a board to start adding tasks — either directly, or by converting meeting action items.
             </p>
           </div>
           <Button
@@ -636,6 +671,22 @@ export const KanbanPage: React.FC = () => {
           boards={boards}
           onTaskUpdated={handleTaskUpdatedFromModal}
           onTaskDeleted={handleTaskDeletedFromModal}
+        />
+      )}
+
+      {/* Create Task Modal (top-level tasks only).
+          Mounted only while open so each opening starts from a clean form. */}
+      {currentWorkspace && isCreateTaskOpen && (
+        <CreateTaskModal
+          onClose={() => setIsCreateTaskOpen(false)}
+          workspaceId={currentWorkspace._id}
+          boards={boards}
+          boardsLoading={boardsLoading}
+          boardsError={boardsError}
+          onRetryBoards={() => setBoardsReloadKey((k) => k + 1)}
+          defaultBoardId={selectedBoardId}
+          members={currentWorkspace.members || []}
+          onTaskCreated={handleTaskCreated}
         />
       )}
 
