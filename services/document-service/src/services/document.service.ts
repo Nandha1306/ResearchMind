@@ -131,7 +131,7 @@ export const uploadDocument = asyncHandler(
           cloudinaryPublicId:
             cloudinaryFile.publicId,
           extractedText,
-          embeddingStatus: "indexed",
+          embeddingStatus: "pending",
         });
 
       try {

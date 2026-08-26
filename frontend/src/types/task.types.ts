@@ -53,6 +53,28 @@ export interface MeetingSummary {
   next_meeting: string;
 }
 
+export interface TaskActivity {
+  _id: string;
+  workspaceId: string;
+  taskId: string;
+  userId: string;
+  action: "created" | "status_changed" | "assigned" | "due_date_set" | "priority_changed" | "comment";
+  payload?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTaskPayload {
+  boardId: string;
+  title: string;
+  description?: string;
+  status?: "todo" | "in_progress" | "done";
+  priority?: "low" | "medium" | "high";
+  assigneeId?: string | null;
+  dueDate?: string | null;
+  parentTaskId?: string | null;
+}
+
 export interface SummarizeMeetingRequest {
   workspaceId: string;
   text: string;

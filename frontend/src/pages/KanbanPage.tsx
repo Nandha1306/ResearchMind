@@ -26,6 +26,8 @@ import {
   createBoard,
 } from "../api/task.api";
 import type { Board, Task } from "../types/task.types";
+import { TaskDetailModal } from "../components/kanban/TaskDetailModal";
+import { Button } from "../components/ui/button";
 import {
   Columns3,
   Loader2,
@@ -89,9 +91,10 @@ const getPriorityBadge = (priority: string) => {
 interface TaskCardProps {
   task: Task;
   isUpdating: boolean;
+  onTaskClick: (taskId: string) => void;
 }
 
-const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating }) => {
+const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating, onTaskClick }) => {
   const {
     attributes,
     listeners,
@@ -111,7 +114,8 @@ const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating }) => {
     <div
       ref={setNodeRef}
       style={style}
-      className={`relative p-3.5 rounded-xl bg-bg-surface border border-border-default shadow-md hover:border-border-subtle transition-all space-y-2.5 group select-none ${
+      onClick={() => onTaskClick(task._id)}
+      className={`relative p-3.5 rounded-xl bg-bg-surface border border-border-default shadow-md hover:border-[#7C6AF7]/50 transition-all space-y-2.5 group select-none cursor-pointer ${
         isUpdating ? "opacity-60 pointer-events-none" : ""
       }`}
     >
@@ -131,6 +135,7 @@ const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating }) => {
         <button
           {...attributes}
           {...listeners}
+          onClick={(e) => e.stopPropagation()}
           className="p-1 text-text-secondary/40 hover:text-text-primary rounded cursor-grab active:cursor-grabbing shrink-0"
           aria-label="Drag task"
         >
@@ -181,12 +186,14 @@ interface ColumnProps {
   column: ColumnDef;
   tasks: Task[];
   updatingTaskIds: string[];
+  onTaskClick: (taskId: string) => void;
 }
 
 const KanbanColumnContainer: React.FC<ColumnProps> = ({
   column,
   tasks,
   updatingTaskIds,
+  onTaskClick,
 }) => {
   const { setNodeRef, isOver } = useDroppable({
     id: column.id,
@@ -229,6 +236,7 @@ const KanbanColumnContainer: React.FC<ColumnProps> = ({
                 key={task._id}
                 task={task}
                 isUpdating={updatingTaskIds.includes(task._id)}
+                onTaskClick={onTaskClick}
               />
             ))
           ) : (
@@ -253,6 +261,29 @@ export const KanbanPage: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
   const [updatingTaskIds, setUpdatingTaskIds] = useState<string[]>([]);
+
+  // Task Detail Modal State
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [isTaskDetailOpen, setIsTaskDetailOpen] = useState<boolean>(false);
+
+  const handleTaskClick = (taskId: string) => {
+    setSelectedTaskId(taskId);
+    setIsTaskDetailOpen(true);
+  };
+
+  const handleTaskUpdatedFromModal = (updatedTask: Task) => {
+    if (updatedTask.boardId !== selectedBoardId) {
+      setTasks((prev) => prev.filter((t) => t._id !== updatedTask._id));
+    } else {
+      setTasks((prev) =>
+        prev.map((t) => (t._id === updatedTask._id ? updatedTask : t))
+      );
+    }
+  };
+
+  const handleTaskDeletedFromModal = (deletedTaskId: string) => {
+    setTasks((prev) => prev.filter((t) => t._id !== deletedTaskId));
+  };
 
   // Board Creation State
   const [isCreateBoardOpen, setIsCreateBoardOpen] = useState<boolean>(false);
@@ -567,6 +598,7 @@ export const KanbanPage: React.FC = () => {
                   column={column}
                   tasks={columnTasks}
                   updatingTaskIds={updatingTaskIds}
+                  onTaskClick={handleTaskClick}
                 />
               );
             })}
@@ -592,6 +624,19 @@ export const KanbanPage: React.FC = () => {
             ) : null}
           </DragOverlay>
         </DndContext>
+      )}
+
+      {/* Task Detail Modal */}
+      {currentWorkspace && (
+        <TaskDetailModal
+          isOpen={isTaskDetailOpen}
+          onClose={() => setIsTaskDetailOpen(false)}
+          taskId={selectedTaskId}
+          workspaceId={currentWorkspace._id}
+          boards={boards}
+          onTaskUpdated={handleTaskUpdatedFromModal}
+          onTaskDeleted={handleTaskDeletedFromModal}
+        />
       )}
 
       {/* Create Board Modal */}

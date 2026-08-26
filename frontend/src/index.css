@@ -165,3 +165,49 @@
     transition: background-color 0.2s ease, color 0.2s ease;
   }
 }
+
+/* KaTeX Math Equations Container Styling */
+.katex-display {
+  margin: 0.85rem 0 !important;
+  padding: 0.85rem 1.25rem !important;
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.katex {
+  font-size: 1.05em !important;
+}
+
+/* Markdown Table Styling */
+.prose table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 1rem 0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--border-default);
+}
+
+.prose th {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  font-weight: 600;
+  padding: 0.65rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.prose td {
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+}
+
+.prose tr:last-child td {
+  border-bottom: none;
+}

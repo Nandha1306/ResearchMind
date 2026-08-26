@@ -15,6 +15,7 @@ import {
   getTaskHandler,
   updateTaskHandler,
   deleteTaskHandler,
+  getTaskActivitiesHandler,
 } from "../controllers/task.controller";
 
 import { requireWorkspaceMembership } from "../middlewares/workspace.middleware";
@@ -49,6 +50,13 @@ router.get(
   authenticate,
   requireWorkspaceMembership,
   getTaskHandler
+);
+
+router.get(
+  "/workspaces/:workspaceId/tasks/:id/activities",
+  authenticate,
+  requireWorkspaceMembership,
+  getTaskActivitiesHandler
 );
 
 router.patch(

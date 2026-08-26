@@ -8,6 +8,7 @@ import {
   updateTask,
   deleteTask,
 } from "../services/task.service";
+import { getTaskActivities } from "../services/task-activity.service";
 
 import { AppError } from "../../../../packages/shared/errors/AppError";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
@@ -253,3 +254,28 @@ export const deleteTaskHandler =
       message: "Task deleted successfully",
     });
   };
+
+export const getTaskActivitiesHandler = async (
+  req: Request,
+  res: Response
+) => {
+  const workspaceId = getWorkspaceId(req);
+  const taskId = (req.params.id || req.params.taskId) as string;
+
+  const activities = await getTaskActivities(
+    workspaceId,
+    taskId
+  );
+
+  if (activities === null) {
+    throw new AppError(
+      "Task not found",
+      404
+    );
+  }
+
+  res.status(200).json({
+    success: true,
+    data: activities,
+  });
+};

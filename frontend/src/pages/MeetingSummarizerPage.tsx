@@ -4,6 +4,7 @@ import { summarizeMeeting } from "../api/ai.api";
 import { getWorkspaceBoards, createBoard, bulkCreateTasks } from "../api/task.api";
 import type { Board, MeetingSummary, Task } from "../types/task.types";
 import { Button } from "../components/ui/button";
+import { MathMarkdown } from "../components/ui/MathMarkdown";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../components/ui/card";
 import {
   Sparkles,
@@ -351,9 +352,7 @@ export const MeetingSummarizerPage: React.FC = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <p className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
-                    {summaryData.summary}
-                  </p>
+                  <MathMarkdown content={summaryData.summary} />
                 </CardContent>
               </Card>
             )}

@@ -1,4 +1,5 @@
 import { TaskActivity } from "../models/TaskActivity";
+import { Task } from "../models/Task";
 
 interface CreateActivityInput {
   workspaceId: string;
@@ -28,6 +29,15 @@ export const getTaskActivities = async (
   workspaceId: string,
   taskId: string
 ) => {
+  const existingTask = await Task.findOne({
+    _id: taskId,
+    workspaceId,
+  });
+
+  if (!existingTask) {
+    return null;
+  }
+
   return TaskActivity.find({
     workspaceId,
     taskId,
@@ -35,3 +45,4 @@ export const getTaskActivities = async (
     .sort({ createdAt: -1 })
     .lean();
 };
+

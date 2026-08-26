@@ -455,6 +455,48 @@
             "type": "string",
             "format": "date-time"
           },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "TaskActivityResponse": {
+        "type": "object",
+        "properties": {
+          "_id": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e777"
+          },
+          "workspaceId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e123"
+          },
+          "taskId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e999"
+          },
+          "userId": {
+            "type": "string",
+            "example": "60d5ecb8b5c9c22b88e1e456"
+          },
+          "action": {
+            "type": "string",
+            "enum": ["created", "status_changed", "assigned", "due_date_set", "priority_changed", "comment"],
+            "example": "status_changed"
+          },
+          "payload": {
+            "type": "object",
+            "example": { "from": "todo", "to": "in_progress" }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
           "updatedAt": {
             "type": "string",
             "format": "date-time"
@@ -1323,6 +1365,40 @@
           "403": {
             "description": "Forbidden - Not a member of this workspace"
           }
+        }
+      }
+    },
+    "/api/tasks/workspaces/{workspaceId}/tasks/{id}/activities": {
+      "get": {
+        "summary": "Get activity/history timeline for a specific task",
+        "tags": ["Tasks"],
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "name": "workspaceId", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of task activities returned in chronological order (newest first)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": { "type": "boolean", "example": true },
+                    "data": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/TaskActivityResponse" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid resource ID" },
+          "401": { "description": "Unauthorized" },
+          "403": { "description": "Forbidden - Not a member of this workspace" },
+          "404": { "description": "Task not found" }
         }
       }
     }
