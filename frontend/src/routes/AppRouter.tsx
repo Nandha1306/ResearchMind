@@ -62,6 +62,7 @@ import { OverviewPage } from "../pages/OverviewPage";
 import { DocumentsPage } from "../pages/DocumentsPage";
 import { SemanticSearchPage } from "../pages/SemanticSearchPage";
 import { MeetingSummarizerPage } from "../pages/MeetingSummarizerPage";
+import { KanbanPage } from "../pages/KanbanPage";
 
 // Generic placeholder page to render for sub-routes under development
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
@@ -95,7 +96,7 @@ export const AppRouter: React.FC = () => {
             {/* App Layout Shell wrapping all authenticated dashboard pages */}
             <Route element={<AppShell />}>
               <Route path="/dashboard" element={<OverviewPage />} />
-              <Route path="/dashboard/tasks" element={<PlaceholderPage title="Tasks Workflow" />} />
+              <Route path="/dashboard/tasks" element={<KanbanPage />} />
               <Route path="/dashboard/documents" element={<DocumentsPage />} />
               <Route path="/dashboard/sources" element={<PlaceholderPage title="Data Sources" />} />
               <Route path="/dashboard/analytics" element={<PlaceholderPage title="Analytics Insight" />} />

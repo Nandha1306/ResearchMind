@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useId } from "react";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { summarizeMeeting } from "../api/ai.api";
-import { getWorkspaceBoards, bulkCreateTasks } from "../api/task.api";
+import { getWorkspaceBoards, createBoard, bulkCreateTasks } from "../api/task.api";
 import type { Board, MeetingSummary, Task } from "../types/task.types";
 import { Button } from "../components/ui/button";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "../components/ui/card";
@@ -34,6 +34,10 @@ export const MeetingSummarizerPage: React.FC = () => {
   const [selectedActionIndices, setSelectedActionIndices] = useState<number[]>([]);
   const [createdTasksResult, setCreatedTasksResult] = useState<Task[] | null>(null);
 
+  // Quick Create Board State
+  const [newBoardName, setNewBoardName] = useState<string>("");
+  const [creatingBoard, setCreatingBoard] = useState<boolean>(false);
+
   // Independent Loading States
   const [boardsLoading, setBoardsLoading] = useState<boolean>(false);
   const [summarizing, setSummarizing] = useState<boolean>(false);
@@ -46,7 +50,6 @@ export const MeetingSummarizerPage: React.FC = () => {
 
   // 1. Fetch Real Boards when Active Workspace changes
   useEffect(() => {
-    // Reset state on workspace switch
     setSummaryData(null);
     setSelectedActionIndices([]);
     setCreatedTasksResult(null);
@@ -85,6 +88,27 @@ export const MeetingSummarizerPage: React.FC = () => {
     fetchBoards();
   }, [currentWorkspace?._id]);
 
+  // Quick Create Board Handler
+  const handleQuickCreateBoard = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentWorkspace?._id || !newBoardName.trim()) return;
+
+    setCreatingBoard(true);
+    setBoardsError(null);
+    try {
+      const created = await createBoard(currentWorkspace._id, newBoardName.trim());
+      setBoards((prev) => [...prev, created]);
+      setSelectedBoardId(created._id);
+      setNewBoardName("");
+    } catch (err: any) {
+      const message =
+        err.response?.data?.message || err.message || "Failed to create board";
+      setBoardsError(message);
+    } finally {
+      setCreatingBoard(false);
+    }
+  };
+
   // 2. Summarize Meeting Handler
   const handleSummarize = async () => {
     const trimmed = meetingNotes.trim();
@@ -103,7 +127,6 @@ export const MeetingSummarizerPage: React.FC = () => {
       });
 
       setSummaryData(summary);
-      // Default: select all action items
       if (summary.action_items && summary.action_items.length > 0) {
         setSelectedActionIndices(summary.action_items.map((_, idx) => idx));
       } else {
@@ -178,7 +201,7 @@ export const MeetingSummarizerPage: React.FC = () => {
             description: item.assignee ? `Assignee context: ${item.assignee}` : undefined,
             status: "todo" as const,
             priority: "medium" as const,
-            assigneeId: null, // Mandatory: name string is preserved in text context, no fake ID invented
+            assigneeId: null,
             dueDate: parsedDueDate,
             parentTaskId: null,
           };
@@ -208,7 +231,6 @@ export const MeetingSummarizerPage: React.FC = () => {
     }
   };
 
-  // Empty Workspace State
   if (!currentWorkspace) {
     return (
       <div className="p-6 md:p-8 max-w-4xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center">
@@ -574,10 +596,35 @@ export const MeetingSummarizerPage: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Inline Quick Board Creation Form when No Boards Exist */}
                   {boards.length === 0 && !boardsLoading && (
-                    <p className="text-xs text-text-secondary bg-bg-surface p-3 rounded-lg border border-border-default">
-                      A Kanban board is required before action items can be created as tasks. Please create a board in the Tasks module first.
-                    </p>
+                    <div className="p-3.5 rounded-xl bg-bg-surface border border-border-default space-y-3">
+                      <p className="text-xs text-text-secondary">
+                        A Kanban board is required before action items can be created as tasks. Create a board below:
+                      </p>
+                      <form onSubmit={handleQuickCreateBoard} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="e.g. Sprint 1 Board, Research Tasks"
+                          value={newBoardName}
+                          onChange={(e) => setNewBoardName(e.target.value)}
+                          className="flex-1 px-3 py-2 rounded-lg bg-bg-elevated border border-border-default text-text-primary text-xs focus:outline-none focus:ring-2 focus:ring-[#7C6AF7]/50"
+                          required
+                        />
+                        <Button
+                          type="submit"
+                          disabled={creatingBoard || !newBoardName.trim()}
+                          className="bg-[#7C6AF7] hover:bg-[#6b58f6] text-white text-xs px-3.5 py-2 rounded-lg flex items-center gap-1.5 shrink-0"
+                        >
+                          {creatingBoard ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <Plus className="w-3.5 h-3.5" />
+                          )}
+                          <span>Create Board</span>
+                        </Button>
+                      </form>
+                    </div>
                   )}
 
                   {taskCreationError && (
