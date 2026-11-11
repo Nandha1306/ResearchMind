@@ -8,11 +8,6 @@ interface JoinWorkspaceModalProps {
   onClose: () => void;
 }
 
-interface ApiErrorShape {
-  response?: { status?: number; data?: { message?: string } };
-  message?: string;
-}
-
 export const JoinWorkspaceModal: React.FC<JoinWorkspaceModalProps> = ({
   isOpen,
   onClose,
@@ -56,14 +51,16 @@ export const JoinWorkspaceModal: React.FC<JoinWorkspaceModalProps> = ({
     setError(null);
 
     try {
-      await joinWorkspace({ inviteCode: code });
+      await joinWorkspace(code);
       await fetchWorkspaces();
       onClose();
     } catch (err) {
-      const apiErr = err as ApiErrorShape;
+      // The store rethrows `new Error(serverMessage)`, so the server's reason
+      // (e.g. "Invalid invite code", "Already a member") is on `err.message`.
       const msg =
-        apiErr?.response?.data?.message ||
-        "Failed to join workspace. Check the code and try again.";
+        err instanceof Error && err.message
+          ? err.message
+          : "Failed to join workspace. Check the code and try again.";
       setError(msg);
     } finally {
       setSubmitting(false);

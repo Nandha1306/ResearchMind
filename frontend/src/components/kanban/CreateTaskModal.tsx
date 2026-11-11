@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useId } from "react";
 import { createTask } from "../../api/task.api";
 import type { Board, Task } from "../../types/task.types";
-import type { WorkspaceMember } from "../../types/workspace.types";
 import { Button } from "../ui/button";
 import {
   X,

@@ -1,5 +1,4 @@
 import axiosInstance, { API_URL, ensureFreshToken } from "./axios";
-import { useAuthStore } from "../store/auth.store";
 import type { AISessionHistoryItem } from "../utils/sse";
 import type { MeetingSummary, SummarizeMeetingRequest } from "../types/task.types";
 

@@ -6,6 +6,24 @@ export function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Return `url` only if it is an absolute http(s) URL, otherwise null.
+ *
+ * Document cards used to be `<a href>` elements, where React itself refuses
+ * `javascript:` URLs. Opening a URL imperatively (window.open / location)
+ * has no such protection, so callers must pass stored URLs through this
+ * guard first.
+ */
+export function getSafeExternalUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Format ISO date string into human readable compact label. */
 export function formatDocumentDate(dateString: string): string {
   if (!dateString) return "Recently";

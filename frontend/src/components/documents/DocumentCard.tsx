@@ -1,7 +1,7 @@
 import React from "react";
 import type { DocumentItem } from "../../types/document.types";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
-import { formatFileSize, formatDocumentDate } from "../../utils/fileUtils";
+import { formatFileSize, formatDocumentDate, getSafeExternalUrl } from "../../utils/fileUtils";
 import { FileText, FileType, ExternalLink, Calendar, HardDrive, Trash2, RefreshCw } from "lucide-react";
 
 interface DocumentCardProps {
@@ -19,10 +19,33 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
 }) => {
   const isPdf = document.fileType === "pdf";
 
-  const handleClick = (e: React.MouseEvent) => {
+  // The card used to be an `<a href={cloudinaryUrl}>` (PDF: same tab, DOCX: new
+  // tab). It became a `<div>` so it can contain the Delete/Retry buttons, which
+  // dropped the non-PDF navigation and keyboard access. This restores both.
+  const openDocument = () => {
     if (isPdf && onSelect) {
-      e.preventDefault();
       onSelect(document);
+      return;
+    }
+    const url = getSafeExternalUrl(document.cloudinaryUrl);
+    if (!url) return; // same as the old `href="#"` fallback
+    if (isPdf) {
+      window.location.assign(url);
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  const handleClick = () => {
+    openDocument();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Ignore keys pressed on the nested Delete/Retry buttons.
+    if (e.target !== e.currentTarget) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      openDocument();
     }
   };
 
@@ -44,7 +67,10 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
 
   return (
     <div
+      role="link"
+      tabIndex={0}
       onClick={handleClick}
+      onKeyDown={handleKeyDown}
       className="bg-bg-surface border border-border-default rounded-xl p-4 flex flex-col justify-between hover:bg-bg-elevated/40 hover:border-border-default transition-all duration-200 group cursor-pointer select-none space-y-4 shadow-sm text-left text-inherit"
       title={
         isPdf
