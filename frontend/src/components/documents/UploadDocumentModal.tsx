@@ -24,6 +24,18 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isOpen && !isUploading) {
+        setSelectedFile(null);
+        setErrorMsg(null);
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isUploading, onClose]);
+
   if (!isOpen) return null;
 
   const validateFile = (file: File): boolean => {
@@ -99,25 +111,28 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="upload-document-modal-title"
       className="fixed inset-0 bg-black/75 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
       onClick={handleModalClose}
     >
       <div
-        className="bg-[#111111] border border-[#2A2A2A] rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 relative"
+        className="bg-bg-surface border border-border-default rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 relative text-text-primary"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Modal Header */}
-        <div className="flex items-center justify-between p-5 border-b border-[#1E1E1E]">
+        <div className="flex items-center justify-between p-5 border-b border-border-default">
           <div>
-            <h2 className="text-base font-bold text-[#EDEDEE]">Upload document</h2>
-            <p className="text-[12px] text-[#8B8B8F] mt-0.5">
+            <h2 id="upload-document-modal-title" className="text-base font-bold text-text-primary">Upload document</h2>
+            <p className="text-[12px] text-text-secondary mt-0.5">
               Upload a PDF or DOCX file to add it to your workspace knowledge base.
             </p>
           </div>
           <button
             onClick={handleModalClose}
             disabled={isUploading}
-            className="p-1.5 rounded-lg hover:bg-[#1A1A1A] border border-[#2A2A2A] text-[#8B8B8F] hover:text-[#EDEDEE] transition-colors cursor-pointer disabled:opacity-50"
+            className="p-1.5 rounded-lg hover:bg-bg-elevated border border-border-subtle text-text-secondary hover:text-text-primary transition-colors cursor-pointer disabled:opacity-50"
             title="Close"
           >
             <X className="w-4 h-4" />
@@ -135,8 +150,8 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
               onClick={() => fileInputRef.current?.click()}
               className={`border-2 border-dashed rounded-xl p-6 text-center flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${
                 isDragOver
-                  ? "border-[#7C6AF7] bg-[#7C6AF7]/10 text-[#7C6AF7]"
-                  : "border-[#2A2A2A] hover:border-[#3A3A3A] bg-[#161616] text-[#8B8B8F]"
+                  ? "border-accent-primary bg-accent-bg text-accent-primary"
+                  : "border-border-default hover:border-border-default/80 bg-bg-elevated/40 text-text-secondary"
               }`}
             >
               <input
@@ -147,32 +162,32 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
                 className="hidden"
               />
 
-              <div className="w-12 h-12 rounded-xl bg-[#1A1A1A] border border-[#2A2A2A] flex items-center justify-center text-[#7C6AF7]">
+              <div className="w-12 h-12 rounded-xl bg-bg-elevated border border-border-subtle flex items-center justify-center text-accent-primary">
                 <Upload className="w-6 h-6" />
               </div>
 
               <div className="space-y-1">
-                <p className="text-[13px] font-semibold text-[#EDEDEE]">
-                  Drop files here or <span className="text-[#7C6AF7]">browse files</span>
+                <p className="text-[13px] font-semibold text-text-primary">
+                  Drop files here or <span className="text-accent-primary">browse files</span>
                 </p>
-                <p className="text-[11px] text-[#4A4A50]">
+                <p className="text-[11px] text-text-muted">
                   Supported formats: PDF, DOCX • Max size: 10 MB
                 </p>
               </div>
             </div>
           ) : (
             /* Selected File Preview Box */
-            <div className="bg-[#1A1A1A] border border-[#2A2A2A] rounded-xl p-4 flex items-center justify-between gap-3">
+            <div className="bg-bg-elevated border border-border-subtle rounded-xl p-4 flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-lg bg-[#7C6AF7]/12 text-[#7C6AF7] border border-[#7C6AF7]/30 flex items-center justify-center shrink-0">
+                <div className="w-10 h-10 rounded-lg bg-accent-bg text-accent-primary border border-accent-primary/20 flex items-center justify-center shrink-0">
                   <FileText className="w-5 h-5" />
                 </div>
 
                 <div className="min-w-0">
-                  <span className="block text-[13px] font-semibold text-[#EDEDEE] truncate">
+                  <span className="block text-[13px] font-semibold text-text-primary truncate">
                     {selectedFile.name}
                   </span>
-                  <span className="block text-[11px] text-[#8B8B8F] mt-0.5">
+                  <span className="block text-[11px] text-text-secondary mt-0.5">
                     {formatFileSize(selectedFile.size)} • {selectedFile.name.split(".").pop()?.toUpperCase()}
                   </span>
                 </div>
@@ -182,7 +197,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedFile(null)}
-                  className="p-1.5 rounded-lg hover:bg-[#2A2A2A] text-[#8B8B8F] hover:text-red-400 transition-colors cursor-pointer"
+                  className="p-1.5 rounded-lg hover:bg-bg-surface text-text-secondary hover:text-destructive transition-colors cursor-pointer"
                   title="Remove file"
                 >
                   <X className="w-4 h-4" />
@@ -193,19 +208,19 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
 
           {/* Validation or API Error Banner */}
           {errorMsg && (
-            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-[12px] flex items-center gap-2">
+            <div className="p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-[12px] flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {/* Footer Action Buttons */}
-          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-[#1E1E1E]">
+          <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-border-subtle">
             <Button
               type="button"
               onClick={handleModalClose}
               disabled={isUploading}
-              className="bg-[#161616] border border-[#2A2A2A] hover:bg-[#1A1A1A] text-[#EDEDEE] text-[12px] font-semibold h-9 px-4 rounded-lg cursor-pointer"
+              className="bg-bg-elevated border border-border-subtle hover:bg-bg-elevated/80 text-text-primary text-[12px] font-semibold h-9 px-4 rounded-lg cursor-pointer"
             >
               Cancel
             </Button>
@@ -213,7 +228,7 @@ export const UploadDocumentModal: React.FC<UploadDocumentModalProps> = ({
             <Button
               type="submit"
               disabled={!selectedFile || isUploading}
-              className="bg-[#7C6AF7] hover:bg-[#9B8DF9] text-white text-[12px] font-semibold h-9 px-4 rounded-lg flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-accent-primary hover:bg-accent-hover text-white text-[12px] font-semibold h-9 px-4 rounded-lg flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isUploading ? (
                 <>

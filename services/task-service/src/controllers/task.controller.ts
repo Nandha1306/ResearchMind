@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-
 import {
   createTask,
   bulkCreateTasks,
@@ -9,21 +8,16 @@ import {
   deleteTask,
 } from "../services/task.service";
 import { getTaskActivities } from "../services/task-activity.service";
-
 import { AppError } from "../../../../packages/shared/errors/AppError";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
-import { AuthRequest } from "../../../auth-service/src/middlewares/auth.middleware";
+import { AuthRequest } from "../../../../packages/shared/auth/authenticate";
 
 const getUserId = (req: Request): string => {
   const user = (req as any).user;
-
   const userId = user?.userId || user?.id;
 
   if (!userId) {
-    throw new AppError(
-      "Authenticated user not found",
-      401
-    );
+    throw new AppError("Authenticated user not found", 401);
   }
 
   return userId;
@@ -33,96 +27,67 @@ const getWorkspaceId = (req: Request): string => {
   const workspaceId = req.params.workspaceId as string;
 
   if (!workspaceId) {
-    throw new AppError(
-      "Workspace ID is required",
-      400
-    );
+    throw new AppError("Workspace ID is required", 400);
   }
 
   return workspaceId;
 };
 
-export const createTaskHandler = async (
-  req: Request,
-  res: Response
-) => {
-  const workspaceId =
-    getWorkspaceId(req);
+export const createTaskHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const workspaceId = getWorkspaceId(req);
+    const createdBy = getUserId(req);
 
-  const createdBy =
-    getUserId(req);
+    const {
+      boardId,
+      title,
+      description,
+      status,
+      priority,
+      assigneeId,
+      dueDate,
+      parentTaskId,
+    } = req.body;
 
-  const {
-    boardId,
-    title,
-    description,
-    status,
-    priority,
-    assigneeId,
-    dueDate,
-    parentTaskId,
-  } = req.body;
+    if (!boardId) {
+      throw new AppError("Board ID is required", 400);
+    }
 
-  if (!boardId) {
-    throw new AppError(
-      "Board ID is required",
-      400
-    );
+    if (!title || typeof title !== "string" || !title.trim()) {
+      throw new AppError("Task title is required", 400);
+    }
+
+    const task = await createTask({
+      workspaceId,
+      boardId,
+      title: title.trim(),
+      description,
+      status,
+      priority,
+      assigneeId,
+      dueDate,
+      parentTaskId,
+      createdBy,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: task,
+    });
   }
-
-  if (
-    !title ||
-    typeof title !== "string" ||
-    !title.trim()
-  ) {
-    throw new AppError(
-      "Task title is required",
-      400
-    );
-  }
-
-  const task = await createTask({
-    workspaceId,
-    boardId,
-    title: title.trim(),
-    description,
-    status,
-    priority,
-    assigneeId,
-    dueDate,
-    parentTaskId,
-    createdBy,
-  });
-
-  if (!task) {
-    throw new AppError(
-      "Board or parent task does not belong to this workspace",
-      400
-    );
-  }
-
-  res.status(201).json({
-    success: true,
-    data: task,
-  });
-};
+);
 
 export const bulkCreateTasksHandler = asyncHandler(
   async (req: AuthRequest, res: Response) => {
-    const workspaceId =
-      getWorkspaceId(req);
-
-    const userId =
-      getUserId(req);
-
+    const workspaceId = getWorkspaceId(req);
+    const userId = getUserId(req);
     const { tasks } = req.body;
 
-    const createdTasks =
-      await bulkCreateTasks({
-        workspaceId,
-        tasks,
-        createdBy: userId,
-      });
+    const createdTasks = await bulkCreateTasks({
+      workspaceId,
+      tasks,
+      createdBy: userId,
+    });
 
     res.status(201).json({
       success: true,
@@ -131,61 +96,44 @@ export const bulkCreateTasksHandler = asyncHandler(
   }
 );
 
-export const getWorkspaceTasksHandler =
-  async (
-    req: Request,
-    res: Response
-  ) => {
-    const workspaceId =
-      getWorkspaceId(req);
+export const getWorkspaceTasksHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const workspaceId = getWorkspaceId(req);
 
-    const tasks =
-      await getWorkspaceTasks(
-        workspaceId,
-        req.query.boardId as string | undefined
-      );
+    const tasks = await getWorkspaceTasks(
+      workspaceId,
+      req.query.boardId as string | undefined,
+      req.query.parentTaskId as string | undefined
+    );
 
     res.status(200).json({
       success: true,
       data: tasks,
     });
-  };
-
-export const getTaskHandler = async (
-  req: Request,
-  res: Response
-) => {
-  const workspaceId =
-    getWorkspaceId(req);
-
-  const task = await getTaskById(
-    workspaceId,
-    req.params.id as string
-  );
-
-  if (!task) {
-    throw new AppError(
-      "Task not found",
-      404
-    );
   }
+);
 
-  res.status(200).json({
-    success: true,
-    data: task,
-  });
-};
+export const getTaskHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const workspaceId = getWorkspaceId(req);
 
-export const updateTaskHandler =
-  async (
-    req: Request,
-    res: Response
-  ) => {
-    const workspaceId =
-      getWorkspaceId(req);
+    const task = await getTaskById(workspaceId, req.params.id as string);
 
-    const userId =
-      getUserId(req);
+    if (!task) {
+      throw new AppError("Task not found", 404);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: task,
+    });
+  }
+);
+
+export const updateTaskHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const workspaceId = getWorkspaceId(req);
+    const userId = getUserId(req);
 
     const {
       title,
@@ -198,84 +146,69 @@ export const updateTaskHandler =
       boardId,
     } = req.body;
 
-    const task =
-      await updateTask(
-        workspaceId,
-        req.params.id as string,
-        userId,
-        {
-          title,
-          description,
-          status,
-          priority,
-          assigneeId,
-          dueDate,
-          parentTaskId,
-          boardId,
-        }
-      );
+    const task = await updateTask(
+      workspaceId,
+      req.params.id as string,
+      userId,
+      {
+        title,
+        description,
+        status,
+        priority,
+        assigneeId,
+        dueDate,
+        parentTaskId,
+        boardId,
+      }
+    );
 
     if (!task) {
-      throw new AppError(
-        "Task not found or related resource does not belong to this workspace",
-        404
-      );
+      throw new AppError("Task not found", 404);
     }
 
     res.status(200).json({
       success: true,
       data: task,
     });
-  };
+  }
+);
 
-export const deleteTaskHandler =
-  async (
-    req: Request,
-    res: Response
-  ) => {
-    const workspaceId =
-      getWorkspaceId(req);
+export const deleteTaskHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const workspaceId = getWorkspaceId(req);
 
-    const task =
-      await deleteTask(
-        workspaceId,
-        req.params.id as string
-      );
+    const result = await deleteTask(workspaceId, req.params.id as string);
 
-    if (!task) {
-      throw new AppError(
-        "Task not found",
-        404
-      );
+    if (!result) {
+      throw new AppError("Task not found", 404);
     }
 
     res.status(200).json({
       success: true,
       message: "Task deleted successfully",
+      data: {
+        deletedTaskCount: result.deletedTaskCount,
+        deletedSubtaskCount: result.deletedSubtaskCount,
+        deletedActivityCount: result.deletedActivityCount,
+      },
     });
-  };
-
-export const getTaskActivitiesHandler = async (
-  req: Request,
-  res: Response
-) => {
-  const workspaceId = getWorkspaceId(req);
-  const taskId = (req.params.id || req.params.taskId) as string;
-
-  const activities = await getTaskActivities(
-    workspaceId,
-    taskId
-  );
-
-  if (activities === null) {
-    throw new AppError(
-      "Task not found",
-      404
-    );
   }
+);
 
-  res.status(200).json({
-    success: true,
-    data: activities,
-  });
-};
+export const getTaskActivitiesHandler = asyncHandler(
+  async (req: Request, res: Response) => {
+    const workspaceId = getWorkspaceId(req);
+    const taskId = (req.params.id || req.params.taskId) as string;
+
+    const activities = await getTaskActivities(workspaceId, taskId);
+
+    if (activities === null) {
+      throw new AppError("Task not found", 404);
+    }
+
+    res.status(200).json({
+      success: true,
+      data: activities,
+    });
+  }
+);

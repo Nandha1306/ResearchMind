@@ -45,14 +45,19 @@ export const bulkCreateTasks = async (
   return response.data.data || [];
 };
 
-/** Fetch all tasks for a workspace (optionally filtered by boardId). */
+/** Fetch all tasks for a workspace (optionally filtered by boardId or parentTaskId). */
 export const getWorkspaceTasks = async (
   workspaceId: string,
-  boardId?: string
+  boardId?: string,
+  parentTaskId?: string | null
 ): Promise<Task[]> => {
+  const params: Record<string, string> = {};
+  if (boardId) params.boardId = boardId;
+  if (parentTaskId !== undefined) params.parentTaskId = String(parentTaskId);
+
   const response = await axiosInstance.get(
     `/tasks/workspaces/${workspaceId}/tasks`,
-    { params: boardId ? { boardId } : undefined }
+    { params: Object.keys(params).length ? params : undefined }
   );
   return response.data.data || [];
 };

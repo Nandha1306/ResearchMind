@@ -7,15 +7,37 @@ export interface EmbeddingResult {
   embedding: number[];
 }
 
-/** Generate Voyage embeddings for a batch of document chunks. */
+/** Generate Voyage embeddings for a batch of document chunks with 429 rate-limit backoff. */
 const embedBatch = async (
-  texts: string[]
+  texts: string[],
+  maxRetries = 3
 ): Promise<number[][]> => {
   if (texts.length === 0) {
     return [];
   }
 
-  return voyageEmbeddings.embedDocuments(texts);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await voyageEmbeddings.embedDocuments(texts);
+    } catch (err: any) {
+      const isRateLimit =
+        err?.status === 429 ||
+        err?.message?.includes("429") ||
+        err?.name === "RateLimitQuotaExhaustedError";
+
+      if (isRateLimit && attempt < maxRetries) {
+        const waitMs = attempt * 20000; // 20s delay to respect 3 RPM free tier rate limit
+        console.warn(
+          `[Voyage AI] Rate limit (429) hit. Pausing ${waitMs / 1000}s before retry ${attempt}/${maxRetries}...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  throw new Error("Failed to generate embeddings after rate limit retries");
 };
 
 /** Generate embeddings for all document chunks in controlled batches. */

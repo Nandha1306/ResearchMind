@@ -1,9 +1,18 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+import { assertRequiredSecrets } from "../../../packages/shared/config/secrets";
+
+/*
+ * Validate security-critical configuration BEFORE anything else is wired up.
+ * Fails closed with the variable NAME only -- never the value.
+ */
+assertRequiredSecrets("document-service", ["JWT_ACCESS_SECRET", "INTERNAL_SERVICE_TOKEN"]);
+
 import app from "./app";
 import { connectDB } from "./config/db";
 import logger from "./utils/logger";
+import { syncPendingDocuments } from "./services/document.service";
 
 const PORT =
   process.env.PORT || 5003;
@@ -11,6 +20,9 @@ const PORT =
 /** Start document service. */
 const startServer = async () => {
   await connectDB();
+
+  // Re-enqueue un-indexed pending/failed documents to Redis queue
+  syncPendingDocuments();
 
   app.listen(PORT, () => {
     logger.info(

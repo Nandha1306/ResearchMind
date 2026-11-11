@@ -31,3 +31,35 @@ export function useUploadDocument(workspaceId: string | undefined) {
     },
   });
 }
+
+/** React Query mutation hook to delete a document. */
+export function useDeleteDocument(workspaceId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, string>({
+    mutationFn: (documentId: string) => {
+      return documentApi.deleteDocument(documentId);
+    },
+    onSuccess: () => {
+      if (workspaceId) {
+        queryClient.invalidateQueries({ queryKey: ["documents", workspaceId] });
+      }
+    },
+  });
+}
+
+/** React Query mutation hook to re-index a document. */
+export function useReindexDocument(workspaceId: string | undefined) {
+  const queryClient = useQueryClient();
+
+  return useMutation<DocumentItem, Error, string>({
+    mutationFn: (documentId: string) => {
+      return documentApi.reindexDocument(documentId);
+    },
+    onSuccess: () => {
+      if (workspaceId) {
+        queryClient.invalidateQueries({ queryKey: ["documents", workspaceId] });
+      }
+    },
+  });
+}

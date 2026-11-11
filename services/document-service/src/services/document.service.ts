@@ -167,15 +167,17 @@ export const uploadDocument = asyncHandler(
   }
 );
 
-/** Return all documents for a workspace. */
+/** Return all documents for a workspace (without full extracted text payload). */
 export const getWorkspaceDocuments = async (
   workspaceId: string
 ) => {
   return Document.find({
     workspaceId,
-  }).sort({
-    createdAt: -1,
-  });
+  })
+    .select("-extractedText")
+    .sort({
+      createdAt: -1,
+    });
 };
 
 /** Find a document by id. */
@@ -186,4 +188,103 @@ export const getDocumentById = async (
     return null;
   }
   return Document.findById(documentId);
+};
+
+/** Delete a document, its Cloudinary asset, and vector embeddings. */
+export const deleteDocument = async (
+  documentId: string,
+  workspaceId: string
+) => {
+  if (!mongoose.Types.ObjectId.isValid(documentId)) {
+    return null;
+  }
+
+  const document = await Document.findOne({
+    _id: documentId,
+    workspaceId,
+  });
+
+  if (!document) {
+    return null;
+  }
+
+  // Destroy Cloudinary asset if public ID is present
+  if (document.cloudinaryPublicId) {
+    try {
+      const resourceType = document.fileType === "pdf" ? "image" : "raw";
+      await cloudinary.uploader.destroy(document.cloudinaryPublicId, {
+        resource_type: resourceType,
+      });
+    } catch (err) {
+      console.error("Failed to destroy Cloudinary asset:", err);
+    }
+  }
+
+  await Document.deleteOne({ _id: document._id });
+
+  return document;
+};
+
+/** Re-index a failed or pending document by re-enqueuing its embedding job. */
+export const reindexDocument = async (
+  documentId: string,
+  workspaceId: string
+) => {
+  if (!mongoose.Types.ObjectId.isValid(documentId)) {
+    return null;
+  }
+
+  const document = await Document.findOne({
+    _id: documentId,
+    workspaceId,
+  });
+
+  if (!document) {
+    return null;
+  }
+
+  document.embeddingStatus = "pending";
+  await document.save();
+
+  try {
+    await addEmbeddingJob({
+      documentId: document._id.toString(),
+      workspaceId: document.workspaceId,
+      uploadedBy: document.uploadedBy,
+      extractedText: document.extractedText,
+      fileType: document.fileType,
+    });
+  } catch (error) {
+    console.error("Failed to re-enqueue embedding job:", error);
+    document.embeddingStatus = "failed";
+    await document.save();
+    throw new Error("Failed to re-enqueue embedding job.");
+  }
+
+  return document;
+};
+
+/** Re-enqueue all pending or failed documents on service startup to recover un-indexed files. */
+export const syncPendingDocuments = async () => {
+  try {
+    const pendingDocs = await Document.find({
+      embeddingStatus: { $in: ["pending", "failed"] },
+    });
+
+    if (pendingDocs.length === 0) return;
+
+    console.log(`[Document Service] Found ${pendingDocs.length} pending/failed documents. Re-enqueuing for indexing...`);
+
+    for (const doc of pendingDocs) {
+      await addEmbeddingJob({
+        documentId: doc._id.toString(),
+        workspaceId: doc.workspaceId,
+        uploadedBy: doc.uploadedBy,
+        extractedText: doc.extractedText || "",
+        fileType: doc.fileType,
+      });
+    }
+  } catch (error) {
+    console.error("[Document Service] Failed to sync pending documents:", error);
+  }
 };

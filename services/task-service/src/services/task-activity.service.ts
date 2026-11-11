@@ -1,11 +1,11 @@
-import { TaskActivity } from "../models/TaskActivity";
+import { TaskActivity, TaskActivityDocument } from "../models/TaskActivity";
 import { Task } from "../models/Task";
 
 interface CreateActivityInput {
   workspaceId: string;
   taskId: string;
   userId: string;
-  action: "created" | "status_changed" | "assigned" | "due_date_set" | "priority_changed" | "comment";
+  action: TaskActivityDocument["action"];
   payload?: Record<string, any>;
 }
 

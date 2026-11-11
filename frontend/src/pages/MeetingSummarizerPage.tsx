@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useId } from "react";
+import { Link } from "react-router-dom";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { summarizeMeeting } from "../api/ai.api";
 import { getWorkspaceBoards, createBoard, bulkCreateTasks } from "../api/task.api";
@@ -20,6 +21,7 @@ import {
   FileText,
   Building2,
   Plus,
+  ExternalLink,
 } from "lucide-react";
 
 export const MeetingSummarizerPage: React.FC = () => {
@@ -636,9 +638,18 @@ export const MeetingSummarizerPage: React.FC = () => {
                   {/* Task Creation Success Notification */}
                   {createdTasksResult && (
                     <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400 space-y-2">
-                      <div className="flex items-center gap-2 font-semibold text-sm">
-                        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                        <span>{createdTasksResult.length} tasks created successfully!</span>
+                      <div className="flex items-center justify-between font-semibold text-sm">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                          <span>{createdTasksResult.length} tasks created successfully!</span>
+                        </div>
+                        <Link
+                          to="/kanban"
+                          className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs transition-colors flex items-center gap-1.5 no-underline font-normal"
+                        >
+                          <span>Open in Kanban</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </Link>
                       </div>
                       <ul className="pl-6 list-disc space-y-1 text-emerald-300/80">
                         {createdTasksResult.map((task) => (

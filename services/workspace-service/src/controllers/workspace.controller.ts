@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { AuthRequest } from "../middlewares/auth.middleware";
-import { createWorkspace, getUserWorkspaces, joinWorkspace, isWorkspaceMember} from "../services/workspace.service";
+import { createWorkspace, getUserWorkspaces, joinWorkspace, isWorkspaceMember, getWorkspaceById, getWorkspaceMembers } from "../services/workspace.service";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 
 export const create = asyncHandler(
@@ -61,6 +61,40 @@ export const checkMembership = asyncHandler(
       data: {
         isMember,
       },
+    });
+  }
+);
+
+/** Get workspace details by workspaceId. */
+export const getById = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const workspaceId = req.params.workspaceId as string;
+
+    const workspace = await getWorkspaceById(
+      workspaceId,
+      req.user!.userId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: workspace,
+    });
+  }
+);
+
+/** Get hydrated members list for workspace. */
+export const getMembers = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const workspaceId = req.params.workspaceId as string;
+
+    const members = await getWorkspaceMembers(
+      workspaceId,
+      req.user!.userId
+    );
+
+    res.status(200).json({
+      success: true,
+      data: members,
     });
   }
 );

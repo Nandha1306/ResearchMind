@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useWorkspaceStore } from "../store/workspace.store";
-import { useWorkspaceDocuments, useUploadDocument } from "../hooks/useDocuments";
+import { useWorkspaceDocuments, useUploadDocument, useDeleteDocument, useReindexDocument } from "../hooks/useDocuments";
 import { DocumentToolbar } from "../components/documents/DocumentToolbar";
 import type { FilterOption } from "../components/documents/DocumentToolbar";
 import { DocumentGrid } from "../components/documents/DocumentGrid";
@@ -19,6 +19,8 @@ export const DocumentsPage: React.FC = () => {
 
   const { data: documents = [], isLoading, isError, error, refetch } = useWorkspaceDocuments(workspaceId);
   const uploadMutation = useUploadDocument(workspaceId);
+  const deleteMutation = useDeleteDocument(workspaceId);
+  const reindexMutation = useReindexDocument(workspaceId);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<FilterOption>("all");
@@ -51,14 +53,14 @@ export const DocumentsPage: React.FC = () => {
       {/* 1. Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="space-y-1">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#7C6AF7]/12 text-[#7C6AF7] text-[10px] font-bold border border-[#7C6AF7]/20 select-none">
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-accent-bg text-accent-primary text-[10px] font-bold border border-accent-primary/20 select-none">
             <Sparkles className="w-3.5 h-3.5" />
             <span>Workspace Knowledge Base</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-[#EDEDEE] tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-text-primary tracking-tight">
             Documents
           </h1>
-          <p className="text-[13px] text-[#8B8B8F]">
+          <p className="text-[13px] text-text-secondary">
             Research papers, reports, notes and project files.
           </p>
         </div>
@@ -66,7 +68,7 @@ export const DocumentsPage: React.FC = () => {
         {/* Header Action Button */}
         <Button
           onClick={() => setIsUploadModalOpen(true)}
-          className="bg-[#7C6AF7] hover:bg-[#9B8DF9] text-white text-[13px] font-semibold h-10 px-4 rounded-lg flex items-center gap-2 transition-all cursor-pointer shadow-sm self-start sm:self-auto"
+          className="bg-accent-primary hover:bg-accent-hover text-white text-[13px] font-semibold h-10 px-4 rounded-lg flex items-center gap-2 transition-all cursor-pointer shadow-sm self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>Upload document</span>
@@ -100,14 +102,16 @@ export const DocumentsPage: React.FC = () => {
             <DocumentGrid
               documents={filteredDocuments}
               onSelectDocument={(doc) => setSelectedPdf(doc)}
+              onDeleteDocument={(doc) => deleteMutation.mutate(doc._id)}
+              onReindexDocument={(doc) => reindexMutation.mutate(doc._id)}
             />
           ) : (
-            <div className="p-8 bg-[#111111] border border-[#2A2A2A] rounded-xl text-center space-y-3">
-              <div className="w-10 h-10 rounded-xl bg-[#1A1A1A] text-[#8B8B8F] flex items-center justify-center mx-auto">
+            <div className="p-8 bg-bg-surface border border-border-default rounded-xl text-center space-y-3 shadow-sm">
+              <div className="w-10 h-10 rounded-xl bg-bg-elevated text-text-muted flex items-center justify-center mx-auto">
                 <FileText className="w-5 h-5" />
               </div>
-              <h3 className="text-sm font-semibold text-[#EDEDEE]">No matching documents found</h3>
-              <p className="text-[12px] text-[#8B8B8F]">
+              <h3 className="text-sm font-semibold text-text-primary">No matching documents found</h3>
+              <p className="text-[12px] text-text-secondary">
                 Try adjusting your search query or filter selection.
               </p>
               <button
@@ -115,7 +119,7 @@ export const DocumentsPage: React.FC = () => {
                   setSearchQuery("");
                   setActiveFilter("all");
                 }}
-                className="text-[12px] text-[#7C6AF7] hover:underline font-semibold cursor-pointer pt-1"
+                className="text-[12px] text-accent-primary hover:underline font-semibold cursor-pointer pt-1"
               >
                 Reset search & filters
               </button>

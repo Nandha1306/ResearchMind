@@ -4,8 +4,8 @@ import helmet from "helmet";
 import morgan from "morgan";
 
 import authRoutes from "./routes/auth.routes";
+import internalRoutes from "./routes/internal.routes";
 import { errorMiddleware } from "../../../packages/shared/errors/error.middleware";
-
 
 const app = express();
 
@@ -15,6 +15,7 @@ app.use(morgan("dev"));
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/internal", internalRoutes);
 
 app.get("/health", (_, res) => {
   res.status(200).json({

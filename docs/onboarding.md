@@ -54,7 +54,7 @@ AUTH_SERVICE_URL=http://127.0.0.1:5001
 WORKSPACE_SERVICE_URL=http://127.0.0.1:5002
 DOCUMENT_SERVICE_URL=http://127.0.0.1:5003
 AI_SERVICE_URL=http://127.0.0.1:5006
-JWT_ACCESS_SECRET=researchmind_access_secret
+JWT_ACCESS_SECRET=<generate-with-openssl-rand-hex-48>
 ```
 
 ### Auth Service (`services/auth-service/.env`)
@@ -62,15 +62,15 @@ JWT_ACCESS_SECRET=researchmind_access_secret
 PORT=5001
 MONGODB_URI=mongodb://127.0.0.1:27017/researchmind-auth
 REDIS_URL=redis://127.0.0.1:6379
-JWT_ACCESS_SECRET=researchmind_access_secret
-JWT_REFRESH_SECRET=researchmind_refresh_secret
+JWT_ACCESS_SECRET=<generate-with-openssl-rand-hex-48>
+JWT_REFRESH_SECRET=<generate-with-openssl-rand-hex-48>
 ```
 
 ### Workspace Service (`services/workspace-service/.env`)
 ```env
 PORT=5002
 MONGODB_URI=mongodb://127.0.0.1:27017/researchmind-workspace
-JWT_ACCESS_SECRET=researchmind_access_secret
+JWT_ACCESS_SECRET=<generate-with-openssl-rand-hex-48>
 ```
 
 ### Document Service (`services/document-service/.env`)
@@ -78,9 +78,9 @@ JWT_ACCESS_SECRET=researchmind_access_secret
 PORT=5003
 MONGODB_URI=mongodb://127.0.0.1:27017/researchmind-documents
 REDIS_URL=redis://127.0.0.1:6379
-JWT_ACCESS_SECRET=researchmind_access_secret
-CLOUDINARY_CLOUD_NAME=qje2tu3s
-CLOUDINARY_API_KEY=812348284878871
+JWT_ACCESS_SECRET=<generate-with-openssl-rand-hex-48>
+CLOUDINARY_CLOUD_NAME=<cloudinary-cloud-name>
+CLOUDINARY_API_KEY=<cloudinary-api-key>
 CLOUDINARY_API_SECRET=<your_secret>
 WORKSPACE_SERVICE_URL=http://127.0.0.1:5002
 ```
@@ -97,7 +97,7 @@ PINECONE_INDEX=researchmind
 DOCUMENT_SERVICE_URL=http://localhost:5003
 WORKSPACE_SERVICE_URL=http://localhost:5002
 XAI_API_KEY=<your_groq_or_xai_key>
-MONGO_URI=mongodb://admin:password@localhost:27017/researchmind_ai?authSource=admin
+MONGO_URI=mongodb://<user>:<password>@localhost:27017/researchmind_ai?authSource=admin
 ```
 
 ---

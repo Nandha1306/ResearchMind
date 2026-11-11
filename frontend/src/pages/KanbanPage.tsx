@@ -362,7 +362,8 @@ export const KanbanPage: React.FC = () => {
       try {
         const workspaceTasks = await getWorkspaceTasks(
           currentWorkspace._id,
-          selectedBoardId
+          selectedBoardId,
+          null
         );
         setTasks(workspaceTasks);
       } catch (err: any) {

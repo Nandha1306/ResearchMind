@@ -5,7 +5,8 @@ import { RegisterPage } from "../pages/RegisterPage";
 import { CreateWorkspacePage } from "../pages/CreateWorkspacePage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { useWorkspaceStore } from "../store/workspace.store";
-import { Loader2, AlertCircle, RotateCcw } from "lucide-react";
+import { useSignOut } from "../hooks/useSignOut";
+import { Loader2, AlertCircle, RotateCcw, LogOut } from "lucide-react";
 
 // Full-screen state shown while the workspace list is being resolved for the
 // first time in this session.
@@ -22,26 +23,47 @@ const WorkspaceResolvingScreen: React.FC = () => (
 const WorkspaceUnavailableScreen: React.FC<{
   message: string | null;
   onRetry: () => void;
-}> = ({ message, onRetry }) => (
-  <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center gap-4 p-6 text-center">
-    <div className="w-12 h-12 rounded-2xl bg-destructive/10 border border-destructive/30 flex items-center justify-center">
-      <AlertCircle className="w-6 h-6 text-destructive" />
+}> = ({ message, onRetry }) => {
+  // This screen replaces the whole app shell, so the TopBar account menu is not
+  // mounted. Without its own Sign Out a user whose workspace service is down
+  // would be stranded inside the authenticated app with no way out.
+  const { signOut, isSigningOut } = useSignOut();
+
+  return (
+    <div className="min-h-screen bg-[#0A0A0A] flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <div className="w-12 h-12 rounded-2xl bg-destructive/10 border border-destructive/30 flex items-center justify-center">
+        <AlertCircle className="w-6 h-6 text-destructive" />
+      </div>
+      <div className="space-y-1.5 max-w-sm">
+        <h2 className="text-base font-bold text-[#EDEDEE]">Couldn't load your workspaces</h2>
+        <p className="text-[13px] text-muted-foreground leading-relaxed">
+          {message || "We couldn't reach the workspace service. Check your connection and try again."}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onRetry}
+          className="h-9 px-4 rounded-lg bg-[#7C6AF7] hover:bg-[#6b58f6] text-white text-[13px] font-semibold flex items-center gap-2 cursor-pointer transition-colors"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          <span>Try again</span>
+        </button>
+        <button
+          onClick={signOut}
+          disabled={isSigningOut}
+          className="h-9 px-4 rounded-lg border border-[#2A2A2A] hover:border-destructive hover:bg-destructive/10 text-muted-foreground hover:text-destructive text-[13px] font-semibold flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {isSigningOut ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <LogOut className="w-3.5 h-3.5" />
+          )}
+          <span>{isSigningOut ? "Signing out..." : "Sign Out"}</span>
+        </button>
+      </div>
     </div>
-    <div className="space-y-1.5 max-w-sm">
-      <h2 className="text-base font-bold text-[#EDEDEE]">Couldn't load your workspaces</h2>
-      <p className="text-[13px] text-muted-foreground leading-relaxed">
-        {message || "We couldn't reach the workspace service. Check your connection and try again."}
-      </p>
-    </div>
-    <button
-      onClick={onRetry}
-      className="h-9 px-4 rounded-lg bg-[#7C6AF7] hover:bg-[#6b58f6] text-white text-[13px] font-semibold flex items-center gap-2 cursor-pointer transition-colors"
-    >
-      <RotateCcw className="w-3.5 h-3.5" />
-      <span>Try again</span>
-    </button>
-  </div>
-);
+  );
+};
 
 /**
  * Guard for every workspace-scoped route.

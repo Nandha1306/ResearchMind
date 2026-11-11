@@ -43,12 +43,22 @@ export const refresh = asyncHandler(
   }
 );
 
-/** Logout user by revoking refresh token. */
+/**
+ * Revoke a refresh token belonging to the authenticated caller.
+ *
+ * The route is behind `authenticate`, so `req.user` is always populated here.
+ * Revocation is scoped to that user: presenting someone else's refresh token
+ * deletes nothing. The response is intentionally identical either way, so the
+ * endpoint cannot be used to probe whether a given token exists.
+ */
 export const logout = asyncHandler(
-  async (req: Request, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
     const { refreshToken } = req.body;
 
-    const result = await logoutUser(refreshToken);
+    const result = await logoutUser(
+      refreshToken,
+      req.user!.userId
+    );
 
     res.status(200).json({
       success: true,

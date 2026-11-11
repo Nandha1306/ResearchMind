@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+const dueDateSchema = z
+  .string()
+  .datetime({ message: "dueDate must be a valid ISO date time string" })
+  .nullable()
+  .optional();
+
 export const createTaskSchema = z.object({
   boardId: z.string().min(1, "Board ID is required"),
   title: z.string().min(1, "Task title is required"),
@@ -7,7 +13,7 @@ export const createTaskSchema = z.object({
   status: z.enum(["todo", "in_progress", "done"]).optional(),
   priority: z.enum(["low", "medium", "high"]).optional(),
   assigneeId: z.string().nullable().optional(),
-  dueDate: z.string().nullable().optional(),
+  dueDate: dueDateSchema,
   parentTaskId: z.string().nullable().optional(),
 });
 
@@ -18,7 +24,7 @@ export const updateTaskSchema = z.object({
   status: z.enum(["todo", "in_progress", "done"]).optional(),
   priority: z.enum(["low", "medium", "high"]).optional(),
   assigneeId: z.string().nullable().optional(),
-  dueDate: z.string().nullable().optional(),
+  dueDate: dueDateSchema,
   parentTaskId: z.string().nullable().optional(),
 });
 
@@ -29,7 +35,7 @@ export const bulkCreateTaskItemSchema = z.object({
   status: z.enum(["todo", "in_progress", "done"]).optional(),
   priority: z.enum(["low", "medium", "high"]).optional(),
   assigneeId: z.string().nullable().optional(),
-  dueDate: z.string().datetime().nullable().optional(),
+  dueDate: dueDateSchema,
   parentTaskId: z.string().nullable().optional(),
 });
 

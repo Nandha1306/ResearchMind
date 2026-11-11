@@ -12,7 +12,7 @@ export interface CreateAiSessionInput {
 /** Save completed RAG query session into MongoDB. */
 export const saveAiSession = async (
   input: CreateAiSessionInput
-): Promise<string> => {
+): Promise<string | null> => {
   try {
     const session = await AISession.create({
       workspaceId: input.workspaceId,
@@ -26,7 +26,7 @@ export const saveAiSession = async (
     return session._id.toString();
   } catch (error) {
     console.error("Failed to save AI session to MongoDB:", error);
-    return `session_${Date.now()}`;
+    return null;
   }
 };
 

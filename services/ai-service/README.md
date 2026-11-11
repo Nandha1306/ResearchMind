@@ -55,7 +55,7 @@ WORKSPACE_SERVICE_URL=http://localhost:5002
 
 XAI_API_KEY=<your_groq_or_xai_key>
 XAI_MODEL=openai/gpt-oss-120b
-MONGO_URI=mongodb://admin:password@localhost:27017/researchmind_ai?authSource=admin
+MONGO_URI=mongodb://<user>:<password>@localhost:27017/researchmind_ai?authSource=admin
 ```
 
 ---

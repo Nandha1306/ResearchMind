@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { create, getAll, join, checkMembership} from "../controllers/workspace.controller";
+import { create, getAll, join, checkMembership, getById, getMembers } from "../controllers/workspace.controller";
 
 import { validate } from "../../../../packages/validation/validation";
 import { createWorkspaceSchema , joinWorkspaceSchema } from "../../../../packages/validation/schemas/workspace.schema";
@@ -31,6 +31,20 @@ router.get(
   "/:workspaceId/membership",
   authenticate,
   checkMembership
+);
+
+/** Get workspace detail. */
+router.get(
+  "/:workspaceId",
+  authenticate,
+  getById
+);
+
+/** Get workspace members. */
+router.get(
+  "/:workspaceId/members",
+  authenticate,
+  getMembers
 );
 
 export default router;

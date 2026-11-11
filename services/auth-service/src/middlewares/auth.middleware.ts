@@ -1,6 +1,15 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { requireSecret } from "../../../../packages/shared/config/secrets";
+
+/*
+ * Resolved once at module load so a service that imports this middleware
+ * refuses to boot without a valid signing key, rather than accepting tokens
+ * signed with a hardcoded default. This module is shared by ai-service,
+ * document-service and task-service as well as auth-service.
+ */
+const ACCESS_SECRET = requireSecret("JWT_ACCESS_SECRET");
 
 export interface AuthRequest extends Request {
   user?: {
@@ -26,12 +35,14 @@ export const authenticate = (
   }
 
   const token = authHeader.split(" ")[1];
-  const jwtSecret = process.env.JWT_ACCESS_SECRET || "researchmind_access_secret";
+  const jwtSecret = ACCESS_SECRET;
 
   try {
     const decoded = jwt.verify(
       token,
-      jwtSecret
+      jwtSecret,
+      // Pinned: without this, jsonwebtoken honours the token's own `alg` header.
+      { algorithms: ["HS256"] }
     ) as {
       userId: string;
     };

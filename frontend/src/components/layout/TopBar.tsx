@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useAuthStore } from "../../store/auth.store";
 import { useWorkspaceStore } from "../../store/workspace.store";
+import { useSignOut } from "../../hooks/useSignOut";
 import {
   Menu,
   Search,
@@ -11,6 +12,8 @@ import {
   ChevronRight,
   PanelLeftClose,
   PanelLeft,
+  LogOut,
+  Loader2,
 } from "lucide-react";
 
 interface TopBarProps {
@@ -31,6 +34,9 @@ export const TopBar: React.FC<TopBarProps> = ({
   const location = useLocation();
   const { user } = useAuthStore();
   const { currentWorkspace } = useWorkspaceStore();
+  const { signOut, isSigningOut } = useSignOut();
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("theme");
     return saved === "light" ? "light" : "dark";
@@ -49,6 +55,27 @@ export const TopBar: React.FC<TopBarProps> = ({
   const toggleTheme = () => {
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
   };
+
+  // Close the account menu on an outside click or Escape.
+  useEffect(() => {
+    if (!isUserMenuOpen) return;
+
+    const handlePointerDown = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsUserMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isUserMenuOpen]);
 
   // Compute page label for breadcrumb
   const getPageLabel = () => {
@@ -164,9 +191,52 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-error rounded-full" />
         </button>
 
-        {/* Mini profile avatar */}
-        <div className="w-8 h-8 rounded-full bg-accent-bg text-accent-primary border border-accent-primary/20 text-[11px] font-bold flex items-center justify-center select-none cursor-pointer shrink-0 ml-1">
-          {userInitials}
+        {/* Account menu */}
+        <div className="relative ml-1 shrink-0" ref={userMenuRef}>
+          <button
+            type="button"
+            onClick={() => setIsUserMenuOpen((open) => !open)}
+            aria-haspopup="menu"
+            aria-expanded={isUserMenuOpen}
+            aria-label={user?.name ? `Account menu for ${user.name}` : "Account menu"}
+            className="w-8 h-8 rounded-full bg-accent-bg text-accent-primary border border-accent-primary/20 text-[11px] font-bold flex items-center justify-center select-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
+          >
+            {userInitials}
+          </button>
+
+          {isUserMenuOpen && (
+            <div
+              role="menu"
+              aria-label="Account"
+              className="absolute right-0 top-full mt-2 w-56 bg-bg-elevated border border-border-default rounded-xl shadow-2xl py-1.5 z-50"
+            >
+              <div className="px-3 py-2 border-b border-border-subtle">
+                <p className="text-[12px] font-semibold text-text-primary truncate">
+                  {user?.name || "Signed in"}
+                </p>
+                {user?.email && (
+                  <p className="text-[11px] text-text-secondary truncate mt-0.5">
+                    {user.email}
+                  </p>
+                )}
+              </div>
+
+              <button
+                type="button"
+                role="menuitem"
+                onClick={signOut}
+                disabled={isSigningOut}
+                className="w-full mt-1 px-3 py-2 text-left text-[12px] font-medium text-text-secondary hover:text-destructive hover:bg-destructive/10 flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:bg-destructive/10 focus:text-destructive"
+              >
+                {isSigningOut ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <LogOut className="w-3.5 h-3.5" />
+                )}
+                <span>{isSigningOut ? "Signing out..." : "Sign Out"}</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </header>

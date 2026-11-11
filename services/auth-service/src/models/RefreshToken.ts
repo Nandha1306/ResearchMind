@@ -4,14 +4,11 @@ import mongoose, { Document, Schema } from "mongoose";
  * Represents a refresh token document.
  *
  * Each login session gets its own refresh token.
- * This allows:
- * - Logout
- * - Session management
- * - Token revocation
+ * Stores SHA-256 hash of the refresh token string for security.
  */
 export interface IRefreshToken extends Document {
   userId: mongoose.Types.ObjectId;
-  token: string;
+  tokenHash: string;
   expiresAt: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -29,17 +26,17 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
+      index: true,
     },
 
     /**
-     * The actual refresh token string.
-     *
-     * Later we can store a hashed version
-     * for additional security.
+     * SHA-256 hash of the refresh token string.
      */
-    token: {
+    tokenHash: {
       type: String,
       required: true,
+      unique: true,
+      index: true,
     },
 
     /**
@@ -50,28 +47,19 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
       required: true,
     },
   },
-
   {
     timestamps: true,
   }
 );
 
 /**
- * Automatically remove expired refresh tokens.
- *
- * MongoDB TTL Index:
- * When expiresAt passes, MongoDB deletes
- * the document automatically.
+ * Automatically remove expired refresh tokens via MongoDB TTL Index.
  */
 refreshTokenSchema.index(
   { expiresAt: 1 },
   { expireAfterSeconds: 0 }
 );
 
-/**
- * MongoDB collection:
- * refreshtokens
- */
 export const RefreshToken = mongoose.model<IRefreshToken>(
   "RefreshToken",
   refreshTokenSchema

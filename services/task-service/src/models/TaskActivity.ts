@@ -4,7 +4,19 @@ export interface TaskActivityDocument {
   workspaceId: string;
   taskId: Schema.Types.ObjectId | string;
   userId: string;
-  action: "created" | "status_changed" | "assigned" | "due_date_set" | "priority_changed" | "comment";
+  action:
+    | "created"
+    | "status_changed"
+    | "assigned"
+    | "unassigned"
+    | "due_date_set"
+    | "due_date_changed"
+    | "due_date_removed"
+    | "priority_changed"
+    | "title_changed"
+    | "description_changed"
+    | "board_changed"
+    | "comment";
   payload?: Record<string, any>;
   createdAt?: Date;
   updatedAt?: Date;
@@ -29,7 +41,20 @@ const taskActivitySchema = new Schema(
     },
     action: {
       type: String,
-      enum: ["created", "status_changed", "assigned", "due_date_set", "priority_changed", "comment"],
+      enum: [
+        "created",
+        "status_changed",
+        "assigned",
+        "unassigned",
+        "due_date_set",
+        "due_date_changed",
+        "due_date_removed",
+        "priority_changed",
+        "title_changed",
+        "description_changed",
+        "board_changed",
+        "comment",
+      ],
       required: true,
     },
     payload: {

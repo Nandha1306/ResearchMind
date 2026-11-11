@@ -58,8 +58,8 @@ Mounted under `/api/auth` (port 5001, proxied through API Gateway on port 5000):
 | `PORT` | Service listening port | `5001` | Yes |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/researchmind-auth` | Yes |
 | `REDIS_URL` | Redis connection URL | `redis://127.0.0.1:6379` | Yes |
-| `JWT_ACCESS_SECRET` | Secret key for signing access tokens | `researchmind_access_secret` | Yes |
-| `JWT_REFRESH_SECRET` | Secret key for signing refresh tokens | `researchmind_refresh_secret` | Yes |
+| `JWT_ACCESS_SECRET` | Secret key for signing access tokens | _(none — required)_ | Yes |
+| `JWT_REFRESH_SECRET` | Secret key for signing refresh tokens | _(none — required)_ | Yes |
 
 ---
 

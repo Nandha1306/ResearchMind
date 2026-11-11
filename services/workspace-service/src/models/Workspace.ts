@@ -35,6 +35,7 @@ const workspaceSchema = new Schema<IWorkspace>(
     members: {
       type: [String],
       default: [],
+      index: true,
     },
   },
   {

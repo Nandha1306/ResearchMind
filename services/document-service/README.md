@@ -64,9 +64,9 @@ All document endpoints are mounted under `/api/documents` (default port 5003, pr
 | `PORT` | Service listening port | `5003` | Yes |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/researchmind-documents` | Yes |
 | `REDIS_URL` | Redis server connection URL | `redis://127.0.0.1:6379` | Yes |
-| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | `researchmind_access_secret` | Yes |
-| `CLOUDINARY_CLOUD_NAME` | Cloudinary account cloud name | `qje2tu3s` | Yes |
-| `CLOUDINARY_API_KEY` | Cloudinary API key | `812348284878871` | Yes |
+| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | _(none — required)_ | Yes |
+| `CLOUDINARY_CLOUD_NAME` | Cloudinary account cloud name | `<cloudinary-cloud-name>` | Yes |
+| `CLOUDINARY_API_KEY` | Cloudinary API key | `<cloudinary-api-key>` | Yes |
 | `CLOUDINARY_API_SECRET` | Cloudinary API secret | `<secret>` | Yes |
 | `WORKSPACE_SERVICE_URL` | URL of Workspace Service for membership checks | `http://127.0.0.1:5002` | Yes |
 

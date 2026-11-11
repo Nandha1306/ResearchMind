@@ -37,8 +37,9 @@ export const generateQueryEmbedding = async (
 
       if (is429 && attempt < maxAttempts - 1) {
         attempt++;
-        console.warn(`Voyage AI 429 rate limit hit. Retrying query embedding in 2s (attempt ${attempt}/${maxAttempts})...`);
-        await new Promise((r) => setTimeout(r, 2000));
+        const waitMs = attempt * 15000;
+        console.warn(`Voyage AI 429 rate limit hit. Retrying query embedding in ${waitMs / 1000}s (attempt ${attempt}/${maxAttempts})...`);
+        await new Promise((r) => setTimeout(r, waitMs));
       } else {
         throw err;
       }

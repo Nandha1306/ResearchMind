@@ -21,13 +21,7 @@ interface CreateTaskModalProps {
   onRetryBoards?: () => void;
   /** Board currently shown on the Kanban; preselected for convenience. */
   defaultBoardId?: string;
-  /**
-   * Real workspace members, the only source of assignee IDs.
-   * workspace-service persists `members` as a plain string[] of user IDs while
-   * the shared Workspace type declares WorkspaceMember objects, so accept both
-   * rather than rendering blank options for whichever shape arrives.
-   */
-  members: Array<WorkspaceMember | string>;
+  members: string[];
   onTaskCreated: (task: Task) => void;
 }
 
@@ -107,14 +101,8 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   }, [onClose]);
 
   const assignableMembers = members
-    .map((member) =>
-      typeof member === "string"
-        ? { userId: member, label: member }
-        : { userId: member.userId, label: member.email || member.userId }
-    )
-    .filter((member): member is { userId: string; label: string } =>
-      Boolean(member.userId)
-    );
+    .filter((id): id is string => Boolean(id))
+    .map((userId) => ({ userId, label: userId }));
 
   const hasBoards = boards.length > 0;
   const trimmedTitle = title.trim();

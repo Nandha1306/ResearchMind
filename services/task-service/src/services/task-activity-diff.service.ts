@@ -3,7 +3,13 @@ export type TaskActivityChange = {
     | "status_changed"
     | "priority_changed"
     | "assigned"
-    | "due_date_set";
+    | "unassigned"
+    | "due_date_set"
+    | "due_date_changed"
+    | "due_date_removed"
+    | "title_changed"
+    | "description_changed"
+    | "board_changed";
 
   payload: Record<string, unknown>;
 };
@@ -32,6 +38,7 @@ const sameDate = (
 };
 
 const ACTIVITY_RULES: ActivityRule[] = [
+  // Status change
   (previous, current) => {
     if (previous.status === current.status) {
       return null;
@@ -46,6 +53,7 @@ const ACTIVITY_RULES: ActivityRule[] = [
     };
   },
 
+  // Priority change
   (previous, current) => {
     if (previous.priority === current.priority) {
       return null;
@@ -60,36 +68,116 @@ const ACTIVITY_RULES: ActivityRule[] = [
     };
   },
 
+  // Assignee change or unassignment
   (previous, current) => {
-    if (
-      previous.assigneeId === current.assigneeId ||
-      !current.assigneeId
-    ) {
+    const prevAssignee = previous.assigneeId ? String(previous.assigneeId) : null;
+    const currAssignee = current.assigneeId ? String(current.assigneeId) : null;
+
+    if (prevAssignee === currAssignee) {
       return null;
+    }
+
+    if (!currAssignee && prevAssignee) {
+      return {
+        action: "unassigned",
+        payload: {
+          from: prevAssignee,
+        },
+      };
     }
 
     return {
       action: "assigned",
       payload: {
-        from: previous.assigneeId,
-        to: current.assigneeId,
+        from: prevAssignee,
+        to: currAssignee,
       },
     };
   },
 
+  // Due date set, changed, or removed
   (previous, current) => {
-    if (
-      previous.dueDate != null ||
-      current.dueDate == null ||
-      sameDate(previous.dueDate, current.dueDate)
-    ) {
+    const prevDate = previous.dueDate;
+    const currDate = current.dueDate;
+
+    if (sameDate(prevDate, currDate)) {
+      return null;
+    }
+
+    if (!prevDate && currDate) {
+      return {
+        action: "due_date_set",
+        payload: {
+          dueDate: currDate,
+        },
+      };
+    }
+
+    if (prevDate && !currDate) {
+      return {
+        action: "due_date_removed",
+        payload: {
+          previousDueDate: prevDate,
+        },
+      };
+    }
+
+    return {
+      action: "due_date_changed",
+      payload: {
+        from: prevDate,
+        to: currDate,
+      },
+    };
+  },
+
+  // Title change
+  (previous, current) => {
+    if (!current.title || previous.title === current.title) {
       return null;
     }
 
     return {
-      action: "due_date_set",
+      action: "title_changed",
       payload: {
-        dueDate: current.dueDate,
+        from: previous.title,
+        to: current.title,
+      },
+    };
+  },
+
+  // Description change
+  (previous, current) => {
+    const prevDesc = previous.description || "";
+    const currDesc = current.description || "";
+
+    if (prevDesc === currDesc) {
+      return null;
+    }
+
+    return {
+      action: "description_changed",
+      payload: {
+        from: prevDesc,
+        to: currDesc,
+      },
+    };
+  },
+
+  // Board change
+  (previous, current) => {
+    const prevBoard = previous.boardId ? String(previous.boardId) : null;
+    const currBoard = current.boardId ? String(current.boardId) : null;
+
+    if (!currBoard || prevBoard === currBoard) {
+      return null;
+    }
+
+    return {
+      action: "board_changed",
+      payload: {
+        from: prevBoard,
+        to: currBoard,
       },
     };
   },

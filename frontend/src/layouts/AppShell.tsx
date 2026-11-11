@@ -21,7 +21,7 @@ export const AppShell: React.FC = () => {
       if (width < 768) {
         setIsSidebarCollapsed(true);
         setIsRightPanelOpen(false);
-      } else if (width < 1280) {
+      } else if (width < 1024) {
         setIsSidebarCollapsed(true);
         setIsRightPanelOpen(false);
       } else {
@@ -43,7 +43,7 @@ export const AppShell: React.FC = () => {
   const leftSidebarPadding = isSidebarCollapsed ? "md:pl-12" : "md:pl-60";
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-primary transition-colors flex flex-col font-sans">
+    <div className="h-screen h-[100dvh] w-full bg-bg-base text-text-primary transition-colors flex flex-col font-sans overflow-hidden">
       {/* 1. Desktop Sidebar */}
       <div className="hidden md:block">
         <Sidebar
@@ -81,7 +81,7 @@ export const AppShell: React.FC = () => {
       )}
 
       {/* 3. Main App Container */}
-      <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${leftSidebarPadding}`}>
+      <div className={`flex-1 flex flex-col min-w-0 min-h-0 h-full transition-all duration-300 ${leftSidebarPadding}`}>
         {/* Topbar */}
         <TopBar
           isSidebarCollapsed={isSidebarCollapsed}
@@ -92,15 +92,15 @@ export const AppShell: React.FC = () => {
         />
 
         {/* Outer body: Main page content + Right Panel */}
-        <div className="flex-1 flex flex-row min-h-[calc(100vh-3.5rem)] overflow-hidden relative">
+        <div className="flex-1 flex flex-row min-h-0 h-[calc(100vh-3.5rem)] overflow-hidden relative">
           
-          {/* Main Outlet Container */}
-          <main className="flex-1 overflow-y-auto no-scrollbar flex flex-col min-w-0">
+          {/* Main Outlet Container (Only this section scrolls) */}
+          <main className="flex-1 overflow-y-auto h-full min-h-0 no-scrollbar flex flex-col min-w-0">
             <Outlet />
           </main>
 
-          {/* Desktop Right Context Panel (Inline side-by-side) */}
-          <div className="hidden xl:block border-l border-border-default select-none">
+          {/* Desktop Right Context Panel (Static sidebar pinned to viewport) */}
+          <div className="hidden lg:flex lg:flex-col border-l border-border-default select-none shrink-0 h-full">
             <RightContextPanel
               isVisible={isRightPanelOpen}
               onClose={() => setIsRightPanelOpen(false)}
@@ -110,15 +110,15 @@ export const AppShell: React.FC = () => {
           {/* Tablet & Mobile Right Panel Drawer Overlay */}
           {isRightPanelOpen && (
             <div 
-              className="fixed inset-0 bg-black/60 z-40 xl:hidden transition-opacity duration-200"
+              className="fixed inset-0 bg-black/60 z-40 lg:hidden transition-opacity duration-200"
               onClick={() => setIsRightPanelOpen(false)}
             >
               <div 
-                className="absolute right-0 top-0 bottom-0 w-80 bg-bg-surface border-l border-border-default h-full shadow-2xl animate-in slide-in-from-right duration-200"
+                className="absolute right-0 top-0 bottom-0 w-80 bg-bg-surface border-l border-border-default h-full shadow-2xl animate-in slide-in-from-right duration-200 flex flex-col"
                 onClick={(e) => e.stopPropagation()}
               >
                 {/* Header within overlay to allow closing */}
-                <div className="h-14 flex items-center justify-between px-4 border-b border-border-default bg-bg-surface">
+                <div className="h-14 flex items-center justify-between px-4 border-b border-border-default bg-bg-surface shrink-0">
                   <span className="text-xs font-bold uppercase tracking-wider text-text-secondary">
                     Workspace Insight Context
                   </span>
@@ -129,7 +129,7 @@ export const AppShell: React.FC = () => {
                     <X className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <div className="h-[calc(100vh-3.5rem)]">
+                <div className="flex-1 min-h-0">
                   <RightContextPanel
                     isVisible={true}
                     onClose={() => setIsRightPanelOpen(false)}

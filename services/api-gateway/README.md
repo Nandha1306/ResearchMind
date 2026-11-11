@@ -63,7 +63,7 @@ api-gateway/
 | `WORKSPACE_SERVICE_URL` | Downstream Workspace Service URL | `http://127.0.0.1:5002` | Yes |
 | `DOCUMENT_SERVICE_URL` | Downstream Document Service URL | `http://127.0.0.1:5003` | Yes |
 | `AI_SERVICE_URL` | Downstream AI Service URL | `http://127.0.0.1:5006` | Yes |
-| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | `researchmind_access_secret` | Yes |
+| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | _(none — required)_ | Yes |
 
 ---
 

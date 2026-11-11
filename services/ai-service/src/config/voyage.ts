@@ -6,7 +6,7 @@ if (!apiKey) {
   throw new Error("VOYAGE_API_KEY is not configured");
 }
 
-export const VOYAGE_MODEL = process.env.VOYAGE_MODEL || "voyage-4";
+export const VOYAGE_MODEL = process.env.VOYAGE_MODEL || "voyage-3";
 
 export const VOYAGE_EMBEDDING_DIMENSION = Number(
   process.env.VOYAGE_EMBEDDING_DIMENSION || 1024

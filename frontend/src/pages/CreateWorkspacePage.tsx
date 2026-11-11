@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Brain, Sun, Moon, LogOut, Building2, UserPlus, KeyRound, Plus, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { useAuthStore } from "../store/auth.store";
+import { useSignOut } from "../hooks/useSignOut";
 import { Button } from "../components/ui/button";
 
 export const CreateWorkspacePage: React.FC = () => {
@@ -12,7 +13,11 @@ export const CreateWorkspacePage: React.FC = () => {
   const wsDescInputId = useId();
 
   const { createWorkspace, joinWorkspace, fetchWorkspaces } = useWorkspaceStore();
-  const { logout, user } = useAuthStore();
+  const { user } = useAuthStore();
+  // Same canonical sign-out as the TopBar account menu: this page sits outside
+  // AppShell (it is the onboarding route) so it needs its own control, but the
+  // teardown must be identical.
+  const { signOut, isSigningOut } = useSignOut();
 
   // Active Option Tab: 'join' | 'create'
   const [activeMode, setActiveMode] = useState<"join" | "create">("join");
@@ -131,14 +136,16 @@ export const CreateWorkspacePage: React.FC = () => {
           </button>
 
           <button
-            onClick={() => {
-              logout();
-              navigate("/login");
-            }}
-            className="px-3 h-8 rounded-lg border border-border-default hover:border-destructive hover:bg-destructive/10 text-text-secondary hover:text-destructive text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
+            onClick={signOut}
+            disabled={isSigningOut}
+            className="px-3 h-8 rounded-lg border border-border-default hover:border-destructive hover:bg-destructive/10 text-text-secondary hover:text-destructive text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
+            {isSigningOut ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <LogOut className="w-3.5 h-3.5" />
+            )}
+            <span>{isSigningOut ? "Signing out..." : "Sign Out"}</span>
           </button>
         </div>
       </header>

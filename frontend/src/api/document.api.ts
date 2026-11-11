@@ -28,4 +28,17 @@ export const documentApi = {
     );
     return response.data.data;
   },
+
+  /** Delete a document by ID. */
+  deleteDocument: async (documentId: string): Promise<void> => {
+    await axiosInstance.delete(`/documents/${documentId}`);
+  },
+
+  /** Re-index a failed document. */
+  reindexDocument: async (documentId: string): Promise<DocumentItem> => {
+    const response = await axiosInstance.post<DocumentApiResponse<DocumentItem>>(
+      `/documents/${documentId}/reindex`
+    );
+    return response.data.data;
+  },
 };

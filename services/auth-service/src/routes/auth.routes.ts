@@ -4,7 +4,7 @@ import { register, login, refresh, logout } from "../controllers/auth.controller
 import { me } from "../controllers/auth.controller";
 import { authenticate } from "../middlewares/auth.middleware";
 import { validate } from "../../../../packages/validation/validation";
-import { registerSchema, loginSchema } from "../../../../packages/validation/schemas/auth.schema";
+import { registerSchema, loginSchema, logoutSchema } from "../../../../packages/validation/schemas/auth.schema";
 
 const router = Router();
 
@@ -24,7 +24,12 @@ router.post(
 router.post("/refresh", refresh);
 /** Get currently authenticated user. */
 router.get("/me", authenticate, me);
-/** Logout the current user. */
-router.post("/logout", logout);
+/** Revoke the caller's own refresh token. */
+router.post(
+  "/logout",
+  authenticate,
+  validate(logoutSchema),
+  logout
+);
 
 export default router;

@@ -1,7 +1,13 @@
-/** Generate a workspace invite code. */
+import crypto from "crypto";
+
+const ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+
+/** Generate an 8-character cryptographic workspace invite code. */
 export const generateInviteCode = (): string => {
-  return Math.random()
-    .toString(36)
-    .substring(2, 10)
-    .toUpperCase();
+  const bytes = crypto.randomBytes(8);
+  let code = "";
+  for (let i = 0; i < 8; i++) {
+    code += ALPHABET[bytes[i] % ALPHABET.length];
+  }
+  return code;
 };

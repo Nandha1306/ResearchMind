@@ -12,8 +12,17 @@ export const authApi = {
     return response.data;
   },
 
-  logout: async (): Promise<{ success: boolean }> => {
-    const response = await axiosInstance.post<{ success: boolean }>("/auth/logout");
+  /**
+   * Revoke a refresh token server-side.
+   *
+   * The token MUST be sent in the body -- auth-service deletes the matching
+   * RefreshToken document by value, so calling this with no body returns 200
+   * while revoking nothing.
+   */
+  logout: async (refreshToken: string): Promise<{ success: boolean }> => {
+    const response = await axiosInstance.post<{ success: boolean }>("/auth/logout", {
+      refreshToken,
+    });
     return response.data;
   },
 

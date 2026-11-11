@@ -12,6 +12,12 @@ export const connectDB = async () => {
     }
 
     console.log("Task Service MongoDB Connected");
+
+    if (process.env.NODE_ENV !== "production") {
+      await mongoose.connection.syncIndexes().catch((err) => {
+        console.warn("[task-service] Index sync warning:", err.message);
+      });
+    }
   } catch (error: any) {
     console.error("Task Service MongoDB Connection Failed:", error?.message);
     process.exit(1);

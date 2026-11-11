@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useAuthStore } from "../../store/auth.store";
 import { useWorkspaceStore } from "../../store/workspace.store";
 import { CreateWorkspaceModal } from "../workspace/CreateWorkspaceModal";
+import { JoinWorkspaceModal } from "../workspace/JoinWorkspaceModal";
 import {
   Brain,
   LayoutDashboard,
@@ -17,6 +18,7 @@ import {
   Settings,
   Plus,
   ChevronsUpDown,
+  LogIn,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -31,12 +33,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse 
   const { workspaces, currentWorkspace, setCurrentWorkspace } = useWorkspaceStore();
   const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
   const [isCreateWorkspaceModalOpen, setIsCreateWorkspaceModalOpen] = useState(false);
+  const [isJoinWorkspaceModalOpen, setIsJoinWorkspaceModalOpen] = useState(false);
 
   // Active workspace role lookup
   const userRole = React.useMemo(() => {
-    if (!currentWorkspace || !user) return "Lead";
-    const member = currentWorkspace.members?.find((m) => m.userId === user.id);
-    return member?.role || "Lead";
+    if (!currentWorkspace || !user) return "Member";
+    return currentWorkspace.ownerId === user.id ? "Owner" : "Member";
   }, [currentWorkspace, user]);
 
   const initials = user?.name
@@ -147,7 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse 
                     </button>
                   ))}
                   
-                  <div className="border-t border-border-subtle mt-1.5 pt-1.5 px-2">
+                  <div className="border-t border-border-subtle mt-1.5 pt-1.5 px-2 space-y-1">
                     <button
                       onClick={() => {
                         setShowWorkspaceDropdown(false);
@@ -157,6 +159,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse 
                     >
                       <Plus className="w-3.5 h-3.5" />
                       <span>New Workspace</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowWorkspaceDropdown(false);
+                        setIsJoinWorkspaceModalOpen(true);
+                      }}
+                      className="w-full h-8 flex items-center justify-center gap-1.5 rounded bg-bg-surface hover:bg-bg-elevated/80 border border-border-default text-text-primary text-[11px] font-semibold transition-colors cursor-pointer"
+                    >
+                      <LogIn className="w-3.5 h-3.5" />
+                      <span>Join Workspace</span>
                     </button>
                   </div>
                 </div>
@@ -290,6 +302,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isCollapsed, onToggleCollapse 
       <CreateWorkspaceModal
         isOpen={isCreateWorkspaceModalOpen}
         onClose={() => setIsCreateWorkspaceModalOpen(false)}
+      />
+
+      {/* Join Workspace Modal */}
+      <JoinWorkspaceModal
+        isOpen={isJoinWorkspaceModalOpen}
+        onClose={() => setIsJoinWorkspaceModalOpen(false)}
       />
     </aside>
   );

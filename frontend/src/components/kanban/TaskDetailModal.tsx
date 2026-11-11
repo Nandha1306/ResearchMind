@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useId } from "react";
 import { getTaskById, getTaskActivities, getWorkspaceTasks, updateTask, createTask, deleteTask } from "../../api/task.api";
+import { workspaceApi, type WorkspaceMember } from "../../api/workspace.api";
 import type { Board, Task, TaskActivity } from "../../types/task.types";
 import { Button } from "../ui/button";
 import {
@@ -50,6 +51,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [task, setTask] = useState<Task | null>(null);
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<TaskActivity[]>([]);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
 
   // Form Fields State
   const [title, setTitle] = useState<string>("");
@@ -121,14 +123,16 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           .catch(() => setActivities([]))
           .finally(() => setActivitiesLoading(false));
 
-        // 3. Fetch Subtasks
-        getWorkspaceTasks(workspaceId)
-          .then((allTasks) => {
-            const children = allTasks.filter((t) => t.parentTaskId === taskId);
-            setSubtasks(children);
-          })
+        // 3. Fetch Subtasks server-side
+        getWorkspaceTasks(workspaceId, undefined, taskId)
+          .then((children) => setSubtasks(children))
           .catch(() => setSubtasks([]))
           .finally(() => setSubtasksLoading(false));
+
+        // 4. Fetch Workspace Members
+        workspaceApi.getWorkspaceMembers(workspaceId)
+          .then(setMembers)
+          .catch(() => setMembers([]));
 
       } catch (err: any) {
         if (err.response?.status === 404) {
@@ -320,7 +324,25 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
   // Delete Task Handler
   const handleDeleteTask = async () => {
-    if (!workspaceId || !taskId || !window.confirm("Are you sure you want to delete this task?")) return;
+    if (!workspaceId || !taskId) return;
+
+    /*
+     * Deleting a task cascades: its whole subtask subtree and every activity
+     * row go with it. The old prompt just asked "Are you sure?", which gave no
+     * hint that other cards would disappear too. Name the consequence.
+     *
+     * (Replacing window.confirm with a proper in-app dialog is A11Y-001.)
+     */
+    const subtaskCount = subtasks.length;
+    const confirmMessage = subtaskCount > 0
+      ? `Delete "${task?.title ?? "this task"}"?
+
+This will also permanently delete its ${subtaskCount} subtask${subtaskCount === 1 ? "" : "s"} and the activity history for all of them. This cannot be undone.`
+      : `Delete "${task?.title ?? "this task"}"?
+
+Its activity history will be permanently deleted too. This cannot be undone.`;
+
+    if (!window.confirm(confirmMessage)) return;
 
     setDeletingTask(true);
     setError(null);
@@ -519,32 +541,27 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
 
                 {/* Assignee Field Info */}
                 <div className="space-y-1">
-                  <span className="text-[11px] font-semibold text-text-secondary block flex items-center gap-1">
+                  <label htmlFor="assignee-select" className="text-[11px] font-semibold text-text-secondary block flex items-center gap-1">
                     <User className="w-3 h-3 text-[#7C6AF7]" />
-                    Assignee ID
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      readOnly
-                      value={assigneeId || "Unassigned"}
-                      className="w-full p-1.5 rounded-lg bg-bg-surface/50 border border-border-default text-text-secondary text-xs truncate"
-                    />
-                    {assigneeId && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setAssigneeId(null);
-                          setHasUnsavedChanges(true);
-                        }}
-                        className="h-7 text-[10px] px-2 text-destructive hover:bg-destructive/10"
-                      >
-                        Clear
-                      </Button>
-                    )}
-                  </div>
+                    Assignee
+                  </label>
+                  <select
+                    id="assignee-select"
+                    value={assigneeId || ""}
+                    onChange={(e) => {
+                      const val = e.target.value || null;
+                      setAssigneeId(val);
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-full p-2 rounded-lg bg-bg-surface border border-border-default text-text-primary text-xs focus:outline-none focus:ring-2 focus:ring-[#7C6AF7]/50"
+                  >
+                    <option value="">Unassigned</option>
+                    {members.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name || m.email || m.id}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Timestamps Info */}

@@ -1,4 +1,4 @@
-import axiosInstance, { API_URL } from "./axios";
+import axiosInstance, { API_URL, ensureFreshToken } from "./axios";
 import { useAuthStore } from "../store/auth.store";
 import type { AISessionHistoryItem } from "../utils/sse";
 import type { MeetingSummary, SummarizeMeetingRequest } from "../types/task.types";
@@ -23,13 +23,9 @@ export const streamAiQuery = async (
   request: AIQueryRequest,
   signal?: AbortSignal
 ): Promise<ReadableStreamDefaultReader<Uint8Array>> => {
-  const token = useAuthStore.getState().accessToken;
+  let token = await ensureFreshToken();
 
-  if (!token) {
-    throw new Error("Authentication required. Please sign in to query workspace documents.");
-  }
-
-  const response = await fetch(`${API_URL}/ai/query`, {
+  let response = await fetch(`${API_URL}/ai/query`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -38,6 +34,24 @@ export const streamAiQuery = async (
     body: JSON.stringify(request),
     signal,
   });
+
+  // Handle 401 Unauthorized by attempting a token refresh and single stream retry
+  if (response.status === 401) {
+    try {
+      token = await ensureFreshToken(true);
+      response = await fetch(`${API_URL}/ai/query`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(request),
+        signal,
+      });
+    } catch {
+      throw new Error("Your session has expired. Please sign in again.");
+    }
+  }
 
   if (!response.ok) {
     let errorMessage = `HTTP ${response.status}: Failed to initialize AI query stream`;

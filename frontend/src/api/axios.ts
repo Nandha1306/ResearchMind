@@ -1,7 +1,8 @@
 import axios from "axios";
 import { useAuthStore } from "../store/auth.store";
+import { clearClientSession } from "../lib/session";
 
-export const API_URL = "http://localhost:5000/api";
+export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 
 const axiosInstance = axios.create({
   baseURL: API_URL,
@@ -65,11 +66,14 @@ axiosInstance.interceptors.response.use(
       originalRequest._retry = true;
       isRefreshing = true;
 
-      const refreshToken = useAuthStore.getState().refreshToken;
+      const { refreshToken, sessionId } = useAuthStore.getState();
 
       if (!refreshToken) {
-        useAuthStore.getState().logout();
+        // Nothing to refresh with. Tear the whole client session down rather
+        // than only auth state, so no workspace or cached data outlives it.
+        clearClientSession();
         isRefreshing = false;
+        processQueue(error, null);
         return Promise.reject(error);
       }
 
@@ -77,6 +81,14 @@ axiosInstance.interceptors.response.use(
         const response = await axios.post(`${API_URL}/auth/refresh`, {
           refreshToken,
         });
+
+        // The user may have signed out (or signed in as someone else) while
+        // this refresh was on the wire. Writing the tokens back now would
+        // resurrect the previous session, so drop the result instead.
+        if (useAuthStore.getState().sessionId !== sessionId) {
+          processQueue(error, null);
+          return Promise.reject(error);
+        }
 
         const newAccessToken = response.data.data.accessToken;
 
@@ -96,8 +108,12 @@ axiosInstance.interceptors.response.use(
         return axiosInstance(originalRequest);
       } catch (refreshError: any) {
         processQueue(refreshError, null);
-        // Refresh token failed, logout user
-        useAuthStore.getState().logout();
+        // Refresh failed. Only tear down if this is still the same session --
+        // an explicit sign-out has already done the teardown, and repeating it
+        // here could clobber a session the user has since started.
+        if (useAuthStore.getState().sessionId === sessionId) {
+          clearClientSession();
+        }
         return Promise.reject(refreshError);
       } finally {
         isRefreshing = false;
@@ -107,5 +123,43 @@ axiosInstance.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+/**
+ * Ensures a valid access token is available.
+ * If token is missing or refresh is explicitly requested, attempts a refresh call.
+ */
+export const ensureFreshToken = async (forceRefresh = false): Promise<string> => {
+  const { accessToken, refreshToken, sessionId } = useAuthStore.getState();
+
+  if (accessToken && !forceRefresh) {
+    return accessToken;
+  }
+
+  if (!refreshToken) {
+    clearClientSession();
+    throw new Error("Session expired. Please sign in again.");
+  }
+
+  try {
+    const response = await axios.post(`${API_URL}/auth/refresh`, {
+      refreshToken,
+    });
+
+    if (useAuthStore.getState().sessionId !== sessionId) {
+      throw new Error("Session changed during refresh.");
+    }
+
+    const newAccessToken = response.data.data.accessToken;
+    const newRefreshToken = response.data.data.refreshToken ?? refreshToken;
+
+    useAuthStore.getState().setTokens(newAccessToken, newRefreshToken);
+    return newAccessToken;
+  } catch (err) {
+    if (useAuthStore.getState().sessionId === sessionId) {
+      clearClientSession();
+    }
+    throw new Error("Session expired. Please sign in again.");
+  }
+};
 
 export default axiosInstance;

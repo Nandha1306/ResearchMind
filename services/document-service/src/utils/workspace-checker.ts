@@ -1,5 +1,3 @@
-import { Workspace } from "../../../workspace-service/src/models/Workspace";
-
 /** Verify whether a user belongs to a specific workspace. */
 export const checkWorkspaceMembership = async (
   workspaceId: string,
@@ -26,17 +24,9 @@ export const checkWorkspaceMembership = async (
         }
       }
     } catch (err) {
-      // Fall through to database check if service endpoint is unreachable
+      // Endpoint unreachable
     }
   }
 
-  try {
-    const workspace = await Workspace.findOne({
-      _id: workspaceId,
-      members: userId,
-    });
-    return Boolean(workspace);
-  } catch (err) {
-    return false;
-  }
+  return false;
 };

@@ -3,7 +3,16 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:gateway": "npm run dev --workspace=api-gateway",
+    "dev:auth": "npm run dev --workspace=auth-service",
+    "dev:workspace": "npm run dev --workspace=workspace-service",
+    "dev:doc": "npm run dev --workspace=document-service",
+    "dev:task": "npm run dev --workspace=task-service",
+    "dev:ai": "npm run dev --workspace=ai-service",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:services": "concurrently -n gateway,auth,workspace,doc,task,ai -c blue,green,yellow,magenta,cyan,red \"npm:dev:gateway\" \"npm:dev:auth\" \"npm:dev:workspace\" \"npm:dev:doc\" \"npm:dev:task\" \"npm:dev:ai\"",
+    "dev": "concurrently -n gateway,auth,workspace,doc,task,ai,frontend -c blue,green,yellow,magenta,cyan,red,bgBlue \"npm:dev:gateway\" \"npm:dev:auth\" \"npm:dev:workspace\" \"npm:dev:doc\" \"npm:dev:task\" \"npm:dev:ai\" \"npm:dev:frontend\"",
+    "test": "npx tsx --test tests/*.test.ts"
   },
   "repository": {
     "type": "git",
@@ -31,6 +40,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/mongoose": "^5.11.96",
-    "@types/morgan": "^1.9.10"
+    "@types/morgan": "^1.9.10",
+    "concurrently": "^10.0.5"
   }
 }

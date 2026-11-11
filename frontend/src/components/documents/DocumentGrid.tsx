@@ -5,11 +5,15 @@ import { DocumentCard } from "./DocumentCard";
 interface DocumentGridProps {
   documents: DocumentItem[];
   onSelectDocument?: (document: DocumentItem) => void;
+  onDeleteDocument?: (document: DocumentItem) => void;
+  onReindexDocument?: (document: DocumentItem) => void;
 }
 
 export const DocumentGrid: React.FC<DocumentGridProps> = ({
   documents,
   onSelectDocument,
+  onDeleteDocument,
+  onReindexDocument,
 }) => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -18,6 +22,8 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           key={doc._id}
           document={doc}
           onSelect={onSelectDocument}
+          onDelete={onDeleteDocument}
+          onReindex={onReindexDocument}
         />
       ))}
     </div>

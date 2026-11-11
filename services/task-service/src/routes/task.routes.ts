@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { authenticate } from "../../../auth-service/src/middlewares/auth.middleware";
+import { authenticate } from "../../../../packages/shared/auth/authenticate";
 import { validate } from "../../../../packages/validation/validation";
 import {
   createTaskSchema,

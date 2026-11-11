@@ -16,13 +16,23 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
 }) => {
   const nameId = useId();
   const descId = useId();
-  const { createWorkspace } = useWorkspaceStore();
+  const { createWorkspace, fetchWorkspaces } = useWorkspaceStore();
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isOpen && !isSubmitting) {
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isSubmitting, onClose]);
 
   if (!isOpen) return null;
 
@@ -45,6 +55,24 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
       });
 
       if (created) {
+        /*
+         * createWorkspace() appends the new workspace locally, which is enough
+         * to render immediately but leaves the list as the only source of
+         * truth until the next guard mount. Reconcile with the server so a
+         * workspace created elsewhere (another tab, a teammate's invite) is
+         * not missing from the switcher.
+         *
+         * Deliberately not awaited: the success message and close animation
+         * must not wait on a network round trip. Failure is non-fatal --
+         * fetchWorkspaces() swallows its own errors into store.error, and the
+         * optimistic append already shows the workspace the user just made.
+         *
+         * Safe for WS-001: after a successful create workspaces.length >= 1,
+         * so the onboarding guard's `isUndecided` stays false and the mounted
+         * dashboard is never torn down to a loading screen.
+         */
+        void fetchWorkspaces();
+
         setSuccessMsg(`Workspace "${created.name}" created successfully!`);
         setTimeout(() => {
           setIsSubmitting(false);
@@ -66,6 +94,9 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-workspace-modal-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget && !isSubmitting) onClose();
+      }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200"
     >
       <div className="bg-bg-surface border border-border-default rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5 text-text-primary">

@@ -57,7 +57,7 @@ Mounted under `/api/workspaces` (default port 5002, proxied through API Gateway 
 |----------|-------------|-------------------|----------|
 | `PORT` | Service listening port | `5002` | Yes |
 | `MONGODB_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/researchmind-workspace` | Yes |
-| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | `researchmind_access_secret` | Yes |
+| `JWT_ACCESS_SECRET` | Secret key for verifying JWT tokens | _(none — required)_ | Yes |
 
 ---
 

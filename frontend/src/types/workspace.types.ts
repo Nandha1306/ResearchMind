@@ -1,6 +1,6 @@
 export interface WorkspaceMember {
   userId: string;
-  role: "Lead" | "Member" | "Advisor" | "Viewer";
+  role?: "Lead" | "Member" | "Advisor" | "Viewer";
   email?: string;
 }
 
@@ -10,7 +10,7 @@ export interface Workspace {
   description: string;
   ownerId: string;
   inviteCode: string;
-  members: WorkspaceMember[];
+  members: string[];
   createdAt?: string;
   updatedAt?: string;
 }

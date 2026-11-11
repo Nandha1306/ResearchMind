@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
-import { AuthRequest } from "../../../auth-service/src/middlewares/auth.middleware";
+import { AuthRequest } from "../../../../packages/shared/auth/authenticate";
 import { generateMeetingSummary } from "../services/meeting-summarizer.service";
 
 export const summarizeMeeting = asyncHandler(
