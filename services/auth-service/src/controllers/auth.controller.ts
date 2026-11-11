@@ -32,7 +32,9 @@ export const login = asyncHandler(
 /** Generate a new access token using refresh token. */
 export const refresh = asyncHandler(
   async (req: Request, res: Response) => {
-    const { refreshToken } = req.body;
+    // Express 5 leaves req.body undefined when no JSON body was sent; a
+    // missing token then fails verification with 401 instead of a 500.
+    const { refreshToken } = req.body ?? {};
 
     const result = await refreshAccessToken(refreshToken);
 

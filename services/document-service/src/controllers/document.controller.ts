@@ -155,7 +155,7 @@ export const updateEmbeddingStatus = async (
   res: Response
 ) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status } = req.body ?? {};
 
   const allowedStatuses = [
     "pending",

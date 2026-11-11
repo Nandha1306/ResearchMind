@@ -13,7 +13,8 @@ export const requireWorkspaceMembership = async (
 
     const workspaceId =
       req.params.workspaceId ||
-      req.body.workspaceId;
+      // Express 5 leaves req.body undefined when no body/parser matched.
+      req.body?.workspaceId;
 
     const authHeader = req.headers.authorization;
 

@@ -9,10 +9,29 @@ import { assertRequiredSecrets } from "../../../packages/shared/config/secrets";
  */
 assertRequiredSecrets("ai-service:worker", ["INTERNAL_SERVICE_TOKEN"]);
 
-import { startEmbeddingWorker } from "./workers/embedding.worker";
+import redisWorker from "./config/redis-worker";
+import { startEmbeddingWorker, stopEmbeddingWorker } from "./workers/embedding.worker";
+import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
+import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
 
-/** Start the AI embedding worker process. */
+/**
+ * Standalone embedding worker process (`npm run dev:worker` / `start:worker`).
+ *
+ * Note: `npm run dev` already runs a worker inside the AI HTTP service. Running
+ * this as well adds a second competing consumer on the same Redis list, which
+ * is safe (each job is popped by exactly one consumer) but not required.
+ */
 const startWorker = async () => {
+  registerGracefulShutdown({
+    serviceName: "ai-service:worker",
+    // Allow an in-progress embedding job (possibly in rate-limit backoff) to finish.
+    timeoutMs: 30_000,
+    steps: [
+      { name: "embedding worker", close: stopEmbeddingWorker },
+      { name: "redis (worker)", close: () => closeRedisClient(redisWorker) },
+    ],
+  });
+
   try {
     await startEmbeddingWorker();
   } catch (error) {

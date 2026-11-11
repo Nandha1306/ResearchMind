@@ -12,17 +12,32 @@ assertRequiredSecrets("auth-service", ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"
 
 import app from "./app";
 import { connectDB } from "./config/db";
-import { connectRedis } from "./config/redis";
+import { connectRedis, closeRedis } from "./config/redis";
+import { disconnectMongo } from "../../../packages/shared/lifecycle/mongo";
+import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
 
 const PORT = process.env.PORT || 5001;
 
 const startServer = async () => {
   await connectDB();
 
-  await connectRedis();
+  // No auth-service route uses Redis today, so it must not block startup:
+  // node-redis's connect() waits (retrying) until Redis is reachable, which
+  // left the service unable to listen whenever Redis was down. The client
+  // connects in the background and logs its own success or failure.
+  void connectRedis();
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(`Auth Service running on port ${PORT}`);
+  });
+
+  registerGracefulShutdown({
+    serviceName: "auth-service",
+    server,
+    steps: [
+      { name: "mongodb", close: disconnectMongo },
+      { name: "redis", close: closeRedis },
+    ],
   });
 };
 

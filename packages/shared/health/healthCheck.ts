@@ -23,6 +23,7 @@ export const createHealthHandler = (
     res.status(status).json({
       success: healthy,
       service: serviceName,
+      status: healthy ? "healthy" : "unhealthy",
       uptime: Math.floor(process.uptime()),
       dependencies: {
         mongo: mongoConnected ? "up" : "down",

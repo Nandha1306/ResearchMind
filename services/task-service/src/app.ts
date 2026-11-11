@@ -6,6 +6,7 @@ import swaggerUi from "swagger-ui-express";
 import swaggerDocument from "./swagger.json";
 
 import { errorMiddleware } from "../../../packages/shared/errors/error.middleware";
+import { createHealthHandler } from "../../../packages/shared/health/healthCheck";
 
 import boardRoutes from "./routes/board.routes";
 import taskRoutes from "./routes/task.routes";
@@ -20,12 +21,8 @@ app.use(morgan("dev"));
 
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
-app.get("/health", (_, res) => {
-  res.status(200).json({
-    success: true,
-    service: "task-service",
-  });
-});
+// Reports 503 while MongoDB is unavailable instead of a static 200.
+app.get("/health", createHealthHandler("task-service"));
 
 app.use("/api/tasks", boardRoutes);
 app.use("/api/tasks", taskRoutes);

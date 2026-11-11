@@ -17,7 +17,9 @@ jobs:
       - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # Node 20 is end-of-life; several dependencies (pdfjs-dist, openai,
+          # concurrently) declare node >= 22, and local development uses 22.
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Dependencies

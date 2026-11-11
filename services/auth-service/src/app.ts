@@ -6,6 +6,7 @@ import morgan from "morgan";
 import authRoutes from "./routes/auth.routes";
 import internalRoutes from "./routes/internal.routes";
 import { errorMiddleware } from "../../../packages/shared/errors/error.middleware";
+import { createHealthHandler } from "../../../packages/shared/health/healthCheck";
 
 const app = express();
 
@@ -17,12 +18,8 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/internal", internalRoutes);
 
-app.get("/health", (_, res) => {
-  res.status(200).json({
-    success: true,
-    service: "auth-service",
-  });
-});
+// Reports 503 while MongoDB is unavailable instead of a static 200.
+app.get("/health", createHealthHandler("auth-service"));
 
 app.use(errorMiddleware);
 

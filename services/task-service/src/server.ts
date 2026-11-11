@@ -11,16 +11,24 @@ assertRequiredSecrets("task-service", ["JWT_ACCESS_SECRET"]);
 
 import app from "./app";
 import { connectDB } from "./config/db";
+import { disconnectMongo } from "../../../packages/shared/lifecycle/mongo";
+import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
 
 const PORT = process.env.PORT || 5004;
 
 const startServer = async () => {
   await connectDB();
 
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     console.log(
       `Task Service running on port ${PORT}`
     );
+  });
+
+  registerGracefulShutdown({
+    serviceName: "task-service",
+    server,
+    steps: [{ name: "mongodb", close: disconnectMongo }],
   });
 };
 

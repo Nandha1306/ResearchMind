@@ -6,8 +6,8 @@
     "dev": "nodemon --exec ts-node src/server.ts",
     "dev:worker": "nodemon --exec ts-node src/worker.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
-    "start:worker": "node dist/worker.js",
+    "start": "node dist/services/ai-service/src/server.js",
+    "start:worker": "node dist/services/ai-service/src/worker.js",
     "test:pinecone": "ts-node src/scripts/test-pinecone.ts",
     "verify:vectors": "ts-node src/scripts/verify-document-vectors.ts"
   },

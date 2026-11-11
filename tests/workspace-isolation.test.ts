@@ -1,54 +1,145 @@
 import assert from "node:assert";
-import { test, describe } from "node:test";
+import { test, describe, before, after } from "node:test";
+import express from "express";
+import { setTestSecrets, listen } from "./helpers/test-env";
 
-describe("Workspace Isolation & Data Protection Matrix", () => {
-  interface WorkspaceMembership {
-    workspaceId: string;
-    members: string[];
-  }
+/*
+ * Exercises the REAL task-service membership middleware (which calls the
+ * workspace-service membership endpoint over HTTP) and the REAL subtask cycle
+ * guard.
+ *
+ * Previously this file checked an inline array and an inline copy of the cycle
+ * algorithm, so it passed regardless of the application code.
+ */
 
-  const workspaces: WorkspaceMembership[] = [
-    { workspaceId: "ws_user_a", members: ["user_a_id"] },
-    { workspaceId: "ws_user_b", members: ["user_b_id"] },
-  ];
+setTestSecrets();
 
-  const checkMembership = (workspaceId: string, userId: string): boolean => {
-    const ws = workspaces.find((w) => w.workspaceId === workspaceId);
-    return Boolean(ws && ws.members.includes(userId));
-  };
+let stubWorkspaceService: { url: string; close: () => Promise<void> };
+let app: express.Express;
+let appServer: { url: string; close: () => Promise<void> };
 
-  test("User A cannot access User B workspace resources (403 Forbidden)", () => {
-    assert.strictEqual(checkMembership("ws_user_a", "user_a_id"), true);
-    assert.strictEqual(checkMembership("ws_user_b", "user_a_id"), false);
+const MEMBER_TOKEN = "Bearer member-token";
+const OUTSIDER_TOKEN = "Bearer outsider-token";
+
+before(async () => {
+  // Stand-in for workspace-service: only MEMBER_TOKEN belongs to workspace "ws-a".
+  stubWorkspaceService = await listen((req, res) => {
+    const match = /^\/api\/workspaces\/([^/]+)\/membership$/.exec(req.url || "");
+    const isMember = Boolean(match) && match![1] === "ws-a" && req.headers.authorization === MEMBER_TOKEN;
+    res.setHeader("Content-Type", "application/json");
+    res.end(JSON.stringify({ success: true, data: { isMember } }));
+  });
+  process.env.WORKSPACE_SERVICE_URL = stubWorkspaceService.url;
+
+  const { requireWorkspaceMembership } = await import(
+    "../services/task-service/src/middlewares/workspace.middleware"
+  );
+
+  app = express();
+  app.use(express.json());
+  // Simulates `authenticate` having run.
+  app.use((req: any, _res, next) => {
+    if (req.headers["x-test-user"]) req.user = { userId: req.headers["x-test-user"] };
+    next();
+  });
+  app.get("/api/tasks/workspaces/:workspaceId/tasks", requireWorkspaceMembership, (_req, res) => {
+    res.json({ success: true, data: [] });
+  });
+  appServer = await listen(app);
+});
+
+after(async () => {
+  await appServer?.close();
+  await stubWorkspaceService?.close();
+});
+
+const call = (workspaceId: string, authorization?: string, user = "user-1") =>
+  fetch(`${appServer.url}/api/tasks/workspaces/${workspaceId}/tasks`, {
+    headers: {
+      ...(authorization ? { Authorization: authorization } : {}),
+      ...(user ? { "x-test-user": user } : {}),
+    },
   });
 
-  test("User B cannot access User A workspace resources (403 Forbidden)", () => {
-    assert.strictEqual(checkMembership("ws_user_b", "user_b_id"), true);
-    assert.strictEqual(checkMembership("ws_user_a", "user_b_id"), false);
+describe("Workspace isolation (task-service requireWorkspaceMembership)", () => {
+  test("a member of the workspace is allowed through", async () => {
+    const res = await call("ws-a", MEMBER_TOKEN);
+    assert.strictEqual(res.status, 200);
   });
 
-  test("Subtask self-parenting and cycles are rejected", () => {
-    const parentMap = new Map<string, string>();
-    parentMap.set("task_b", "task_a");
+  test("a user who is not a member gets 403", async () => {
+    const res = await call("ws-a", OUTSIDER_TOKEN);
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual((await res.json()).success, false);
+  });
 
-    const willCreateCycle = (taskId: string, proposedParentId: string): boolean => {
-      if (taskId === proposedParentId) return true;
+  test("a member of workspace A cannot reach workspace B", async () => {
+    const res = await call("ws-b", MEMBER_TOKEN);
+    assert.strictEqual(res.status, 403);
+  });
 
-      let cursor: string | undefined = proposedParentId;
-      const visited = new Set<string>();
+  test("no authenticated user is 401", async () => {
+    const res = await call("ws-a", MEMBER_TOKEN, "");
+    assert.strictEqual(res.status, 401);
+  });
+});
 
-      while (cursor) {
-        if (cursor === taskId) return true;
-        if (visited.has(cursor)) return true;
-        visited.add(cursor);
-        cursor = parentMap.get(cursor);
-      }
-      return false;
-    };
+describe("Subtask cycle protection (task.service.assertParentChainIsSafe)", () => {
+  let assertParentChainIsSafe: (ws: string, parent: string, self?: string) => Promise<void>;
+  let Task: any;
+  let originalFindOne: unknown;
+  // id -> parentTaskId, all within workspace "ws-a"
+  let parents: Record<string, string | null> = {};
 
-    // A -> B exists. Trying B -> A should detect cycle.
-    assert.strictEqual(willCreateCycle("task_a", "task_a"), true);
-    assert.strictEqual(willCreateCycle("task_a", "task_b"), true);
-    assert.strictEqual(willCreateCycle("task_c", "task_a"), false);
+  before(async () => {
+    ({ assertParentChainIsSafe } = await import("../services/task-service/src/services/task.service"));
+    ({ Task } = await import("../services/task-service/src/models/Task"));
+    originalFindOne = Task.findOne;
+    // Unit-level stub of the single query the guard issues.
+    Task.findOne = (query: { _id: string; workspaceId: string }) => ({
+      select: () => ({
+        lean: async () =>
+          query.workspaceId === "ws-a" && query._id in parents
+            ? { parentTaskId: parents[query._id] }
+            : null,
+      }),
+    });
+  });
+
+  after(() => {
+    Task.findOne = originalFindOne;
+  });
+
+  const expect400 = async (promise: Promise<void>, pattern: RegExp) =>
+    assert.rejects(promise, (err: any) => {
+      assert.strictEqual(err.statusCode, 400);
+      assert.match(err.message, pattern);
+      return true;
+    });
+
+  test("a task cannot be its own parent", async () => {
+    parents = { A: null };
+    await expect400(assertParentChainIsSafe("ws-a", "A", "A"), /own parent/);
+  });
+
+  test("making A a child of its own descendant B is rejected", async () => {
+    parents = { A: null, B: "A" }; // B is a subtask of A
+    await expect400(assertParentChainIsSafe("ws-a", "B", "A"), /cycle/);
+  });
+
+  test("a valid re-parent is accepted", async () => {
+    parents = { A: null, B: "A", C: null };
+    await assertParentChainIsSafe("ws-a", "B", "C");
+  });
+
+  test("joining a chain that already contains a cycle is rejected", async () => {
+    parents = { X: "Y", Y: "X" };
+    await expect400(assertParentChainIsSafe("ws-a", "X"), /already contains a cycle/);
+  });
+
+  test("nesting deeper than the supported limit is rejected", async () => {
+    parents = {};
+    for (let i = 0; i < 25; i++) parents[`T${i}`] = i === 24 ? null : `T${i + 1}`;
+    await expect400(assertParentChainIsSafe("ws-a", "T0"), /maximum supported depth/);
   });
 });

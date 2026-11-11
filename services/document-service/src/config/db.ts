@@ -1,11 +1,13 @@
-import mongoose from "mongoose";
 import logger from "../utils/logger";
+import { connectMongo, resolveMongoUri } from "../../../../packages/shared/lifecycle/mongo";
 
 /** Connect document-service to MongoDB. */
 export const connectDB = async () => {
   try {
-    await mongoose.connect(
-      process.env.MONGODB_URI || process.env.MONGO_URI!
+    await connectMongo(
+      "document-service",
+      resolveMongoUri("MONGODB_URI", "MONGO_URI")?.uri,
+      ["MONGODB_URI", "MONGO_URI"]
     );
 
     logger.info(
@@ -13,9 +15,9 @@ export const connectDB = async () => {
     );
   } catch (error) {
     logger.error(
-      "MongoDB Connection Failed"
+      `MongoDB Connection Failed: ${(error as Error)?.message}`
     );
-    
+
     process.exit(1);
   }
 };

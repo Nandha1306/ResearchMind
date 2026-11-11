@@ -10,9 +10,18 @@ import { assertRequiredSecrets } from "../../../packages/shared/config/secrets";
 assertRequiredSecrets("api-gateway", ["JWT_ACCESS_SECRET"]);
 
 import app from "./app";
+import { rateLimitRedis } from "./middlewares/rate-limit.middleware";
+import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
+import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
 
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`API Gateway running on port ${PORT}`);
+});
+
+registerGracefulShutdown({
+  serviceName: "api-gateway",
+  server,
+  steps: [{ name: "redis (rate limiter)", close: () => closeRedisClient(rateLimitRedis) }],
 });

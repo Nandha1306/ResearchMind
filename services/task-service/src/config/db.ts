@@ -1,15 +1,21 @@
 import mongoose from "mongoose";
+import { connectMongo, resolveMongoUri } from "../../../../packages/shared/lifecycle/mongo";
 
-/** Connect task-service to MongoDB. */
+/**
+ * Connect task-service to MongoDB.
+ *
+ * There is intentionally no fallback URI: silently connecting to a different
+ * (unauthenticated) database on failure split task data across databases or
+ * left the service "up" with every query failing. A missing or unreachable
+ * database now stops the service with a visible error.
+ */
 export const connectDB = async () => {
   try {
-    const uri = process.env.MONGODB_URI || process.env.MONGO_URI || "mongodb://127.0.0.1:27017/researchmind";
-    try {
-      await mongoose.connect(uri);
-    } catch (e) {
-      console.warn("Primary MONGO_URI failed, attempting fallback to mongodb://127.0.0.1:27017/researchmind...");
-      await mongoose.connect("mongodb://127.0.0.1:27017/researchmind");
-    }
+    await connectMongo(
+      "task-service",
+      resolveMongoUri("MONGODB_URI", "MONGO_URI")?.uri,
+      ["MONGODB_URI", "MONGO_URI"]
+    );
 
     console.log("Task Service MongoDB Connected");
 

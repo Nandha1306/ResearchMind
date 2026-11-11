@@ -4,6 +4,7 @@ import { Document } from "../models/Document";
 import { CreateDocumentDto } from "../types/document.types";
 import { Request, Response } from "express";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
+import { AppError } from "../../../../packages/shared/errors/AppError";
 import { extractPdfText } from "../utils/pdf-extractor";
 import { extractDocxText } from "../utils/docx-extractor";
 import { checkWorkspaceMembership } from "../utils/workspace-checker";
@@ -105,17 +106,28 @@ export const uploadDocument = asyncHandler(
           req.file.path
         );
       } else {
-        throw new Error(
-          "Unsupported document type"
+        throw new AppError(
+          "Unsupported document type. Only PDF and DOCX files are supported.",
+          415
         );
       }
 
-      const cloudinaryFile =
-        await uploadToCloudinary(
+      let cloudinaryFile: Awaited<ReturnType<typeof uploadToCloudinary>>;
+      try {
+        cloudinaryFile = await uploadToCloudinary(
           req.file.path,
           req.file.filename,
           fileExtension
         );
+      } catch (storageError) {
+        // External storage failure: log the cause server-side, return a safe
+        // message instead of a generic 500.
+        console.error("Cloudinary upload failed:", storageError);
+        throw new AppError(
+          "File storage is temporarily unavailable. Please try again later.",
+          502
+        );
+      }
 
       const document =
         await createDocument({
@@ -258,7 +270,10 @@ export const reindexDocument = async (
     console.error("Failed to re-enqueue embedding job:", error);
     document.embeddingStatus = "failed";
     await document.save();
-    throw new Error("Failed to re-enqueue embedding job.");
+    throw new AppError(
+      "Indexing queue is temporarily unavailable. Please try again later.",
+      503
+    );
   }
 
   return document;

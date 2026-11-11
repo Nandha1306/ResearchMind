@@ -43,7 +43,8 @@ const fileFilter: multer.Options["fileFilter"] = (
   if (allowedExtensions.includes(ext) || allowedMimeTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new AppError("Only PDF and DOCX files are allowed.", 400));
+    // 415 Unsupported Media Type, consistent with the service-level type check.
+    cb(new AppError("Only PDF and DOCX files are allowed.", 415));
   }
 };
 

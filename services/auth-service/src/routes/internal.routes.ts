@@ -11,7 +11,7 @@ router.use(requireInternalServiceToken);
 router.post(
   "/users/bulk",
   asyncHandler(async (req: Request, res: Response) => {
-    const { userIds } = req.body;
+    const { userIds } = req.body ?? {};
     if (!Array.isArray(userIds)) {
       return res.status(400).json({
         success: false,

@@ -77,7 +77,7 @@ const MAX_ANCESTRY_DEPTH = 20;
  * Call this only AFTER the parent has been confirmed to exist in the
  * workspace, so the first hop is a known-valid ObjectId.
  */
-const assertParentChainIsSafe = async (
+export const assertParentChainIsSafe = async (
   workspaceId: string,
   proposedParentId: string,
   selfId?: string

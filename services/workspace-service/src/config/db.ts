@@ -1,9 +1,10 @@
 import mongoose from "mongoose";
+import { connectMongo } from "../../../../packages/shared/lifecycle/mongo";
 
 /** Connect the Workspace Service to MongoDB. */
 export const connectDB = async (): Promise<void> => {
   try {
-    await mongoose.connect(process.env.MONGO_URI!);
+    await connectMongo("workspace-service", process.env.MONGO_URI, ["MONGO_URI"]);
     console.log("MongoDB Connected");
 
     if (process.env.NODE_ENV !== "production") {
@@ -12,7 +13,7 @@ export const connectDB = async (): Promise<void> => {
       });
     }
   } catch (error) {
-    console.error("MongoDB Connection Failed:", error);
+    console.error("MongoDB Connection Failed:", (error as Error)?.message);
 
     process.exit(1);
   }

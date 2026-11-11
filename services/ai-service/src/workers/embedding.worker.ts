@@ -122,18 +122,92 @@ const processEmbeddingJob = async (
   }
 };
 
-/** Start the long-running Redis embedding worker. */
-export const startEmbeddingWorker = async () => {
+/*
+ * BLPOP waits at most this long so the loop can notice a stop request.
+ * (It used to block forever, so a shutdown could never wait for it cleanly.)
+ */
+const BLPOP_TIMEOUT_SECONDS = 5;
+
+let workerLoop: Promise<void> | null = null;
+let currentJob: Promise<void> | null = null;
+let stopRequested = false;
+
+/** Resolves when a stop must abandon a BLPOP that can never settle. */
+let abandonPendingPop: () => void = () => {};
+let pendingPopAbandoned: Promise<null> = Promise.resolve(null);
+
+/**
+ * Start the long-running Redis embedding worker.
+ *
+ * Idempotent within a process: a second call returns the already-running loop
+ * instead of starting a second consumer.
+ */
+export const startEmbeddingWorker = (): Promise<void> => {
+  if (workerLoop) {
+    console.warn(
+      "Embedding worker already running in this process; ignoring duplicate start"
+    );
+    return workerLoop;
+  }
+
+  stopRequested = false;
+  pendingPopAbandoned = new Promise<null>((resolve) => {
+    abandonPendingPop = () => resolve(null);
+  });
+  workerLoop = runWorkerLoop().finally(() => {
+    workerLoop = null;
+  });
+  return workerLoop;
+};
+
+/**
+ * Ask the worker to stop: no new job is taken from the queue, and the job
+ * currently being processed (if any) is allowed to finish.
+ *
+ * - Redis reachable: wait for the loop. Its BLPOP returns within
+ *   BLPOP_TIMEOUT_SECONDS, so a job it pops is processed, never abandoned.
+ * - Redis unreachable: the pending BLPOP can never settle (ioredis keeps it
+ *   in its offline queue), and it cannot deliver a job either, so it is
+ *   abandoned and the loop exits immediately.
+ */
+export const stopEmbeddingWorker = async (): Promise<void> => {
+  stopRequested = true;
+
+  if (currentJob) {
+    await currentJob.catch(() => {
+      // Failure is already logged and recorded by processEmbeddingJob.
+    });
+  }
+
+  if (redisWorker.status !== "ready") {
+    // Stop the client from reconnecting first: otherwise the abandoned BLPOP,
+    // still queued inside ioredis, could run if Redis came back moments later
+    // and pop a job that nobody would process.
+    redisWorker.disconnect();
+    abandonPendingPop();
+  }
+
+  if (workerLoop) {
+    await workerLoop;
+  }
+};
+
+const runWorkerLoop = async () => {
   console.log(
     `Embedding worker listening on ${EMBEDDING_QUEUE}`
   );
 
-  while (true) {
+  while (!stopRequested) {
     try {
-      const result = await redisWorker.blpop(
+      const pop = redisWorker.blpop(
         EMBEDDING_QUEUE,
-        0
+        BLPOP_TIMEOUT_SECONDS
       );
+      // If the pop is abandoned on stop, its eventual rejection (client
+      // closed) must not surface as an unhandled rejection.
+      pop.catch(() => {});
+
+      const result = await Promise.race([pop, pendingPopAbandoned]);
 
       if (!result) {
         continue;
@@ -160,8 +234,19 @@ export const startEmbeddingWorker = async () => {
         continue;
       }
 
-      await processEmbeddingJob(parsedJob);
+      currentJob = processEmbeddingJob(parsedJob);
+      try {
+        await currentJob;
+      } finally {
+        currentJob = null;
+      }
     } catch (error) {
+      if (stopRequested) {
+        // Expected during shutdown: the Redis client was closed under a
+        // pending BLPOP.
+        break;
+      }
+
       console.error(
         "Embedding worker error:",
         error
@@ -177,4 +262,6 @@ export const startEmbeddingWorker = async () => {
       );
     }
   }
+
+  console.log("Embedding worker stopped");
 };
