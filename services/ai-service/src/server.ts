@@ -17,6 +17,8 @@ import { startEmbeddingWorker, stopEmbeddingWorker } from "./workers/embedding.w
 import { disconnectMongo } from "../../../packages/shared/lifecycle/mongo";
 import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
 import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
+import { validateVectorIndexAtStartup } from "./utils/verify-pinecone";
+import { logEffectiveModelConfiguration } from "./config/model-config";
 
 const PORT = process.env.PORT || 5006;
 
@@ -34,6 +36,16 @@ const startServer = async () => {
     await connectDB();
   } catch (error) {
     console.error("Failed to start AI Service:", (error as Error)?.message);
+    process.exit(1);
+  }
+
+  // Model configuration: log what is actually in use, and refuse to start if
+  // the embedding dimension does not match the vector index.
+  logEffectiveModelConfiguration();
+  try {
+    await validateVectorIndexAtStartup();
+  } catch (error) {
+    console.error("Failed to start AI Service: vector index check failed:", (error as Error)?.message);
     process.exit(1);
   }
 

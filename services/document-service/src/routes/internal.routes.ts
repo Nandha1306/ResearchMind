@@ -1,6 +1,6 @@
 import { Router } from "express";
 
-import { updateEmbeddingStatus } from "../controllers/document.controller";
+import { updateEmbeddingStatus, claimEmbeddingHandler } from "../controllers/document.controller";
 import { requireInternalServiceToken } from "../middlewares/internal-auth.middleware";
 
 /**
@@ -17,6 +17,13 @@ router.patch(
   "/documents/:id/embedding-status",
   requireInternalServiceToken,
   updateEmbeddingStatus
+);
+
+/** Atomically claim a document before embedding it (called by the ai-service worker). */
+router.post(
+  "/documents/:id/embedding/claim",
+  requireInternalServiceToken,
+  claimEmbeddingHandler
 );
 
 export default router;

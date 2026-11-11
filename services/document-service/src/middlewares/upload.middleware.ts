@@ -24,23 +24,26 @@ const storage = multer.diskStorage({
   },
 });
 
-/** Allow only PDF and DOCX files. */
+/** Extensions the service can actually extract text from. */
+export const ALLOWED_UPLOAD_EXTENSIONS = [".pdf", ".docx"];
+
+/**
+ * Allow only PDF and DOCX files, by extension.
+ *
+ * The browser-supplied MIME type is deliberately NOT accepted as an
+ * alternative: it is client-controlled, and accepting "extension OR MIME" let
+ * any file through with a zip/PDF MIME type (and admitted legacy `.doc`, which
+ * cannot be parsed). The file's actual bytes are verified after upload
+ * (utils/file-signature.ts) before any parsing.
+ */
 const fileFilter: multer.Options["fileFilter"] = (
   _req,
   file,
   cb
 ) => {
-  const allowedMimeTypes = [
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/msword",
-    "application/x-zip-compressed",
-    "application/zip",
-  ];
-  const allowedExtensions = [".pdf", ".docx", ".doc"];
   const ext = path.extname(file.originalname).toLowerCase();
 
-  if (allowedExtensions.includes(ext) || allowedMimeTypes.includes(file.mimetype)) {
+  if (ALLOWED_UPLOAD_EXTENSIONS.includes(ext)) {
     cb(null, true);
   } else {
     // 415 Unsupported Media Type, consistent with the service-level type check.
@@ -54,5 +57,11 @@ export const upload = multer({
   fileFilter,
   limits: {
     fileSize: 10 * 1024 * 1024,
+    // One document per request plus a few small text fields (workspaceId).
+    files: 1,
+    fields: 10,
+    fieldSize: 64 * 1024,
+    fieldNameSize: 100,
+    parts: 20,
   },
 });

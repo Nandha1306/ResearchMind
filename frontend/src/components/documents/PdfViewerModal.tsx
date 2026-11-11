@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { DocumentItem } from "../../types/document.types";
+import { getSafeExternalUrl } from "../../utils/fileUtils";
 import {
   X,
   ChevronLeft,
@@ -28,6 +29,10 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [hasError, setHasError] = useState<boolean>(false);
+  // Only load http(s) URLs; anything else (e.g. a forged javascript:/data: URL)
+  // is shown as an unloadable document instead of being handed to pdf.js.
+  const safeUrl = getSafeExternalUrl(doc.cloudinaryUrl);
+  const showError = hasError || !safeUrl;
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -111,7 +116,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
 
       {/* Main Viewer Area */}
       <div className="flex-1 overflow-auto p-4 sm:p-8 flex items-center justify-center relative bg-[#0A0A0A]">
-        {hasError ? (
+        {showError ? (
           <div className="bg-[#111111] border border-red-500/20 rounded-xl p-8 max-w-md text-center space-y-4 shadow-xl">
             <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center mx-auto">
               <AlertCircle className="w-6 h-6" />
@@ -131,7 +136,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
           </div>
         ) : (
           <Document
-            file={doc.cloudinaryUrl}
+            file={safeUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
             loading={
@@ -154,7 +159,7 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
       </div>
 
       {/* Bottom Controls / Toolbar Bar */}
-      {!hasError && (
+      {!showError && (
         <div className="h-14 px-4 bg-[#111111] border-t border-[#2A2A2A] flex items-center justify-between shrink-0 text-xs text-[#EDEDEE]">
           {/* Zoom Controls */}
           <div className="flex items-center gap-1.5">

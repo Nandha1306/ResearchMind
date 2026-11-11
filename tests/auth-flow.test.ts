@@ -61,7 +61,7 @@ describe("Refresh rotation and reuse detection (auth.service.refreshAccessToken)
   const calls: Record<string, any[]> = {};
 
   before(() => {
-    for (const name of ["findOne", "deleteMany", "deleteOne", "create"]) {
+    for (const name of ["findOneAndUpdate", "findOne", "deleteMany", "updateOne", "create"]) {
       original[name] = RefreshToken[name];
     }
   });
@@ -70,52 +70,98 @@ describe("Refresh rotation and reuse detection (auth.service.refreshAccessToken)
     Object.assign(RefreshToken, original);
   });
 
-  const stubModel = (stored: unknown) => {
+  /**
+   * Unit-level stub of the model. `claimed` is what the atomic claim
+   * (findOneAndUpdate) returns; `existing` is what the follow-up lookup of an
+   * unclaimable token finds. Real concurrency is covered by
+   * refresh-rotation.integration.test.ts against a real MongoDB.
+   */
+  const stubModel = ({ claimed, existing = null, createFails = false }: { claimed: unknown; existing?: unknown; createFails?: boolean }) => {
     for (const key of Object.keys(calls)) delete calls[key];
-    const record = (name: string) => (arg: unknown) => {
-      (calls[name] ||= []).push(arg);
-      return Promise.resolve(name === "findOne" ? stored : {});
+    const record = (name: string, result: () => unknown) => (...args: unknown[]) => {
+      (calls[name] ||= []).push(args);
+      return Promise.resolve(result());
     };
-    RefreshToken.findOne = record("findOne");
-    RefreshToken.deleteMany = record("deleteMany");
-    RefreshToken.deleteOne = record("deleteOne");
-    RefreshToken.create = record("create");
+    RefreshToken.findOneAndUpdate = record("findOneAndUpdate", () => claimed);
+    RefreshToken.findOne = (...args: unknown[]) => {
+      (calls.findOne ||= []).push(args);
+      return { select: () => ({ lean: async () => existing }) };
+    };
+    RefreshToken.deleteMany = record("deleteMany", () => ({}));
+    RefreshToken.updateOne = record("updateOne", () => ({}));
+    RefreshToken.create = (...args: unknown[]) => {
+      (calls.create ||= []).push(args);
+      return createFails ? Promise.reject(new Error("write failed")) : Promise.resolve({});
+    };
   };
 
-  test("a known token is rotated: old hash deleted, new hash stored, new pair returned", async () => {
+  test("a known token is claimed atomically and exchanged for a new pair", async () => {
     const presented = jwtUtils.generateRefreshToken({ userId: "user-42" });
-    stubModel({ _id: "stored-id" });
+    stubModel({ claimed: { _id: "stored-id", expiresAt: new Date() } });
 
     const result = await authService.refreshAccessToken(presented);
 
-    assert.deepStrictEqual(calls.findOne, [{ tokenHash: sha256(presented) }]);
-    assert.deepStrictEqual(calls.deleteOne, [{ _id: "stored-id" }]);
+    const [filter, update] = calls.findOneAndUpdate[0];
+    assert.deepStrictEqual(filter, { tokenHash: sha256(presented), rotatedAt: null });
+    assert.ok(update.$set.rotatedAt instanceof Date);
     assert.strictEqual(calls.deleteMany, undefined, "must not revoke all sessions on a normal refresh");
     assert.strictEqual(calls.create.length, 1);
-    assert.strictEqual(calls.create[0].userId, "user-42");
-    assert.strictEqual(calls.create[0].tokenHash, sha256(result.refreshToken));
+    assert.strictEqual(calls.create[0][0].userId, "user-42");
+    assert.strictEqual(calls.create[0][0].tokenHash, sha256(result.refreshToken));
+    assert.notStrictEqual(result.refreshToken, presented);
     assert.strictEqual(jwtUtils.verifyAccessToken(result.accessToken).userId, "user-42");
+  });
+
+  test("refresh tokens issued in the same second are unique (jti)", () => {
+    const a = jwtUtils.generateRefreshToken({ userId: "user-1" });
+    const b = jwtUtils.generateRefreshToken({ userId: "user-1" });
+    assert.notStrictEqual(a, b);
+  });
+
+  test("a token rotated moments ago by a concurrent request is rejected WITHOUT revoking sessions", async () => {
+    const presented = jwtUtils.generateRefreshToken({ userId: "user-5" });
+    stubModel({ claimed: null, existing: { rotatedAt: new Date() } });
+
+    await assert.rejects(authService.refreshAccessToken(presented), (err: any) => {
+      assert.strictEqual(err.statusCode, 401);
+      assert.match(err.message, /already been used/);
+      return true;
+    });
+    assert.strictEqual(calls.deleteMany, undefined);
+    assert.strictEqual(calls.create, undefined);
   });
 
   test("reuse of a validly-signed but unknown token revokes ALL of the user's sessions", async () => {
     const reused = jwtUtils.generateRefreshToken({ userId: "user-7" });
-    stubModel(null);
+    stubModel({ claimed: null, existing: null });
 
     await assert.rejects(authService.refreshAccessToken(reused), (err: any) => {
       assert.ok(err instanceof AppError);
       assert.strictEqual(err.statusCode, 401);
       return true;
     });
-    assert.deepStrictEqual(calls.deleteMany, [{ userId: "user-7" }]);
+    assert.deepStrictEqual(calls.deleteMany, [[{ userId: "user-7" }]]);
     assert.strictEqual(calls.create, undefined, "no new token may be issued on reuse");
   });
 
+  test("if the new token cannot be stored, the claim is released and the error surfaces", async () => {
+    const presented = jwtUtils.generateRefreshToken({ userId: "user-8" });
+    const originalExpiry = new Date(Date.now() + 60_000);
+    stubModel({ claimed: { _id: "stored-8", expiresAt: originalExpiry }, createFails: true });
+
+    await assert.rejects(authService.refreshAccessToken(presented), /write failed/);
+    assert.deepStrictEqual(calls.updateOne[0], [
+      { _id: "stored-8" },
+      { $set: { rotatedAt: null, expiresAt: originalExpiry } },
+    ]);
+  });
+
   test("an invalid or missing token is a 401 and never touches the database", async () => {
-    stubModel(null);
+    stubModel({ claimed: null });
     for (const bad of ["not-a-jwt", undefined as unknown as string]) {
       await assert.rejects(authService.refreshAccessToken(bad), (err: any) => err.statusCode === 401);
     }
-    assert.strictEqual(calls.findOne, undefined);
+    assert.strictEqual(calls.findOneAndUpdate, undefined);
   });
 });
 

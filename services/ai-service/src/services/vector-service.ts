@@ -1,4 +1,5 @@
 import { pineconeIndex } from "../config/pinecone";
+import { VOYAGE_MODEL } from "../config/voyage";
 import { EmbeddingResult } from "./embedding.service";
 
 interface VectorMetadata {
@@ -10,6 +11,8 @@ interface VectorMetadata {
   fileType: string;
   chunkIndex: number;
   text: string;
+  /** Model that produced this vector; vectors from different models are not comparable. */
+  embeddingModel: string;
 }
 
 /** Build the Pinecone vector ID for a document chunk. */
@@ -61,6 +64,7 @@ export const upsertDocumentEmbeddings = async ({
       chunkIndex: result.index,
       text: chunk.text,
       fileType,
+      embeddingModel: VOYAGE_MODEL,
     };
 
     return {

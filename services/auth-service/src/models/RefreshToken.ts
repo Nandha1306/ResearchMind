@@ -10,6 +10,7 @@ export interface IRefreshToken extends Document {
   userId: mongoose.Types.ObjectId;
   tokenHash: string;
   expiresAt: Date;
+  rotatedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -45,6 +46,18 @@ const refreshTokenSchema = new Schema<IRefreshToken>(
     expiresAt: {
       type: Date,
       required: true,
+    },
+
+    /**
+     * Set atomically when this token is exchanged for a new pair. A rotated
+     * token is kept only for a short grace window (its expiresAt is shortened)
+     * so a concurrent refresh of the same token can be told apart from theft.
+     * Documents created before this field existed have no value, which
+     * matches `rotatedAt: null` queries, so they rotate normally.
+     */
+    rotatedAt: {
+      type: Date,
+      default: null,
     },
   },
   {

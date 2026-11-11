@@ -1,7 +1,8 @@
 import assert from "node:assert";
 import { test, describe, before, after } from "node:test";
 import express from "express";
-import multer from "multer";
+import path from "node:path";
+import { createRequire } from "node:module";
 import { listen } from "./helpers/test-env";
 import { errorMiddleware } from "../packages/shared/errors/error.middleware";
 import { AppError } from "../packages/shared/errors/AppError";
@@ -13,6 +14,12 @@ import { loginSchema } from "../packages/validation/schemas/auth.schema";
  * task and ai services) through a real Express app and real HTTP requests,
  * including errors raised by the real body parser and multer.
  */
+
+// multer is a document-service dependency (installed under its own
+// node_modules), so resolve it the way that service does.
+const multer = createRequire(
+  path.join(__dirname, "../services/document-service/package.json")
+)("multer");
 
 let server: { url: string; close: () => Promise<void> };
 

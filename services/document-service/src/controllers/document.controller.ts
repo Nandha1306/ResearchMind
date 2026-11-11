@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
-import { getWorkspaceDocuments, getDocumentById, createDocument, deleteDocument, reindexDocument } from "../services/document.service";
+import { getWorkspaceDocuments, getDocumentById, createDocument, deleteDocument, reindexDocument, claimDocumentForEmbedding } from "../services/document.service";
 import { checkWorkspaceMembership } from "../utils/workspace-checker";
 import { Document } from "../models/Document";
 import { AppError } from "../../../../packages/shared/errors/AppError";
@@ -138,9 +138,18 @@ export const createDocumentHandler = asyncHandler(
       });
     }
 
+    // Built field by field: storage location, extracted text and status are
+    // server-owned and never copied from the request body.
+    const { originalName, fileType, fileSize } = req.body;
     const document = await createDocument({
-      ...req.body,
+      workspaceId,
+      originalName,
+      fileType,
+      fileSize,
       uploadedBy: userId,
+      cloudinaryUrl: null,
+      cloudinaryPublicId: null,
+      extractedText: "",
     });
     res.status(201).json({
       success: true,
@@ -149,13 +158,22 @@ export const createDocumentHandler = asyncHandler(
   }
 );
 
-/** Update the embedding processing status for a document. */
+/** Maximum length of a worker-reported failure reason stored on a document. */
+const MAX_EMBEDDING_ERROR_LENGTH = 500;
+
+/**
+ * Update the embedding processing status for a document (ai-service worker).
+ *
+ * A document that is being deleted (or is gone) is never updated: the worker
+ * gets 410/404 and removes any vectors it wrote, so deleted content cannot be
+ * resurrected by in-flight embedding work.
+ */
 export const updateEmbeddingStatus = async (
   req: any,
   res: Response
 ) => {
   const { id } = req.params;
-  const { status } = req.body ?? {};
+  const { status, error, claimToken } = req.body ?? {};
 
   const allowedStatuses = [
     "pending",
@@ -171,22 +189,52 @@ export const updateEmbeddingStatus = async (
     );
   }
 
+  const update: Record<string, unknown> = { embeddingStatus: status };
+  if (status === "indexed") {
+    update.embeddingError = null;
+  }
+  if (status === "failed") {
+    update.embeddingError =
+      typeof error === "string" && error.trim()
+        ? error.trim().slice(0, MAX_EMBEDDING_ERROR_LENGTH)
+        : "Indexing failed";
+  }
+  if (status === "indexing") {
+    update.indexingStartedAt = new Date();
+  }
+
+  /*
+   * Claim fencing: a worker reports the token of the claim it holds. The
+   * update only applies while that claim is still the current one, so a stale
+   * worker (whose claim expired and was taken over, possibly across a manual
+   * re-index) cannot overwrite the newer holder's result. Callers that send
+   * no token keep the previous unconditional behaviour.
+   */
+  const fenced = Number.isInteger(claimToken);
+  const filter: Record<string, unknown> = { _id: id, deletedAt: null };
+  if (fenced) {
+    filter.embeddingStatus = "indexing";
+    filter.claimSequence = claimToken;
+  }
+
   const document =
-    await Document.findByIdAndUpdate(
-      id,
+    await Document.findOneAndUpdate(
+      filter,
+      { $set: update },
       {
-        embeddingStatus: status,
-      },
-      {
-        new: true,
+        returnDocument: "after",
       }
     );
 
   if (!document) {
-    throw new AppError(
-      "Document not found",
-      404
-    );
+    const current = await Document.findById(id).select("deletedAt");
+    if (!current) {
+      throw new AppError("Document not found", 404);
+    }
+    if (current.deletedAt) {
+      throw new AppError("Document has been deleted", 410);
+    }
+    throw new AppError("Embedding claim is no longer current", 409);
   }
 
   return res.status(200).json({
@@ -196,6 +244,40 @@ export const updateEmbeddingStatus = async (
       embeddingStatus:
         document.embeddingStatus,
     },
+  });
+};
+
+/**
+ * Atomically claim a document for embedding (ai-service worker), before any
+ * processing. 200 = claimed; 409 = already indexed / in progress / retry limit
+ * reached; 410 = deleted; 404 = unknown. Only a 200 may be processed.
+ */
+export const claimEmbeddingHandler = async (
+  req: any,
+  res: Response
+) => {
+  const result = await claimDocumentForEmbedding(req.params.id);
+
+  if (result.claimed) {
+    return res.status(200).json({
+      success: true,
+      data: {
+        documentId: result.document._id,
+        workspaceId: result.document.workspaceId,
+        embeddingAttempts: result.document.embeddingAttempts,
+        // Fencing token: send back as `claimToken` on status updates.
+        claimToken: result.document.claimSequence,
+      },
+    });
+  }
+
+  const statusCode =
+    result.reason === "not-found" ? 404 : result.reason === "deleted" ? 410 : 409;
+
+  return res.status(statusCode).json({
+    success: false,
+    message: `Document not claimable: ${result.reason}`,
+    reason: result.reason,
   });
 };
 
@@ -234,6 +316,15 @@ export const deleteDocumentHandler = asyncHandler(
     }
 
     const deleted = await deleteDocument(id, document.workspaceId);
+
+    // A concurrent request already claimed this deletion (or it vanished
+    // between the lookup and the atomic mark).
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Document not found",
+      });
+    }
 
     res.status(200).json({
       success: true,
@@ -278,6 +369,14 @@ export const reindexDocumentHandler = asyncHandler(
     }
 
     const updated = await reindexDocument(id, document.workspaceId);
+
+    // Deleted between the lookup and the update.
+    if (!updated) {
+      return res.status(404).json({
+        success: false,
+        message: "Document not found",
+      });
+    }
 
     res.status(200).json({
       success: true,

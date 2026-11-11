@@ -4,8 +4,8 @@ export interface CreateDocumentDto {
   originalName: string;
   fileType: "pdf" | "docx";
   fileSize: number;
-  cloudinaryUrl?: string;
-  cloudinaryPublicId?: string;
+  cloudinaryUrl?: string | null;
+  cloudinaryPublicId?: string | null;
   extractedText?: string;
   embeddingStatus?: "pending" | "indexing" | "indexed" | "failed";
 }

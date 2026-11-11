@@ -10,6 +10,19 @@ jobs:
   typecheck-and-test:
     runs-on: ubuntu-latest
 
+    # Disposable MongoDB for the integration tests (tests/*.integration.test.ts).
+    # Without it those tests are skipped, not passed.
+    services:
+      mongodb:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
     steps:
       - name: Checkout Code Repository
         uses: actions/checkout@v4
@@ -39,5 +52,7 @@ jobs:
           npm run build --workspace=frontend
 
       - name: Run Automated Test Suite
+        env:
+          TEST_MONGO_URI: mongodb://localhost:27017
         run: |
           npm test

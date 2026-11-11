@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import jwt, { SignOptions, VerifyOptions } from "jsonwebtoken";
 
 import { requireSecret } from "../../../../packages/shared/config/secrets";
@@ -50,12 +51,19 @@ export const generateAccessToken = (payload: TokenPayload): string => {
   );
 };
 
-/** Generate refresh token */
+/**
+ * Generate refresh token.
+ *
+ * Every refresh token carries a random `jti`. Without it, two tokens issued
+ * for the same user within the same second (iat has 1 s resolution) were
+ * byte-identical, so they shared one stored hash: the second insert hit the
+ * unique index (500), and rotating or revoking one session affected the other.
+ */
 export const generateRefreshToken = (payload: TokenPayload): string => {
   return jwt.sign(
     payload,
     JWT_REFRESH_SECRET,
-    refreshOptions
+    { ...refreshOptions, jwtid: crypto.randomUUID() }
   );
 };
 

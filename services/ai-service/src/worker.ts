@@ -13,6 +13,7 @@ import redisWorker from "./config/redis-worker";
 import { startEmbeddingWorker, stopEmbeddingWorker } from "./workers/embedding.worker";
 import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
 import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
+import { validateVectorIndexAtStartup } from "./utils/verify-pinecone";
 
 /**
  * Standalone embedding worker process (`npm run dev:worker` / `start:worker`).
@@ -31,6 +32,15 @@ const startWorker = async () => {
       { name: "redis (worker)", close: () => closeRedisClient(redisWorker) },
     ],
   });
+
+  // The worker writes vectors: refuse to start against an index whose
+  // dimension does not match the configured embedding model.
+  try {
+    await validateVectorIndexAtStartup();
+  } catch (error) {
+    console.error("Failed to start embedding worker: vector index check failed:", (error as Error)?.message);
+    process.exit(1);
+  }
 
   try {
     await startEmbeddingWorker();

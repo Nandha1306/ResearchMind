@@ -1,4 +1,4 @@
-import { voyageQueryEmbeddings } from "../config/voyage";
+import { voyageQueryEmbeddings, VOYAGE_EMBEDDING_DIMENSION } from "../config/voyage";
 
 /** Generate a semantic embedding for a user's search query with rate limit retry handling. */
 export const generateQueryEmbedding = async (
@@ -18,9 +18,8 @@ export const generateQueryEmbedding = async (
     try {
       const embedding = await voyageQueryEmbeddings.embedQuery(normalizedQuery);
 
-      const expectedDimension = Number(
-        process.env.VOYAGE_EMBEDDING_DIMENSION || 1024
-      );
+      // Same validated value used for document embeddings and the index check.
+      const expectedDimension = VOYAGE_EMBEDDING_DIMENSION;
 
       if (embedding.length !== expectedDimension) {
         throw new Error(

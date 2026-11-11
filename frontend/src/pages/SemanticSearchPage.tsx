@@ -4,6 +4,7 @@ import { useWorkspaceDocuments } from "../hooks/useDocuments";
 import { useAiQuery } from "../hooks/useAiQuery";
 import { PdfViewerModal } from "../components/documents/PdfViewerModal";
 import type { DocumentItem } from "../types/document.types";
+import { getSafeExternalUrl } from "../utils/fileUtils";
 import type { AISource } from "../utils/sse";
 import {
   Sparkles,
@@ -88,7 +89,12 @@ export const SemanticSearchPage: React.FC = () => {
       if (doc.fileType === "pdf") {
         setSelectedPdf(doc);
       } else {
-        window.open(doc.cloudinaryUrl, "_blank");
+        // Open only http(s) URLs, without giving the new tab a handle to this
+        // window (a stored URL is not trusted to be safe).
+        const url = getSafeExternalUrl(doc.cloudinaryUrl);
+        if (url) {
+          window.open(url, "_blank", "noopener,noreferrer");
+        }
       }
     }
   };
