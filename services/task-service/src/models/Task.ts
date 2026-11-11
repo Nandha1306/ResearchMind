@@ -11,6 +11,8 @@ export interface TaskDocument {
   dueDate: Date | null;
   parentTaskId: string | null;
   createdBy: string;
+  importKey?: string;
+  importIndex?: number;
 }
 
 const taskSchema = new Schema(
@@ -79,6 +81,21 @@ const taskSchema = new Schema(
       type: String,
       required: true,
     },
+
+    /**
+     * Set only on tasks created by a bulk import that carried an importKey
+     * (e.g. meeting action items): the key and the item's position in it.
+     * Together they make a repeated import a no-op (see the unique index).
+     */
+    importKey: {
+      type: String,
+      default: undefined,
+    },
+
+    importIndex: {
+      type: Number,
+      default: undefined,
+    },
   },
   {
     timestamps: true,
@@ -89,5 +106,13 @@ taskSchema.index({
   workspaceId: 1,
   boardId: 1,
 });
+
+// One task per (import, position): a duplicate or concurrent repeat of the
+// same bulk import cannot create a second copy. Partial, so ordinary tasks
+// (no importKey) are unaffected.
+taskSchema.index(
+  { workspaceId: 1, importKey: 1, importIndex: 1 },
+  { unique: true, partialFilterExpression: { importKey: { $type: "string" } } }
+);
 
 export const Task = model("Task", taskSchema);

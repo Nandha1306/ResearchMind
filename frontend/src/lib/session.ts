@@ -2,6 +2,12 @@ import { useAuthStore } from "../store/auth.store";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { queryClient } from "./queryClient";
 import { authApi } from "../api/auth.api";
+import { AUTH_STORAGE_KEY, revokeTokensQuietly, tokenRefresh } from "../api/axios";
+import {
+  decideCrossTabAuthChange,
+  parsePersistedAuth,
+  revokeCurrentRefreshToken,
+} from "./token-refresh";
 
 /**
  * Tears down every piece of client state that belongs to the signed-in user.
@@ -33,7 +39,7 @@ export const clearClientSession = (): void => {
   // synchronously, but drop the keys outright so nothing survives a partialize
   // change or a half-written entry.
   try {
-    localStorage.removeItem("researchmind-auth");
+    localStorage.removeItem(AUTH_STORAGE_KEY);
     localStorage.removeItem("researchmind-workspace");
   } catch {
     // Storage can be unavailable (private mode, blocked cookies). The in-memory
@@ -47,11 +53,11 @@ let signOutInFlight = false;
 /**
  * Full application sign-out.
  *
- * Revokes the refresh token server-side on a best-effort basis, then clears
- * client state unconditionally. A failed revocation must never leave the user
- * stranded inside the authenticated app, so the local teardown happens either
- * way; the caller is told whether the server call succeeded so it can surface
- * a warning if it wants to.
+ * Revokes the CURRENT refresh token server-side on a best-effort basis (see
+ * revokeCurrentRefreshToken: an expired access token is renewed first, so the
+ * newest refresh token is the one revoked), then clears client state
+ * unconditionally. A failed revocation must never leave the user stranded
+ * inside the authenticated app; the caller is told whether it succeeded.
  */
 export const signOutClientSession = async (): Promise<{ revoked: boolean }> => {
   if (signOutInFlight) {
@@ -59,23 +65,65 @@ export const signOutClientSession = async (): Promise<{ revoked: boolean }> => {
   }
   signOutInFlight = true;
 
-  const { refreshToken } = useAuthStore.getState();
-  let revoked = false;
-
   try {
-    if (refreshToken) {
-      // The endpoint reads `refreshToken` from the body; without it the server
-      // matches no document and silently revokes nothing.
-      await authApi.logout(refreshToken);
-      revoked = true;
-    }
-  } catch {
-    // Server-side revocation failed. Fall through: the local session is still
-    // torn down, which is the security-relevant part on this client.
+    const revoked = await revokeCurrentRefreshToken({
+      waitForPendingRefresh: () => tokenRefresh.waitForPendingRefresh(),
+      getTokens: () => {
+        const { accessToken, refreshToken } = useAuthStore.getState();
+        return { accessToken, refreshToken };
+      },
+      logout: (refreshToken) => authApi.logout(refreshToken),
+      refreshAccessToken: (failed) => tokenRefresh.refreshAccessToken(failed),
+    });
+    return { revoked };
   } finally {
     clearClientSession();
     signOutInFlight = false;
   }
+};
 
-  return { revoked };
+let crossTabSyncInstalled = false;
+
+/**
+ * Keep this tab's session consistent with other tabs (P1-A12): adopt tokens
+ * another tab rotated (so this tab never spends a stale refresh token), end
+ * the session when another tab signs out, and reload when another account
+ * signs in. Call once at startup.
+ */
+export const installCrossTabSessionSync = (): void => {
+  if (crossTabSyncInstalled || typeof window === "undefined") return;
+  crossTabSyncInstalled = true;
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== AUTH_STORAGE_KEY && event.key !== null) return;
+
+    const state = useAuthStore.getState();
+    const persisted = parsePersistedAuth(
+      event.key === null ? null : event.newValue
+    );
+    const action = decideCrossTabAuthChange(
+      {
+        isAuthenticated: state.isAuthenticated,
+        userId: state.user?.id ?? null,
+        refreshToken: state.refreshToken,
+      },
+      persisted
+    );
+
+    if (action === "adopt" && persisted?.accessToken && persisted.refreshToken) {
+      state.setTokens(persisted.accessToken, persisted.refreshToken);
+    } else if (action === "signed-out") {
+      // Another tab signed out. This tab may hold a newer refresh token than
+      // the one that tab revoked (e.g. it rotated it a moment ago), so revoke
+      // the token held here too. Clearing first also discards (and revokes)
+      // the result of any refresh still in flight in this tab.
+      const { accessToken, refreshToken } = state;
+      clearClientSession();
+      if (accessToken && refreshToken) {
+        revokeTokensQuietly(refreshToken, accessToken);
+      }
+    } else if (action === "reload") {
+      window.location.reload();
+    }
+  });
 };

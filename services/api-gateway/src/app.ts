@@ -34,7 +34,30 @@ const handleProxyError = (err: Error, req: any, res: any) => {
       success: false,
       message: "Service temporarily unavailable. Please try again.",
     });
+    return;
   }
+  // The upstream failed after the response started (e.g. ai-service died
+  // mid-way through an SSE answer). End the client response so the client
+  // sees the stream close without a terminal event -- and reports the answer
+  // as incomplete -- instead of waiting on a connection that will never finish.
+  if (!res.writableEnded) {
+    res.end();
+  }
+};
+
+/**
+ * When ai-service dies part-way through a streamed (SSE) answer, the proxy
+ * stops piping but never ends the client response, so the browser waits on a
+ * connection that will not finish. End it as soon as the upstream response
+ * closes incomplete: the client then sees the stream end without a terminal
+ * event and reports the answer as incomplete (P1-A21).
+ */
+const endClientResponseIfUpstreamAborts = (proxyRes: any, _req: any, res: any) => {
+  proxyRes.on("close", () => {
+    if (!proxyRes.complete && !res.writableEnded) {
+      res.end();
+    }
+  });
 };
 
 /*
@@ -119,6 +142,7 @@ app.use(
     changeOrigin: true,
     on: {
       error: handleProxyError,
+      proxyRes: endClientResponseIfUpstreamAborts,
     },
   })
 );

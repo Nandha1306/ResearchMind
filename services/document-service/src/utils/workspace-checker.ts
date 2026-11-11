@@ -1,32 +1,9 @@
-/** Verify whether a user belongs to a specific workspace. */
-export const checkWorkspaceMembership = async (
-  workspaceId: string,
-  userId: string,
-  authHeader?: string
-): Promise<boolean> => {
-  const workspaceServiceUrl =
-    process.env.WORKSPACE_SERVICE_URL || "http://127.0.0.1:5002";
-
-  if (authHeader) {
-    try {
-      const res = await fetch(
-        `${workspaceServiceUrl}/api/workspaces/${workspaceId}/membership`,
-        {
-          headers: {
-            Authorization: authHeader,
-          },
-        }
-      );
-      if (res.ok) {
-        const result = await res.json();
-        if (result.success && typeof result.data?.isMember === "boolean") {
-          return result.data.isMember;
-        }
-      }
-    } catch (err) {
-      // Endpoint unreachable
-    }
-  }
-
-  return false;
-};
+/**
+ * Workspace membership check, shared across services (P1-A13): validates the
+ * id (400), times out (3 s) and reports a failed check as 503 instead of
+ * "not a member". Resolves true/false only for a definite answer.
+ */
+export {
+  checkWorkspaceMembership,
+  getWorkspaceMemberIds,
+} from "../../../../packages/shared/auth/workspace-membership";

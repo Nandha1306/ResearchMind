@@ -41,34 +41,43 @@ export const getUserWorkspaces = async (
   });
 };
 
-/** Join a workspace using an invite code. */
+/**
+ * Invite codes are generated in upper case (utils/invite-code.ts); users type
+ * them in any case and with stray spaces.
+ */
+export const normalizeInviteCode = (inviteCode: string) =>
+  inviteCode.trim().toUpperCase();
+
+/**
+ * Join a workspace using an invite code.
+ *
+ * Atomic: the membership is added by a single conditional update, so two
+ * concurrent joins (double submit, two tabs) cannot add the user twice.
+ *  - unknown code          -> 404
+ *  - already a member      -> 409 (the membership exists; nothing changes)
+ */
 export const joinWorkspace = async (
   userId: string,
   inviteCode: string
 ) => {
-  const workspace = await Workspace.findOne({
-    inviteCode,
-  });
+  const code = normalizeInviteCode(inviteCode);
 
-  if (!workspace) {
-    throw new AppError(
-      "Invalid invite code",
-      404
-    );
+  const workspace = await Workspace.findOneAndUpdate(
+    { inviteCode: code, members: { $ne: userId } },
+    { $addToSet: { members: userId } },
+    { returnDocument: "after" }
+  );
+
+  if (workspace) {
+    return workspace;
   }
 
-  if (workspace.members.includes(userId)) {
-    throw new AppError(
-      "Already a member",
-      400
-    );
+  const existing = await Workspace.exists({ inviteCode: code });
+  if (!existing) {
+    throw new AppError("Invalid invite code", 404);
   }
 
-  workspace.members.push(userId);
-
-  await workspace.save();
-
-  return workspace;
+  throw new AppError("You are already a member of this workspace", 409);
 };
 
 /** Check whether a user belongs to a workspace. */

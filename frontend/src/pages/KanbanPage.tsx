@@ -26,6 +26,8 @@ import {
   createBoard,
 } from "../api/task.api";
 import type { Board, Task } from "../types/task.types";
+import { useWorkspaceMembers } from "../hooks/useWorkspaceMembers";
+import { describeMember } from "../utils/members";
 import { TaskDetailModal } from "../components/kanban/TaskDetailModal";
 import { CreateTaskModal } from "../components/kanban/CreateTaskModal";
 import { Button } from "../components/ui/button";
@@ -97,6 +99,13 @@ interface TaskCardProps {
 }
 
 const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating, onTaskClick }) => {
+  // Shared, cached member list (one request for the whole board).
+  const workspaceId = useWorkspaceStore((state) => state.currentWorkspace?._id);
+  const membersQuery = useWorkspaceMembers(workspaceId);
+  const assignee = describeMember(
+    membersQuery.isError ? null : membersQuery.data,
+    task.assigneeId
+  );
   const {
     attributes,
     listeners,
@@ -172,10 +181,13 @@ const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating, onTaskClick }
         )}
 
         {/* Assignee Context */}
-        {task.assigneeId && (
-          <span className="px-2 py-0.5 rounded-md bg-bg-elevated border border-border-default text-text-secondary flex items-center gap-1">
+        {assignee && (
+          <span
+            className="px-2 py-0.5 rounded-md bg-bg-elevated border border-border-default text-text-secondary flex items-center gap-1"
+            title={assignee.isMember ? "Assignee" : "Assignee is not a current workspace member"}
+          >
             <User className="w-2.5 h-2.5 text-[#7C6AF7]" />
-            {task.assigneeId}
+            {assignee.label}
           </span>
         )}
       </div>
@@ -256,6 +268,7 @@ const KanbanColumnContainer: React.FC<ColumnProps> = ({
 export const KanbanPage: React.FC = () => {
   const boardSelectId = useId();
   const { currentWorkspace } = useWorkspaceStore();
+  const { data: workspaceMembers = [] } = useWorkspaceMembers(currentWorkspace?._id);
 
   // State
   const [boards, setBoards] = useState<Board[]>([]);
@@ -686,7 +699,7 @@ export const KanbanPage: React.FC = () => {
           boardsError={boardsError}
           onRetryBoards={() => setBoardsReloadKey((k) => k + 1)}
           defaultBoardId={selectedBoardId}
-          members={currentWorkspace.members || []}
+          members={workspaceMembers}
           onTaskCreated={handleTaskCreated}
         />
       )}

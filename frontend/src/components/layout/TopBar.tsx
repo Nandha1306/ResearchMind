@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { MAX_UI_QUERY_LENGTH } from "../../utils/navigation";
 import { useAuthStore } from "../../store/auth.store";
 import { useWorkspaceStore } from "../../store/workspace.store";
 import { useSignOut } from "../../hooks/useSignOut";
@@ -37,6 +38,33 @@ export const TopBar: React.FC<TopBarProps> = ({
   const { signOut, isSigningOut } = useSignOut();
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  /*
+   * "Search or ask ResearchMind" (P1-A25): submitting asks the AI researcher,
+   * the same hand-off as the right-panel ask box. Cmd/Ctrl+K focuses it, as
+   * the shortcut badge promises.
+   */
+  const navigate = useNavigate();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [searchText, setSearchText] = useState("");
+  const submitSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const question = searchText.trim();
+    if (!question) return;
+    navigate("/dashboard/ai-researcher", { state: { initialQuery: question } });
+    setSearchText("");
+    searchInputRef.current?.blur();
+  };
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("theme");
     return saved === "light" ? "light" : "dark";
@@ -137,12 +165,21 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Center: Global Search Input */}
-      <div className="hidden sm:flex items-center flex-1 max-w-md mx-6 relative">
+      <form
+        onSubmit={submitSearch}
+        role="search"
+        className="hidden sm:flex items-center flex-1 max-w-md mx-6 relative"
+      >
         <div className="absolute left-3 text-text-muted">
           <Search className="w-4 h-4" />
         </div>
         <input
+          ref={searchInputRef}
           type="text"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          maxLength={MAX_UI_QUERY_LENGTH}
+          aria-label="Ask ResearchMind"
           placeholder="Search or ask ResearchMind..."
           className="w-full h-9 pl-9 pr-12 text-[12px] text-text-primary bg-bg-elevated border border-border-subtle rounded-lg focus:border-accent-primary/60 outline-none transition-all"
         />
@@ -151,7 +188,7 @@ export const TopBar: React.FC<TopBarProps> = ({
           <span>⌘</span>
           <span>K</span>
         </div>
-      </div>
+      </form>
 
       {/* Right side: Actions, Theme, notifications, profile */}
       <div className="flex items-center gap-2">
@@ -182,13 +219,16 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
 
         {/* Notification Bell */}
+        {/* Notifications are not built yet: shown disabled, with no fake
+            unread indicator. */}
         <button
-          className="p-1.5 rounded-lg hover:bg-bg-elevated border border-border-subtle text-text-secondary hover:text-text-primary relative cursor-pointer shrink-0"
-          title="Notifications"
+          type="button"
+          disabled
+          aria-disabled="true"
+          className="p-1.5 rounded-lg border border-border-subtle text-text-secondary relative shrink-0 opacity-50 cursor-not-allowed"
+          title="Notifications are not available yet"
         >
           <Bell className="w-4 h-4" />
-          {/* Unread indicator */}
-          <span className="absolute top-1 right-1 w-1.5 h-1.5 bg-error rounded-full" />
         </button>
 
         {/* Account menu */}

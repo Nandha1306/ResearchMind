@@ -128,7 +128,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       joinWorkspace: async (inviteCode) => {
         set({ isLoading: true, error: null });
         try {
-          const workspace = await workspaceApi.joinWorkspace({ inviteCode });
+          // Codes are upper case; normalise here so every entry point (the
+          // onboarding page and the sidebar modal) sends the same form.
+          const workspace = await workspaceApi.joinWorkspace({
+            inviteCode: inviteCode.trim().toUpperCase(),
+          });
           const currentWorkspaces = get().workspaces;
           
           // Add if not already present

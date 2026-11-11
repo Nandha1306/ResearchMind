@@ -43,7 +43,9 @@ Rules:
 5. If there are no decisions, return an empty array.
 6. If there are no action items, return an empty array.
 7. If an action item has no assignee, return an empty string for "assignee".
-8. If an action item has no due date, return an empty string for "due".
+8. If an action item has no due date, return an empty string for "due". If the
+   notes give a specific calendar date, write it as YYYY-MM-DD; otherwise copy
+   the wording from the notes (for example "next sprint") without converting it.
 9. If there are no open questions, return an empty array.
 10. If the next meeting is not mentioned, return an empty string.
 11. Preserve names as they appear in the notes.
@@ -61,7 +63,21 @@ Rules:
  * This intentionally handles the normal Chat Completions response shape
  * without assuming any custom response format from the Grok client.
  */
+/**
+ * Upper bound on the summary the model may write. Explicit so a runaway
+ * generation cannot run to the provider default; generous enough for long
+ * meetings with many action items.
+ */
+export const MEETING_SUMMARY_MAX_TOKENS = 4096;
+
 const extractResponseContent = (response: any): string => {
+  // A reply cut off at the token limit is incomplete JSON: report it as a
+  // failure instead of trying to parse a truncated summary.
+  if (response?.choices?.[0]?.finish_reason === "length") {
+    logLlmFailure("meeting summary", "malformed_content");
+    throw new LlmUnavailableError("malformed_content");
+  }
+
   const content = response?.choices?.[0]?.message?.content;
 
   if (typeof content !== "string" || !content.trim()) {
@@ -134,6 +150,7 @@ ${normalizedText}
         ],
 
         temperature: 0.2,
+        max_tokens: MEETING_SUMMARY_MAX_TOKENS,
       },
       {
         timeout: Number(process.env.LLM_REQUEST_TIMEOUT_MS || 60_000),

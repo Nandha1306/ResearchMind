@@ -1,5 +1,5 @@
 import axiosInstance from "./axios";
-import type { Board, Task, BulkCreateTasksPayload, TaskActivity, CreateTaskPayload } from "../types/task.types";
+import type { Board, Task, BulkCreateTasksPayload, TaskActivity, CreateTaskPayload, BulkCreateTasksResult } from "../types/task.types";
 
 /** Fetch all Kanban boards for the given workspace. */
 export const getWorkspaceBoards = async (
@@ -37,12 +37,15 @@ export const createTask = async (
 export const bulkCreateTasks = async (
   workspaceId: string,
   payload: BulkCreateTasksPayload
-): Promise<Task[]> => {
+): Promise<BulkCreateTasksResult> => {
   const response = await axiosInstance.post(
     `/tasks/workspaces/${workspaceId}/tasks/bulk`,
     payload
   );
-  return response.data.data || [];
+  return {
+    tasks: response.data.data || [],
+    replayed: response.data.replayed === true,
+  };
 };
 
 /** Fetch all tasks for a workspace (optionally filtered by boardId or parentTaskId). */

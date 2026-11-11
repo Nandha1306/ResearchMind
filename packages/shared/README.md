@@ -1,6 +1,6 @@
 # Shared Package (`packages/shared`)
 
-Shared utilities, custom error classes, and common Express error handling middleware for the **ResearchMind** monorepo.
+Shared backend code for the **ResearchMind** monorepo: error handling, JWT and internal-token authentication, workspace membership checks, secret validation, health checks, and connection/shutdown lifecycle helpers.
 
 ---
 
@@ -12,17 +12,34 @@ The `packages/shared` package centralizes shared backend logic, error abstractio
 ## 2. Responsibilities
 - Standardizing operational application errors (`AppError`).
 - Providing an async route handler wrapper (`asyncHandler`) to catch unhandled promise rejections.
-- Providing global Express error middleware (`errorMiddleware`) that formats error JSON responses uniform across all services.
+- Providing global Express error middleware (`errorMiddleware`) that formats error JSON responses (`{ success: false, message }`) uniformly across all services.
+- JWT access-token verification middleware (`auth/authenticate.ts`), used by document-, task- and ai-service.
+- Internal service-to-service authentication via the `X-Internal-Token` header (`auth/internal-auth.middleware.ts`).
+- Workspace membership checks against workspace-service (`auth/workspace-membership.ts`): malformed workspace id → `400`, not authenticated → `401`, check could not complete (timeout 3 s, network error, 5xx) → `503`; otherwise `true`/`false` (callers answer `403` for non-members). `getWorkspaceMemberIds` returns the member user ids (used to validate task assignees).
+- Startup secret validation (`config/secrets.ts`): a required secret that is missing, a placeholder, shorter than 32 characters or a known-insecure value stops the service; only the variable name is reported.
+- Health check handler (`health/healthCheck.ts`), MongoDB connection (`lifecycle/mongo.ts`), Redis reconnect/close helpers (`lifecycle/redis.ts`) and graceful shutdown (`lifecycle/shutdown.ts`).
 
 ---
 
 ## 3. Folder Structure
 ```
 packages/shared/
+├── auth/
+│   ├── authenticate.ts               # JWT access-token middleware
+│   ├── internal-auth.middleware.ts   # X-Internal-Token middleware
+│   └── workspace-membership.ts       # Membership checks against workspace-service
+├── config/
+│   └── secrets.ts            # requireSecret / assertRequiredSecrets
 ├── errors/
 │   ├── AppError.ts           # Custom operational error class extending Error
 │   ├── asyncHandler.ts       # Express async route wrapper
 │   └── error.middleware.ts   # Express global error handler
+├── health/
+│   └── healthCheck.ts        # createHealthHandler
+├── lifecycle/
+│   ├── mongo.ts              # connectMongo / disconnectMongo
+│   ├── redis.ts              # Redis reconnect and close helpers
+│   └── shutdown.ts           # registerGracefulShutdown
 └── README.md
 ```
 
@@ -34,7 +51,13 @@ packages/shared/
 ---
 
 ## 5. Environment Variables
-No specific environment variables required.
+Read by the shared code in whichever service imports it:
+
+| Variable | Used by | Notes |
+|----------|---------|-------|
+| `JWT_ACCESS_SECRET` | `auth/authenticate.ts` | Required; same value in every service |
+| `INTERNAL_SERVICE_TOKEN` | `auth/internal-auth.middleware.ts` | Without it every internal request is rejected (`401`) |
+| `WORKSPACE_SERVICE_URL` | `auth/workspace-membership.ts` | Default `http://127.0.0.1:5002` |
 
 ---
 

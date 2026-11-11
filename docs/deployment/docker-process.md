@@ -2,57 +2,43 @@
 
 ## Overview
 
-ResearchMind uses Docker Compose to orchestrate local infrastructure components (MongoDB database and Redis cache/queue server).
+ResearchMind uses Docker Compose to run local infrastructure only (MongoDB, Redis and Mongo Express). The Node services and the frontend are **not** containerized: there are no Dockerfiles, and they run with `npm run dev` (see `docs/onboarding.md`). Containerizing the services is roadmap / not yet implemented.
 
 ---
 
 ## Infrastructure Services (`docker-compose.yml`)
 
-```yaml
-version: '3.8'
+See `docker-compose.yml` for the exact definition. Summary:
 
-services:
-  mongodb:
-    image: mongo:7.0
-    container_name: researchmind-mongodb
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongodb_data:/data/db
+| Service | Image | Container | Port | Notes |
+|---------|-------|-----------|------|-------|
+| `mongodb` | `mongo:7` | `researchmind-mongodb` | `27017` | Root user from `MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD`; data in volume `mongodb_data` |
+| `redis` | `redis:7` | `researchmind-redis` | `6379` | Data in volume `redis_data` |
+| `mongo-express` | `mongo-express` | `researchmind-mongo-express` | `8081` | Admin login from `MONGO_ROOT_*`; basic auth from `MONGO_EXPRESS_USERNAME` / `MONGO_EXPRESS_PASSWORD` |
 
-  redis:
-    image: redis:7-alpine
-    container_name: researchmind-redis
-    ports:
-      - "6379:6379"
+All three use `restart: unless-stopped`. The credential variables have local-development defaults in `docker-compose.yml`; override them in a root `.env` (gitignored) for anything that is not a throwaway database. The ports are published on all interfaces, so do not run this file unmodified on a host reachable from an untrusted network.
 
-  mongo-express:
-    image: mongo-express:latest
-    container_name: researchmind-mongo-express
-    ports:
-      - "8081:8081"
-    environment:
-      ME_CONFIG_MONGODB_SERVER: mongodb
-      ME_CONFIG_MONGODB_PORT: 27017
-
-volumes:
-  mongodb_data:
-```
+Because MongoDB authentication is enabled, service connection strings must include credentials, e.g. `mongodb://<user>:<password>@127.0.0.1:27017/<database>?authSource=admin`.
 
 ---
 
-## Database Schema & Databases Hosted in MongoDB Container
+## Databases Hosted in MongoDB Container
 
-1. **`researchmind-auth`**: Stores user authentication profiles (`users`) and refresh token records (`tokens`).
-2. **`researchmind-workspace`**: Stores research workspaces (`workspaces`) and team member memberships (`members`).
-3. **`researchmind-documents`**: Stores document metadata, extracted text, and Cloudinary URLs (`documents`).
+Each service uses the database named in its own connection string (`MONGO_URI`, or `MONGODB_URI` for document/task/ai services). The names below are the ones used in the docs' examples:
+
+1. **`researchmind-auth`**: Users (`users`) and hashed refresh tokens (`refreshtokens`).
+2. **`researchmind-workspace`**: Workspaces (`workspaces`); members are stored as an array of user ids on each workspace.
+3. **`researchmind-documents`**: Document metadata, extracted text, embedding status and Cloudinary URLs (`documents`).
+4. **Task database** (e.g. `researchmind-tasks`): Boards (`boards`), tasks (`tasks`) and task activity (`taskactivities`).
+5. **`researchmind_ai`**: AI Q&A sessions (`aisessions`).
 
 ---
 
 ## Redis Container Usage
 
-- **Rate Limiting**: API Gateway sliding window rate limiter.
-- **Queue Producer**: Document Service pushes embedding job JSON strings into list `researchmind:embedding:jobs`.
+- **Rate Limiting**: API Gateway rate limiters (`express-rate-limit` with a Redis store, keys prefixed `rl:`). If Redis is unreachable the limiters fail open.
+- **Embedding Queue**: Document Service pushes embedding job JSON strings into list `researchmind:embedding:jobs`; the AI Service worker consumes them.
+- Auth Service connects to Redis at startup but does not use it.
 
 ---
 

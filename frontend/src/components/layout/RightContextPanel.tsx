@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { MAX_UI_QUERY_LENGTH } from "../../utils/navigation";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useWorkspaceStore } from "../../store/workspace.store";
 import { useAuthStore } from "../../store/auth.store";
@@ -191,21 +192,8 @@ export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible 
           </div>
         </div>
 
-        {/* Vector Engine Health Status */}
-        <div className="p-3 bg-bg-elevated/60 border border-border-subtle rounded-xl space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-text-muted">
-              RAG Engine Status
-            </span>
-            <span className="flex items-center gap-1 text-[10px] font-semibold text-success">
-              <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
-              Operational
-            </span>
-          </div>
-          <p className="text-[11px] text-text-secondary leading-normal">
-            Pinecone vector database & Voyage AI embedding worker connected.
-          </p>
-        </div>
+        {/* The former "RAG Engine Status: Operational" card was hard-coded and
+            never reflected real service health, so it was removed (P1-A25). */}
       </div>
 
       {/* 3. STATIC BOTTOM FOOTER: Ask ResearchMind Chat Box (Anchored to bottom edge) */}
@@ -226,6 +214,7 @@ export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible 
               ref={textareaRef}
               rows={1}
               value={chatMessage}
+              maxLength={MAX_UI_QUERY_LENGTH}
               onChange={(e) => setChatMessage(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask about your project..."

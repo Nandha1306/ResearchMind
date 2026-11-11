@@ -20,9 +20,14 @@ export const authApi = {
    * while revoking nothing.
    */
   logout: async (refreshToken: string): Promise<{ success: boolean }> => {
-    const response = await axiosInstance.post<{ success: boolean }>("/auth/logout", {
-      refreshToken,
-    });
+    // No automatic refresh-and-retry: a retry would resend THIS (by then
+    // rotated) refresh token and revoke nothing. signOutClientSession handles
+    // an expired access token itself.
+    const response = await axiosInstance.post<{ success: boolean }>(
+      "/auth/logout",
+      { refreshToken },
+      { skipAuthRefresh: true }
+    );
     return response.data;
   },
 

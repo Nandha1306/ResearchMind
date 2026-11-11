@@ -7,6 +7,8 @@ interface DocumentGridProps {
   onSelectDocument?: (document: DocumentItem) => void;
   onDeleteDocument?: (document: DocumentItem) => void;
   onReindexDocument?: (document: DocumentItem) => void;
+  /** Ids of documents with a delete/re-index request in progress. */
+  busyDocumentIds?: string[];
 }
 
 export const DocumentGrid: React.FC<DocumentGridProps> = ({
@@ -14,6 +16,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
   onSelectDocument,
   onDeleteDocument,
   onReindexDocument,
+  busyDocumentIds = [],
 }) => {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -24,6 +27,7 @@ export const DocumentGrid: React.FC<DocumentGridProps> = ({
           onSelect={onSelectDocument}
           onDelete={onDeleteDocument}
           onReindex={onReindexDocument}
+          isBusy={busyDocumentIds.includes(doc._id)}
         />
       ))}
     </div>

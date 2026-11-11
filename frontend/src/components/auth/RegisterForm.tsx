@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { postLoginDestination } from "../../utils/navigation";
 import { Sparkles, Mail, Lock, User, Eye, EyeOff, AlertCircle, Loader2 } from "lucide-react";
 import { useAuthStore } from "../../store/auth.store";
 import { authApi } from "../../api/auth.api";
@@ -12,6 +13,7 @@ import { Button } from "../ui/button";
 
 export const RegisterForm: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { register: storeRegister } = useAuthStore();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -47,12 +49,13 @@ export const RegisterForm: React.FC = () => {
       if (response.success && response.data) {
         const { user, accessToken, refreshToken } = response.data;
         storeRegister(user, accessToken, refreshToken);
-        navigate("/dashboard");
+        // Back to the protected page that required signing in, if any.
+        navigate(postLoginDestination(location.state), { replace: true });
       } else {
         setApiError("Registration failed. Invalid response structure.");
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Authentication request failed:", err?.message);
       setApiError(
         err.response?.data?.message || err.message || "Registration failed. Please try again."
       );
@@ -275,7 +278,10 @@ export const RegisterForm: React.FC = () => {
       {/* Google Button */}
       <button
         type="button"
-        className="w-full h-10 border border-[#2A2A2A] rounded-md bg-transparent hover:bg-[#1A1A1A] hover:border-[#3A3A3A] transition-colors flex items-center justify-center gap-2 text-[14px] text-[#8B8B8F] hover:text-[#EDEDEE]"
+        disabled
+        aria-disabled="true"
+        title="Google sign-in is not available yet"
+        className="w-full h-10 border border-[#2A2A2A] rounded-md bg-transparent transition-colors flex items-center justify-center gap-2 text-[14px] text-[#8B8B8F] opacity-50 cursor-not-allowed"
       >
         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
           <path
@@ -295,7 +301,7 @@ export const RegisterForm: React.FC = () => {
             fill="#EA4335"
           />
         </svg>
-        <span>Continue with Google</span>
+        <span>Continue with Google (coming soon)</span>
       </button>
 
       {/* Footer Switcher */}

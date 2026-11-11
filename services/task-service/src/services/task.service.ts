@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Board } from "../models/Board";
 import { Task, TaskDocument } from "../models/Task";
 import { TaskActivity } from "../models/TaskActivity";
@@ -206,111 +207,155 @@ export const createTask = async ({
   return task;
 };
 
+export type BulkTaskInput = {
+  boardId: string;
+  title: string;
+  description?: string;
+  status?: "todo" | "in_progress" | "done";
+  priority?: "low" | "medium" | "high";
+  assigneeId?: string | null;
+  dueDate?: string | null;
+  parentTaskId?: string | null;
+};
+
+/**
+ * Create several tasks (e.g. from meeting action items) as one unit.
+ *
+ * - All-or-nothing: the whole batch is validated before anything is written,
+ *   tasks and their "created" activities are inserted in bulk, and if any
+ *   write fails the tasks already written are deleted again (compensation;
+ *   MongoDB transactions need a replica set, which deployments do not have).
+ * - Idempotent with `importKey`: a repeat of the same import (double click,
+ *   network retry) returns the tasks created the first time, `replayed: true`.
+ *   A unique index makes a concurrent duplicate fail instead of duplicating.
+ */
 export const bulkCreateTasks = async ({
   workspaceId,
   tasks,
   createdBy,
+  importKey,
 }: {
   workspaceId: string;
-  tasks: Array<{
-    boardId: string;
-    title: string;
-    description?: string;
-    status?: "todo" | "in_progress" | "done";
-    priority?: "low" | "medium" | "high";
-    assigneeId?: string | null;
-    dueDate?: string | null;
-    parentTaskId?: string | null;
-  }>;
+  tasks: BulkTaskInput[];
   createdBy: string;
-}) => {
-  /*
-   * Phase 1: Pre-validate the entire batch.
-   *
-   * IMPORTANT:
-   * No Task documents or TaskActivity documents are written
-   * during this phase.
-   */
-
-  for (const task of tasks) {
-    const boardExists = await ensureBoardInWorkspace(
-      workspaceId,
-      task.boardId
-    );
-
-    if (!boardExists) {
+  importKey?: string;
+}): Promise<{ tasks: any[]; replayed: boolean }> => {
+  if (importKey) {
+    const previous = await findImportedTasks(workspaceId, importKey);
+    if (previous) {
+      // Only a COMPLETE earlier import is a replay. A partial set means the
+      // first request is still writing (or was rolled back): never report
+      // tasks as created that may not all exist.
+      if (previous.tasks.length === tasks.length) return previous;
       throw new AppError(
-        `Board "${task.boardId}" does not belong to this workspace`,
-        400
+        "Only part of this import exists: it may still be in progress, or some of its tasks were removed since. Try again shortly, or submit it as a new import.",
+        409
       );
     }
+  }
 
-    if (task.parentTaskId) {
-      const parentExists =
-        await ensureParentTaskInWorkspace(
-          workspaceId,
-          task.parentTaskId
-        );
+  /*
+   * Phase 1: validate the entire batch. Nothing is written in this phase.
+   */
+  const validBoards = new Set<string>();
+  const validParents = new Set<string>();
 
-      if (!parentExists) {
+  for (const task of tasks) {
+    if (!validBoards.has(task.boardId)) {
+      if (!(await ensureBoardInWorkspace(workspaceId, task.boardId))) {
+        throw new AppError(`Board "${task.boardId}" does not belong to this workspace`, 400);
+      }
+      validBoards.add(task.boardId);
+    }
+
+    if (task.parentTaskId && !validParents.has(task.parentTaskId)) {
+      if (!(await ensureParentTaskInWorkspace(workspaceId, task.parentTaskId))) {
         throw new AppError(
           `Parent task "${task.parentTaskId}" does not belong to this workspace`,
           400
         );
       }
-
-      // Validated in phase 1 so a bad parent chain aborts the whole batch
-      // before any document is written.
-      await assertParentChainIsSafe(
-        workspaceId,
-        task.parentTaskId
-      );
+      // A bad parent chain aborts the whole batch before any write.
+      await assertParentChainIsSafe(workspaceId, task.parentTaskId);
+      validParents.add(task.parentTaskId);
     }
   }
 
   /*
-   * Phase 2: All validation has passed.
-   *
-   * Now create the tasks using the existing createTask()
-   * business logic so TaskActivity records are generated
-   * exactly like normal task creation.
+   * Phase 2: write everything, or nothing.
    */
+  const documents = tasks.map((task, index) => ({
+    _id: new mongoose.Types.ObjectId(),
+    workspaceId,
+    boardId: task.boardId,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    priority: task.priority,
+    assigneeId: task.assigneeId ?? null,
+    dueDate: task.dueDate ? new Date(task.dueDate) : null,
+    parentTaskId: task.parentTaskId ?? null,
+    createdBy,
+    ...(importKey ? { importKey, importIndex: index } : {}),
+  }));
+  const ids = documents.map((doc) => doc._id);
 
-  const createdTasks = [];
-
-  for (const task of tasks) {
-    const createdTask = await createTask({
-      workspaceId,
-      boardId: task.boardId,
-      title: task.title,
-      description: task.description,
-      status: task.status,
-      priority: task.priority,
-      assigneeId: task.assigneeId,
-      dueDate: task.dueDate
-        ? new Date(task.dueDate)
-        : null,
-      parentTaskId: task.parentTaskId,
-      createdBy,
-    });
-
-    /*
-     * This should theoretically never fail because the
-     * same board/parent validation was already performed.
-     *
-     * Keep the guard as defense-in-depth.
-     */
-    if (!createdTask) {
-      throw new AppError(
-        `Failed to create task "${task.title}"`,
-        400
+  const compensate = async (reason: unknown) => {
+    try {
+      await Task.deleteMany({ _id: { $in: ids }, workspaceId });
+      await TaskActivity.deleteMany({ taskId: { $in: ids }, workspaceId });
+    } catch (cleanupError) {
+      // Leaves a partial import behind; logged with ids so it can be removed.
+      console.error(
+        `[task-service] Bulk import rollback failed for tasks ${ids.join(",")}:`,
+        (cleanupError as Error)?.message
       );
     }
+    throw reason;
+  };
 
-    createdTasks.push(createdTask);
+  // "created" activities first, tasks last: the tasks only become visible
+  // (to readers and to a replay of this import) once everything else is
+  // written, so a replay can never report an import that is later rolled back.
+  try {
+    await TaskActivity.insertMany(
+      documents.map((task) => ({
+        workspaceId,
+        taskId: task._id,
+        userId: createdBy,
+        action: "created",
+        payload: {},
+      })),
+      { ordered: true }
+    );
+  } catch (error) {
+    return compensate(error);
   }
 
-  return createdTasks;
+  let created;
+  try {
+    created = await Task.insertMany(documents, { ordered: true });
+  } catch (error: any) {
+    if (importKey && error?.code === 11000) {
+      // A concurrent request with the same key won the race. None of our
+      // tasks can have been written (both start at position 0, which
+      // conflicts); remove our activities.
+      await TaskActivity.deleteMany({ taskId: { $in: ids }, workspaceId }).catch(() => {});
+      await Task.deleteMany({ _id: { $in: ids }, workspaceId }).catch(() => {});
+      const previous = await findImportedTasks(workspaceId, importKey);
+      if (previous && previous.tasks.length === tasks.length) return previous;
+      throw new AppError("This import is already being processed. Please try again shortly.", 409);
+    }
+    return compensate(error);
+  }
+
+  return { tasks: created, replayed: false };
+};
+
+/** Tasks created earlier by the same import, or null if there are none. */
+const findImportedTasks = async (workspaceId: string, importKey: string) => {
+  const existing = await Task.find({ workspaceId, importKey }).sort({ importIndex: 1 });
+  return existing.length > 0 ? { tasks: existing, replayed: true } : null;
 };
 
 /**

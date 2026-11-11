@@ -1,11 +1,12 @@
 import axiosInstance from "./axios";
-import type { Workspace, WorkspaceCreationPayload, WorkspaceJoinPayload } from "../types/workspace.types";
+import type {
+  Workspace,
+  WorkspaceCreationPayload,
+  WorkspaceJoinPayload,
+  WorkspaceMember,
+} from "../types/workspace.types";
 
-export interface WorkspaceMember {
-  id: string;
-  name?: string;
-  email?: string;
-}
+export type { WorkspaceMember };
 
 export const workspaceApi = {
   createWorkspace: async (payload: WorkspaceCreationPayload): Promise<Workspace> => {

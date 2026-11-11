@@ -1,7 +1,11 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { streamAiQuery, fetchWorkspaceSessions } from "../api/ai.api";
-import { SSEStreamParser } from "../utils/sse";
 import type { AISource, AISessionHistoryItem } from "../utils/sse";
+import {
+  readAiStream,
+  INCOMPLETE_STREAM_MESSAGE,
+  STOPPED_STREAM_MESSAGE,
+} from "../utils/ai-stream";
 
 export interface UseAiQueryOptions {
   workspaceId: string | undefined;
@@ -24,8 +28,13 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
-  // Clear query state when active workspace changes
+  // Clear query state when the active workspace CHANGES. Not on (re)mount:
+  // React StrictMode re-runs mount effects in development, and a reset then
+  // would abort a question submitted by the page on mount (initialQuery).
+  const lastWorkspaceIdRef = useRef(workspaceId);
   useEffect(() => {
+    if (lastWorkspaceIdRef.current === workspaceId) return;
+    lastWorkspaceIdRef.current = workspaceId;
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
@@ -52,7 +61,7 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
       const items = await fetchWorkspaceSessions(workspaceId);
       setHistory(items);
     } catch (err) {
-      console.warn("Could not load AI session history:", err);
+      console.warn("Could not load AI session history:", (err as Error)?.message);
     } finally {
       setHistoryLoading(false);
     }
@@ -62,12 +71,21 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
     loadHistory();
   }, [loadHistory]);
 
+  /** Whether answer text has been received for the current request. */
+  const receivedTextRef = useRef(false);
+
   // Cancel an ongoing SSE stream request
   const cancelStream = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsStreaming(false);
+      // A stopped answer is not a complete one: never leave it looking like
+      // a finished grounded response.
+      if (receivedTextRef.current) {
+        setError(STOPPED_STREAM_MESSAGE);
+        setAnswerIsPartial(true);
+      }
     }
   }, []);
 
@@ -97,8 +115,14 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
 
       const controller = new AbortController();
       abortControllerRef.current = controller;
+      // Only the latest request may touch state: a superseded or cancelled
+      // request must not clear the newer request's controller or loading
+      // state, or append its tokens to the newer answer.
+      const isCurrent = () =>
+        abortControllerRef.current === controller && !controller.signal.aborted;
 
       // Reset state for new query
+      receivedTextRef.current = false;
       setQuery(trimmed);
       setAnswer("");
       setSources([]);
@@ -108,72 +132,53 @@ export const useAiQuery = ({ workspaceId }: UseAiQueryOptions) => {
       setUnverifiedCitations([]);
       setIsStreaming(true);
 
-      const parser = new SSEStreamParser();
-
       try {
         const reader = await streamAiQuery(
           { workspaceId, query: trimmed },
           controller.signal
         );
 
-        const decoder = new TextDecoder();
+        const outcome = await readAiStream(
+          reader,
+          {
+            onToken: (text) => {
+              receivedTextRef.current = true;
+              setAnswer((prev) => prev + text);
+            },
+            onSources: (items) => setSources(items),
+          },
+          isCurrent
+        );
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        if (!outcome || !isCurrent()) return;
 
-          const chunkText = decoder.decode(value, { stream: true });
-          const events = parser.push(chunkText);
-
-          for (const ev of events) {
-            if (ev.type === "token") {
-              setAnswer((prev) => prev + ev.text);
-            } else if (ev.type === "sources") {
-              setSources(ev.sources || []);
-            } else if (ev.type === "done") {
-              setSessionId(ev.sessionId);
-              setUnverifiedCitations(ev.unverifiedCitations);
-              setIsStreaming(false);
-            } else if (ev.type === "error") {
-              // Terminal failure: no sessionId is set, so the UI can never
-              // present this as a completed answer.
-              setError(ev.message);
-              setAnswerIsPartial(ev.partial);
-              setIsStreaming(false);
-            }
-          }
-        }
-
-        // Flush remaining buffer
-        const finalEvents = parser.flush();
-        for (const ev of finalEvents) {
-          if (ev.type === "token") {
-            setAnswer((prev) => prev + ev.text);
-          } else if (ev.type === "sources") {
-            setSources(ev.sources || []);
-          } else if (ev.type === "done") {
-            setSessionId(ev.sessionId);
-            setUnverifiedCitations(ev.unverifiedCitations);
-          } else if (ev.type === "error") {
-            setError(ev.message);
-            setAnswerIsPartial(ev.partial);
-          }
-        }
-
-        setIsStreaming(false);
-        abortControllerRef.current = null;
-
-        // Refresh MongoDB history after successful session completion
-        loadHistory();
-      } catch (err: any) {
-        if (err.name === "AbortError") {
-          console.log("Query stream aborted by user");
+        if (outcome.kind === "done") {
+          setSessionId(outcome.sessionId);
+          setUnverifiedCitations(outcome.unverifiedCitations);
+          // Refresh MongoDB history after successful session completion
+          loadHistory();
+        } else if (outcome.kind === "error") {
+          // Terminal failure: no sessionId is set, so the UI can never
+          // present this as a completed answer.
+          setError(outcome.message);
+          setAnswerIsPartial(outcome.partial);
         } else {
-          console.error("AI Stream Error:", err);
-          setError(err.message || "ResearchMind couldn't complete the answer. Please try again.");
+          // The stream closed without a terminal event: incomplete, whatever
+          // text arrived.
+          setError(INCOMPLETE_STREAM_MESSAGE);
+          setAnswerIsPartial(outcome.receivedText);
         }
-        setIsStreaming(false);
-        abortControllerRef.current = null;
+      } catch (err: any) {
+        // Cancelled or replaced by a newer request: that path owns the state.
+        if (!isCurrent()) return;
+        console.error("AI stream error:", err?.message);
+        setError(err?.message || "ResearchMind couldn't complete the answer. Please try again.");
+        setAnswerIsPartial(receivedTextRef.current);
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+          setIsStreaming(false);
+        }
       }
     },
     [workspaceId, loadHistory]

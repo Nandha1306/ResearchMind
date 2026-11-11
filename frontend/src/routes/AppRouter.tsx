@@ -1,5 +1,7 @@
 import React, { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
+import { useAuthStore } from "../store/auth.store";
+import { defaultRouteFor, postLoginDestination } from "../utils/navigation";
 import { LoginPage } from "../pages/LoginPage";
 import { RegisterPage } from "../pages/RegisterPage";
 import { CreateWorkspacePage } from "../pages/CreateWorkspacePage";
@@ -138,13 +140,29 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
   );
 };
 
+/** Unknown URLs (and "/"): the dashboard when signed in, otherwise sign-in. */
+const DefaultRedirect: React.FC = () => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  return <Navigate to={defaultRouteFor(isAuthenticated)} replace />;
+};
+
+/** Sign-in / sign-up pages are for signed-out users only. */
+const GuestOnly: React.FC<{ children: React.ReactElement }> = ({ children }) => {
+  const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
+  const location = useLocation();
+  if (isAuthenticated) {
+    return <Navigate to={postLoginDestination(location.state)} replace />;
+  }
+  return children;
+};
+
 export const AppRouter: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
         {/* Public Routes */}
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/login" element={<GuestOnly><LoginPage /></GuestOnly>} />
+        <Route path="/register" element={<GuestOnly><RegisterPage /></GuestOnly>} />
 
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>
@@ -171,7 +189,7 @@ export const AppRouter: React.FC = () => {
         </Route>
 
         {/* Default Redirects */}
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<DefaultRedirect />} />
       </Routes>
     </BrowserRouter>
   );

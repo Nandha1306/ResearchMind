@@ -7,17 +7,52 @@
 > it *understands* it, and actively assists teams throughout the entire project lifecycle.
 
 [![Node.js](https://img.shields.io/badge/Node.js-20-339933?logo=nodedotjs)](https://nodejs.org)
-[![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)](https://reactjs.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://reactjs.org)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?logo=mongodb)](https://mongodb.com)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis)](https://redis.io)
 [![Pinecone](https://img.shields.io/badge/Pinecone-Vector_DB-000000)](https://pinecone.io)
-[![Claude](https://img.shields.io/badge/Claude-AI-orange)](https://anthropic.com)
+[![LLM](https://img.shields.io/badge/LLM-Groq_%2F_xAI-orange)](https://groq.com)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docker.com)
+
+---
+
+## Current Implementation Status
+
+This README describes the full product design. Much of it is **not built yet**. This section describes what the code in this repository actually does. Where a later section disagrees with it, this section is correct, and any feature not listed here as implemented is **Roadmap / not yet implemented**. Per-service details are in `services/*/README.md`, `docs/onboarding.md` and `docs/architecture/system-architecture.md`.
+
+**Repository layout.** An npm-workspaces monorepo: `frontend/` (React 19 + Vite + TypeScript), `services/*` (Express 5 + TypeScript microservices) and `packages/{shared,validation}` (shared backend code and zod schemas). There is no `apps/` directory.
+
+| Service | Directory | Default port | Status |
+|---------|-----------|--------------|--------|
+| API Gateway | `services/api-gateway` | 5000 | Implemented |
+| Auth Service | `services/auth-service` | 5001 | Implemented |
+| Workspace Service | `services/workspace-service` | 5002 | Implemented (separate service, not part of auth) |
+| Document Service | `services/document-service` | 5003 | Implemented |
+| Task Service | `services/task-service` | 5004 | Implemented |
+| AI Service (+ embedding worker) | `services/ai-service` | 5006 | Implemented |
+| Notification Service | `services/notification-service` | — | Not implemented (empty placeholder) |
+| Chat Service | — | — | Not implemented (does not exist) |
+| Frontend | `frontend` | 5173 | Implemented |
+
+**Actual stack.** LLM: Groq or xAI, called through the OpenAI SDK (`services/ai-service/src/config/grok.ts`; a `gsk_` key selects Groq, default model `openai/gpt-oss-120b`, otherwise xAI, default `grok-4.5`). Anthropic Claude is not used. Embeddings: Voyage AI, model `VOYAGE_MODEL` (default `voyage-3`, 1024 dimensions). Vector store: Pinecone, one namespace per workspace. Validation: zod (`packages/validation`), not Joi. Storage: MongoDB (Mongoose), Redis (gateway rate limits and the embedding queue), Cloudinary (original files).
+
+**Implemented behaviour.**
+- **Auth**: register, login, refresh, logout, `GET /api/auth/me`. Access token (default 15 min) plus refresh token (default 7 days). The refresh token is sent in the JSON request body (no cookie) and stored only as a SHA-256 hash in MongoDB (not Redis). The client keeps both tokens in `localStorage`. Every refresh rotates the pair. Reusing an already-rotated token revokes all of the user's sessions, except within `REFRESH_REUSE_GRACE_MS` (default 10 s), where a concurrent refresh is only rejected.
+- **Gateway**: verifies the JWT, applies Redis-backed rate limits and proxies to the services. It does not check workspace membership: each service checks membership against workspace-service. A malformed workspace id answers `400`, a non-member gets `403`, and `503` means the check could not run.
+- **Workspaces**: create, list and join with an invite code (case-insensitive; unknown code → `404`, already a member → `409`), plus the member list. There is no role system, and invite codes do not expire.
+- **Documents**: upload PDF or DOCX only (max 10 MB; wrong type → `415`, empty or unreadable → `422`, too large → `413`). Text is extracted, the file is stored on Cloudinary, and the document is embedded in the background through a Redis queue consumed by an ai-service worker. Status is `pending` / `indexing` / `indexed` / `failed` (with a failure reason). Indexing is retried automatically up to 3 attempts, and manual re-index is available. Deleting a document removes its vectors first and answers `503` if that fails. Markdown and TXT are not supported.
+- **AI Q&A**: `POST /api/ai/query` streams Server-Sent Events: `start`, `sources`, `token`, then `done` (`sessionId`, `unverifiedCitations`), or `error` (`message`, `partial`). The query is trimmed and must be 1–2000 characters; `topK` is 1–10. `GET /api/ai/sessions/workspace/:workspaceId` lists past sessions, and `POST /api/ai/search` returns raw retrieval results. The frontend Q&A page streams from `/api/ai/query`.
+- **Meeting summarizer**: `POST /api/ai/summarize-meeting` returns structured JSON (not streamed). The page can create tasks from action items.
+- **Tasks**: boards, tasks, subtasks, activity log and a drag-and-drop Kanban board. The assignee must be a workspace member's user id (`400` otherwise). Bulk creation (`POST /api/tasks/workspaces/:workspaceId/tasks/bulk`) takes at most 50 tasks, is all-or-nothing, and is idempotent with an optional `importKey`.
+- **Tests/CI**: `npm test` runs `tests/*.test.ts` with Node's test runner via `tsx`. GitHub Actions (`.github/workflows/ci.yml`) typechecks the services, builds the frontend and runs the tests.
+
+**Known limitations / not yet implemented.** No notifications of any kind, no Google sign-in (button shows "coming soon"), no password reset, no profile editing, no real-time chat or WebSockets, no AI agent, no literature review generator, report drafter or onboarding summary, no progress dashboard (the Overview page only shows indexed-document, Q&A-session and member counts plus the latest session), no caching layer or Redis pub/sub, no Dockerfiles or deployment, no demo seed script. The Sources, Analytics, Literature Review, Report Drafter and Settings pages are placeholders.
 
 ---
 
 ## 📌 Table of Contents
 
+0. [Current Implementation Status](#current-implementation-status)
 1. [Problem Statement](#1-problem-statement)
 2. [Proposed Solution](#2-proposed-solution)
 3. [Key Features](#3-key-features)
@@ -87,18 +122,18 @@ Beyond answering questions, AI agents **actively work** alongside the team:
 
 ## 3. Key Features
 
-| Module | Feature | AI Technique |
-|--------|---------|-------------|
-| 📄 Document Ingestion | Upload PDF, DOCX, MD, TXT | Chunking + Embedding pipeline |
-| 🔍 Semantic Search | Natural language Q&A over all documents | RAG — vector similarity search |
-| 🤖 AI Agent | Multi-step task automation | Tool calling + ReAct loop |
-| 📚 Literature Review Generator | Auto-generate review from papers | RAG + structured generation |
-| 📝 Meeting Summarizer | Paste notes → decisions + tasks | Structured output prompting |
-| ✅ Task Manager | Kanban board + AI task creation | Agent tool execution |
-| 💬 Project Chat | Real-time team messaging | WebSocket + pub/sub |
-| 📊 Progress Tracker | Visual project timeline | Aggregation + AI insight |
-| 🔔 Smart Notifications | Relevant alerts, not noise | Event-driven + AI filtering |
-| 👥 Team Workspace | Isolated per project team | Multi-tenant architecture |
+| Module | Feature | AI Technique | Status |
+|--------|---------|-------------|--------|
+| 📄 Document Ingestion | Upload PDF, DOCX (MD, TXT planned) | Chunking + Embedding pipeline | Implemented for PDF and DOCX only |
+| 🔍 Semantic Search | Natural language Q&A over all documents | RAG — vector similarity search | Implemented |
+| 🤖 AI Agent | Multi-step task automation | Tool calling + ReAct loop | Roadmap / not yet implemented |
+| 📚 Literature Review Generator | Auto-generate review from papers | RAG + structured generation | Roadmap / not yet implemented (placeholder page) |
+| 📝 Meeting Summarizer | Paste notes → decisions + tasks | Structured output prompting | Implemented |
+| ✅ Task Manager | Kanban board + AI task creation | Agent tool execution | Kanban board implemented; tasks are created from meeting action items via bulk creation (no agent) |
+| 💬 Project Chat | Real-time team messaging | WebSocket + pub/sub | Roadmap / not yet implemented |
+| 📊 Progress Tracker | Visual project timeline | Aggregation + AI insight | Roadmap / not yet implemented |
+| 🔔 Smart Notifications | Relevant alerts, not noise | Event-driven + AI filtering | Roadmap / not yet implemented |
+| 👥 Team Workspace | Isolated per project team | Multi-tenant architecture | Implemented (invite code join, no roles) |
 
 ---
 
@@ -125,9 +160,11 @@ This means:
 - Cost-efficient — only relevant context hits the LLM
 - Scalable — works with hundreds of documents
 
-### ✅ AI Agent with Tool Calling
+### 🔜 AI Agent with Tool Calling (roadmap)
 
-The agent uses Claude's **function calling API** with a ReAct (Reasoning + Acting) loop:
+> **Roadmap / not yet implemented.** No agent endpoint or agent UI exists. The project's LLM is Groq/xAI through the OpenAI SDK, not Claude.
+
+The planned agent uses the LLM's **function calling API** with a ReAct (Reasoning + Acting) loop:
 
 - Agent receives a natural language instruction
 - Reasons about what steps are needed
@@ -141,19 +178,23 @@ This is not a chatbot. It is an **autonomous workflow executor**.
 
 A real background data pipeline:
 - Triggered on every document upload
-- Handles PDF text extraction, DOCX parsing, Markdown parsing
+- Handles PDF text extraction and DOCX parsing (Markdown parsing is roadmap / not yet implemented)
 - Intelligent chunking (respects paragraph boundaries, overlapping windows)
 - Batch embedding with retry logic
 - Incremental upsert to Pinecone (not full re-index on every change)
 
 ### ✅ Structured Output Generation
 
+> **Status:** only the meeting summarizer exists. It uses schema-guided prompting, and the JSON output is validated with zod. Literature reviews, multi-pass generation and page-level citation tracking are roadmap / not yet implemented.
+
 For literature reviews and meeting summaries, the system uses:
 - Schema-guided prompting to force structured JSON output
 - Multi-pass generation (outline → section → full review)
 - Citation tracking — every claim linked back to source document + page
 
-### ✅ Context-Aware Prompting at Scale
+### 🔜 Context-Aware Prompting at Scale (roadmap)
+
+> **Status:** roadmap. Today the Q&A prompt injects only the retrieved chunks (with `[Source N]` labels) and the user's question.
 
 Every AI call dynamically injects:
 - Project name, domain, and description
@@ -200,6 +241,8 @@ This is **system-level prompt engineering**, not ad-hoc prompting.
 ---
 
 ## 6. System Architecture
+
+> **Target design.** The diagram below is the planned architecture. The ports `3000–3006`, the Chat and Notification services, Socket.io, Redis pub/sub, request-ID tracing and the notification mailer are **not implemented**. The real services and ports are API Gateway `5000`, Auth `5001`, Workspace `5002`, Document `5003`, Task `5004` and AI `5006`; see [Current Implementation Status](#current-implementation-status) and `docs/architecture/system-architecture.md`.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -249,22 +292,22 @@ This is **system-level prompt engineering**, not ad-hoc prompting.
 ```
 DOCUMENT UPLOAD FLOW
 User uploads PDF/DOCX
-  → Doc Service stores raw file (Cloudinary/S3)
-  → Extracts text (pdf-parse / mammoth)
-  → Triggers Embedding Pipeline Worker (async)
-  → Worker chunks text → generates embeddings → upserts to Pinecone
-  → Doc record in MongoDB updated: embeddingStatus = "indexed"
+  → Doc Service extracts text (pdf-parse / mammoth)
+  → Stores the original file on Cloudinary
+  → Pushes an embedding job to the Redis list researchmind:embedding:jobs
+  → AI Service worker claims the job, chunks text → generates embeddings → upserts to Pinecone
+  → Doc record in MongoDB updated: embeddingStatus = "indexed" (or "failed" with a reason)
 
 SEMANTIC SEARCH FLOW
 User asks: "Which papers mention BERT?"
   → AI Service embeds the query
-  → Queries Pinecone (topK=5, namespace=projectId)
+  → Queries Pinecone (topK=5 by default, max 10, namespace=workspaceId)
   → Retrieves relevant chunks with source metadata
   → Builds prompt: system + context chunks + user question
-  → Streams Claude response back via SSE
-  → Response includes citations (doc name + page)
+  → Streams the Groq/xAI response back via SSE
+  → Sources event lists documentId, chunkIndex, score, fileType (no page numbers)
 
-AGENT FLOW
+AGENT FLOW (roadmap / not yet implemented)
 User: "Summarize today's meeting and create tasks"
   → AI Service starts ReAct agent loop
   → Agent calls: read_document(meetingNotesId)
@@ -278,188 +321,193 @@ User: "Summarize today's meeting and create tasks"
 
 ## 7. Tech Stack
 
+> Rows marked *(planned)* are not used in the current code.
+
 ### Frontend
 | Purpose | Technology | Why |
 |---------|-----------|-----|
-| Framework | React 18 + Vite | Fast dev server, modern tooling |
-| State Management | Zustand | Lightweight, no boilerplate |
+| Framework | React 19 + Vite + TypeScript | Fast dev server, modern tooling |
+| State Management | Zustand (+ TanStack React Query for server state) | Lightweight, no boilerplate |
 | Styling | Tailwind CSS + shadcn/ui | Fast, consistent UI |
-| File Upload | react-dropzone | PDF/DOCX drag-and-drop |
-| Rich Text Editor | TipTap | Extensible, supports collaboration |
-| Real-time | Socket.io-client | Chat + live updates |
+| File Upload | react-dropzone *(planned)* | PDF/DOCX drag-and-drop |
+| Rich Text Editor | TipTap *(planned)* | Extensible, supports collaboration |
+| Real-time | Socket.io-client *(planned)* | Chat + live updates |
 | HTTP Client | Axios + interceptors | Auto token refresh |
-| Routing | React Router v6 | Standard SPA routing |
+| Routing | React Router v7 | Standard SPA routing |
 | Drag and Drop | @dnd-kit/core | Kanban board |
-| AI Streaming | Native EventSource API | SSE for token-by-token output |
-| Charts | Recharts | Progress dashboard |
+| AI Streaming | `fetch` + `ReadableStream` SSE parser | Token-by-token output from `POST /api/ai/query` (EventSource cannot send a POST body) |
+| Charts | Recharts *(installed; no page uses it yet)* | Progress dashboard |
 | PDF Viewer | react-pdf | View uploaded papers in-app |
 
 ### Backend (per microservice)
 | Purpose | Technology | Why |
 |---------|-----------|-----|
-| Runtime | Node.js 20 | V8 performance, huge ecosystem |
-| Framework | Express.js | Minimal, flexible |
-| Real-time | Socket.io | WebSocket + fallbacks |
-| Auth | jsonwebtoken + bcrypt | Industry standard |
-| Validation | Joi | Declarative schema validation |
+| Runtime | Node.js 22 (TypeScript, `ts-node` in development) | V8 performance, huge ecosystem |
+| Framework | Express 5 | Minimal, flexible |
+| Real-time | Socket.io *(planned)* | WebSocket + fallbacks |
+| Auth | jsonwebtoken + bcryptjs | Industry standard |
+| Validation | zod (`packages/validation`) | Declarative schema validation |
 | File handling | Multer + Cloudinary | Upload + CDN storage |
 | PDF extraction | pdf-parse | Extract text from PDFs |
 | DOCX extraction | mammoth | Extract text from DOCX |
-| Logging | Winston + Morgan | Structured logs |
-| Process manager | PM2 (prod) | Restart on crash |
+| Logging | Morgan (HTTP logs); Winston only in document-service | Structured logs |
+| Process manager | PM2 (prod) *(planned)* | Restart on crash |
 
 ### Data & AI Infrastructure
 | Tool | Purpose |
 |------|---------|
 | MongoDB + Mongoose | Primary data store — documents, tasks, users |
-| Redis (ioredis) | Rate limiting, caching, pub/sub, presence |
+| Redis (ioredis) | Gateway rate limiting and the embedding job queue (caching, pub/sub and presence are planned) |
 | Pinecone | Vector database for semantic search |
-| Anthropic Claude API | LLM for all AI features |
-| Voyage AI embeddings | Generate document + query embeddings |
-| Docker + Compose | Local environment orchestration |
+| Groq / xAI via the OpenAI SDK | LLM for Q&A and meeting summaries (Anthropic Claude is not used) |
+| Voyage AI embeddings (`voyage-3` by default) | Generate document + query embeddings |
+| Docker + Compose | Local infrastructure only (MongoDB, Redis, Mongo Express) |
 
 ### DevOps
 | Tool | Purpose |
 |------|---------|
-| Docker Compose | Local multi-service dev |
-| GitHub Actions | CI/CD — lint, test, deploy |
-| Railway | Deploy all backend services |
-| Vercel | Deploy React frontend |
-| MongoDB Atlas | Production DB |
-| Upstash Redis | Serverless production Redis |
+| Docker Compose | Local infrastructure (the Node services are not containerized) |
+| GitHub Actions | CI — typecheck services, build frontend, run tests (no lint or deploy step) |
+| Railway *(planned)* | Deploy all backend services |
+| Vercel *(planned)* | Deploy React frontend |
+| MongoDB Atlas *(planned)* | Production DB |
+| Upstash Redis *(planned)* | Serverless production Redis |
 
 ---
 
 ## 8. Microservices Breakdown
 
-### 8.1 API Gateway — Port 3000
+> The real services and default ports are: API Gateway `5000`, Auth `5001`, **Workspace `5002`** (a separate service; workspaces are not part of auth-service), Document `5003`, Task `5004`, AI `5006`. Chat and Notification services are not implemented. Endpoint lists marked *(design)* below are the original plan; the implemented endpoints are listed in each `services/*/README.md`.
+
+### 8.1 API Gateway — Port 5000
 
 The gateway is the **only** entry point. The React client never calls services directly.
 
-**Middleware stack (applied in order):**
+**Middleware stack (as implemented):**
 ```
 Request arrives
-  → requestId middleware (inject X-Request-ID header)
-  → Morgan logger (log method, path, IP)
-  → CORS middleware
-  → Rate limiter (Redis sliding window)
-  → JWT verifier (except /auth/register, /auth/login)
-    → attaches { userId, role, workspaceId } to request headers
-  → HTTP proxy to correct downstream service
+  → CORS, Helmet, Morgan logger
+  → Per-IP rate limiter on POST /api/auth/login and /api/auth/register
+  → /api/auth/* proxied without JWT check
+  → Other routes: JWT verifier (Authorization: Bearer <accessToken>)
+  → Per-user rate limiters (Redis-backed express-rate-limit; fail open if Redis is down)
+  → HTTP proxy to the downstream service (the Authorization header is forwarded;
+    each service verifies the JWT itself and checks workspace membership)
 ```
+Request-ID tracing and injected user/role headers are not implemented.
 
 **Route mapping:**
 ```
-/api/auth/*       → Auth Service       :3001
-/api/docs/*       → Docs Service       :3002
-/api/chat/*       → Chat Service       :3003
-/api/tasks/*      → Task Service       :3004
-/api/ai/*         → AI Service         :3005
-/api/notif/*      → Notification Svc   :3006
+/api/auth/*        → Auth Service        :5001
+/api/workspaces/*  → Workspace Service   :5002
+/api/documents/*   → Document Service    :5003
+/api/tasks/*       → Task Service        :5004
+/api/ai/*          → AI Service          :5006
 ```
 
-**Rate Limits:**
+**Rate Limits (as implemented):**
 | Endpoint | Limit | Window |
 |---------|-------|--------|
-| POST /auth/login | 5 requests | 15 minutes per IP |
-| POST /auth/register | 3 requests | 1 hour per IP |
-| POST /ai/search | 30 requests | 1 hour per user |
-| POST /ai/agent | 10 requests | 1 hour per user |
-| POST /ai/generate-review | 5 requests | 1 hour per user |
-| All other endpoints | 100 requests | 1 minute per user |
+| POST /api/auth/login | 5 failed requests | 15 minutes per IP |
+| POST /api/auth/register | 3 requests | 1 hour per IP |
+| POST /api/ai/query + POST /api/ai/search (shared) | 30 requests | 1 hour per user |
+| POST /api/ai/summarize-meeting | 20 requests | 1 hour per user |
+| All other authenticated endpoints | 100 requests | 1 minute per user |
 
 ---
 
-### 8.2 Auth Service — Port 3001
+### 8.2 Auth Service — Port 5001 (Workspace Service — Port 5002)
 
-Handles identity, authentication, and workspace membership.
+Handles identity and authentication. Workspaces live in the separate Workspace Service (`services/workspace-service`, port 5002).
 
-**Endpoints:**
+**Endpoints (as implemented):**
 ```
-POST  /auth/register                 Create account (name, email, password)
-POST  /auth/login                    Login → accessToken + refreshToken cookie
-POST  /auth/refresh                  Rotate refresh token
-POST  /auth/logout                   Invalidate refresh token in Redis
-GET   /auth/me                       Current user profile
-PUT   /auth/me                       Update name, avatar
-POST  /auth/forgot-password          Send reset email
-POST  /auth/reset-password           Reset with token
+POST  /api/auth/register                 Create account (name, email, password)
+POST  /api/auth/login                    Login → { user, accessToken, refreshToken } in the JSON body
+POST  /api/auth/refresh                  Rotate the token pair ({ refreshToken } in the body)
+POST  /api/auth/logout                   Revoke the given refresh token (MongoDB)
+GET   /api/auth/me                       Current user profile
 
-POST  /workspaces                    Create workspace (project team)
-GET   /workspaces                    List user's workspaces
-GET   /workspaces/:id                Workspace detail + members
-POST  /workspaces/:id/invite         Send invite email
-POST  /workspaces/:id/join/:token    Accept invite
-PUT   /workspaces/:id/members/:uid   Change member role
-DELETE /workspaces/:id/members/:uid  Remove member
+POST  /api/workspaces                    Create workspace (Workspace Service)
+GET   /api/workspaces                    List user's workspaces
+POST  /api/workspaces/join               Join with an invite code (case-insensitive; 404 unknown, 409 already a member)
+GET   /api/workspaces/:workspaceId               Workspace detail (members only)
+GET   /api/workspaces/:workspaceId/members       Member list with names
+GET   /api/workspaces/:workspaceId/membership    { isMember } for the caller (used by other services)
 ```
+Roadmap / not yet implemented: `PUT /auth/me` (profile update), forgot/reset password, Google sign-in, email invites, member roles, removing members. Invite codes do not expire.
 
-**JWT Auth Flow:**
+**JWT Auth Flow (as implemented):**
 ```
 Login
   → verify password with bcrypt
-  → issue accessToken (JWT, 15min, payload: { userId, email })
-  → issue refreshToken (JWT, 7 days)
-  → store SHA256(refreshToken) in Redis key: refresh:{userId}, TTL = 7 days
-  → send accessToken in response body
-  → send refreshToken in httpOnly, Secure, SameSite=Strict cookie
+  → issue accessToken (JWT, default 15 min, payload: { userId })
+  → issue refreshToken (JWT, default 7 days, separate secret)
+  → store SHA256(refreshToken) in MongoDB (RefreshToken collection) — not Redis
+  → return both tokens in the JSON response body (no cookie);
+    the client keeps them in localStorage
 
 Every request
-  → Gateway extracts Bearer token from Authorization header
-  → Verifies JWT signature and expiry
-  → Injects X-User-Id and X-User-Role into forwarded request
+  → Gateway verifies the Bearer token's signature and expiry
+  → Forwards the Authorization header unchanged; each service verifies it again
+    and asks Workspace Service whether the caller is a member of the workspace
+    (malformed id → 400, not a member → 403, check could not run → 503)
 
 Token refresh
-  → Client sends request with refreshToken cookie
-  → Server verifies cookie → looks up hash in Redis
-  → If match: issue NEW accessToken + NEW refreshToken
-  → Delete old hash from Redis → store new hash (rotation)
-  → If mismatch (stolen token used): delete all refresh tokens for user → force re-login
+  → Client sends { refreshToken } in the request body
+  → Server verifies the JWT, then atomically marks the stored hash as rotated
+  → Issues a NEW accessToken + NEW refreshToken (rotation on every refresh)
+  → Token already rotated within REFRESH_REUSE_GRACE_MS (default 10 s, e.g. a second tab):
+    401, other sessions untouched
+  → Token rotated earlier, revoked or unknown (reuse): delete all refresh tokens
+    for the user → force re-login
 ```
 
 ---
 
-### 8.3 Document Service — Port 3002
+### 8.3 Document Service — Port 5003
 
 Core service. Manages file uploads, document storage, and triggers the embedding pipeline.
 
-**Endpoints:**
+**Endpoints (as implemented):**
 ```
-GET    /docs/workspace/:wid              List all documents in workspace
-POST   /docs/workspace/:wid              Upload new document (multipart/form-data)
-GET    /docs/:id                         Get document metadata + content
-DELETE /docs/:id                         Delete document + remove vectors from Pinecone
-GET    /docs/:id/content                 Get extracted text content
-GET    /docs/:id/file                    Stream original file (PDF/DOCX)
-GET    /docs/workspace/:wid/status       Embedding status for all docs
-POST   /docs/:id/reindex                 Manually trigger re-embedding
+GET    /api/documents/workspace/:workspaceId   List all documents in workspace (with embedding status)
+POST   /api/documents/upload                   Upload new document (multipart/form-data: file, workspaceId)
+POST   /api/documents                          Create document metadata
+GET    /api/documents/:id                      Get document metadata + content
+DELETE /api/documents/:id                      Delete document: vectors first (503 if that fails), then file + record
+POST   /api/documents/:id/reindex              Manually trigger re-embedding (resets the retry budget)
 ```
+Roadmap / not yet implemented: separate `/content`, `/file` and `/status` endpoints.
 
-**Document Upload Flow:**
+**Document Upload Flow (as implemented):**
 ```javascript
-// 1. Client uploads file via multipart form
-// 2. Multer saves to temp directory
-// 3. Upload original to Cloudinary (for viewing)
-// 4. Extract text based on file type:
+// 1. Client uploads file via multipart form (one file, max 10 MB)
+// 2. Multer saves to a temp directory; only .pdf / .docx extensions pass
+// 3. Workspace membership is checked against Workspace Service
+// 4. The file's bytes must match its extension (else 415); empty file → 422
+// 5. Extract text based on file type (unreadable file → 422):
 //    - PDF  → pdf-parse
-//    - DOCX → mammoth.extractRawText()
-//    - MD/TXT → read directly
-// 5. Save document record to MongoDB
-//    { title, type, cloudinaryUrl, extractedText, embeddingStatus: "pending" }
-// 6. Emit "document:uploaded" event to embedding worker (Redis pub/sub)
-// 7. Return document record immediately (don't wait for embedding)
-// 8. Worker processes embedding in background, updates embeddingStatus
+//    - DOCX → mammoth
+// 6. Upload original to Cloudinary (for viewing)
+// 7. Save document record to MongoDB
+//    { originalName, fileType, fileSize, cloudinaryUrl, extractedText, uploadedBy, embeddingStatus: "pending" }
+// 8. Push an embedding job onto the Redis list researchmind:embedding:jobs (no pub/sub)
+// 9. Return document record immediately (don't wait for embedding)
+// 10. AI Service worker claims the job, embeds it and reports "indexed" or "failed" (with a reason);
+//     up to 3 attempts, plus a 5-minute recovery sweep for stuck or lost jobs
 ```
 
 **Supported File Types:**
 - `.pdf` — Research papers, reports, presentations
 - `.docx` — Word documents, reports
-- `.md` — Markdown notes, README files
-- `.txt` — Plain text meeting notes, logs
+- `.md`, `.txt` — **not supported** (roadmap / not yet implemented); rejected with `415`
 
 ---
 
-### 8.4 Chat Service — Port 3003
+### 8.4 Chat Service — Roadmap / not yet implemented
+
+> No chat service, WebSocket server or channel UI exists. Everything in this subsection is design.
 
 Real-time team messaging with WebSocket.
 
@@ -494,58 +542,58 @@ redis.publish("workspace:events", JSON.stringify({
 
 ---
 
-### 8.5 Task Service — Port 3004
+### 8.5 Task Service — Port 5004
 
-Kanban task management. Tasks can be created manually or by the AI agent.
+Kanban task management. Tasks are created manually or in bulk from meeting-summary action items (there is no AI agent).
 
-**Endpoints:**
+**Endpoints (as implemented, all under `/api/tasks/workspaces/:workspaceId`):**
 ```
-GET    /tasks/workspace/:wid/boards          List boards
-POST   /tasks/workspace/:wid/boards          Create board
-GET    /tasks/boards/:id                     Board detail + all tasks
-POST   /tasks/boards/:id/tasks               Create task
-GET    /tasks/:id                            Task detail
-PUT    /tasks/:id                            Update task
-DELETE /tasks/:id                            Delete task
-PUT    /tasks/:id/move                       Change status + reorder
-GET    /tasks/:id/activity                   Activity log
-POST   /tasks/workspace/:wid/bulk            Bulk create tasks (used by AI agent)
-GET    /tasks/workspace/:wid/summary         Summary stats for dashboard
-GET    /tasks/workspace/:wid/overdue         List overdue tasks
+POST   /boards                 Create board
+GET    /boards                 List boards
+GET    /boards/:id             Board detail
+PATCH  /boards/:id             Update board
+DELETE /boards/:id             Delete board
+POST   /tasks                  Create task
+POST   /tasks/bulk             Bulk create tasks (max 50, all-or-nothing, idempotent with optional importKey)
+GET    /tasks                  List tasks
+GET    /tasks/:id              Task detail
+GET    /tasks/:id/activities   Activity log
+PATCH  /tasks/:id              Update task (including status changes from drag and drop)
+DELETE /tasks/:id              Delete task
 ```
+Roadmap / not yet implemented: summary stats and overdue endpoints.
 
-**Task Schema Fields:**
-- title, description, status (todo / in_progress / review / done)
-- priority (low / medium / high / urgent)
-- assigneeId, dueDate, estimatedHours
-- linkedDocId (link to a source document)
-- createdBy (user or "AI Agent")
-- tags, subtasks, activity log
+**Task Schema Fields (as implemented):**
+- title, description, status (todo / in_progress / done)
+- priority (low / medium / high)
+- boardId, assigneeId (must be the user id of a workspace member, else `400`), dueDate
+- parentTaskId (subtasks)
+- createdBy (user id), activity log
+- Roadmap: review status, urgent priority, estimatedHours, linkedDocId, tags
 
 ---
 
-### 8.6 AI Service — Port 3005
+### 8.6 AI Service — Port 5006
 
-The intelligence layer. All AI features are handled here.
+The intelligence layer. All AI features are handled here. The LLM is Groq or xAI through the OpenAI SDK.
 
-**Endpoints:**
+**Endpoints (as implemented):**
 ```
-POST  /ai/search              Semantic Q&A over documents (RAG)
-POST  /ai/agent               AI agent: multi-step task execution
-POST  /ai/summarize-meeting   Format meeting notes → structured summary
-POST  /ai/generate-review     Generate literature review from papers
-POST  /ai/draft-section       Draft a project report section
-POST  /ai/explain-document    Ask questions about a specific document
-POST  /ai/suggest-tasks       Suggest tasks from a document or discussion
-POST  /ai/onboard             Onboarding summary for new team member
-POST  /ai/embed               Internal — generate embedding for text
+POST  /api/ai/query                             RAG Q&A, streamed via SSE
+POST  /api/ai/search                            Raw retrieval results (not streamed)
+GET   /api/ai/sessions/workspace/:workspaceId   Past Q&A sessions
+POST  /api/ai/summarize-meeting                 Meeting notes → structured JSON summary (not streamed)
+DELETE /internal/vectors/workspaces/:workspaceId/documents/:documentId   Internal (X-Internal-Token)
 ```
+The embedding worker runs inside this service's process (a standalone worker is optional: `npm run dev:worker`).
 
-**All endpoints stream responses via SSE except `/ai/embed`.**
+**Roadmap / not yet implemented:** `/ai/agent`, `/ai/generate-review`, `/ai/draft-section`, `/ai/explain-document`, `/ai/suggest-tasks`, `/ai/onboard`, `/ai/embed`. Only `/api/ai/query` streams.
 
 ---
 
-### 8.7 Notification Service — Port 3006
+### 8.7 Notification Service — Roadmap / not yet implemented
+
+> `services/notification-service` is an empty placeholder: no routes, no port, no Redis subscriber, no email. The application sends no notifications. Everything below is design.
 
 Event-driven. Never called directly — reacts to Redis events.
 
@@ -577,36 +625,36 @@ task:overdue         → daily digest email
 ┌──────────────────────────────────────────────────────┐
 │                  INDEXING PIPELINE                   │
 │                                                      │
-│  PDF/DOCX/MD uploaded                                │
+│  PDF/DOCX uploaded (MD planned)                      │
 │       ↓                                              │
 │  Text Extraction                                     │
 │    PDF  → pdf-parse (preserves layout)               │
 │    DOCX → mammoth (clean text, no styling)           │
-│    MD   → remark (parse + stringify to plain)        │
+│    MD   → remark  (planned, not implemented)         │
 │       ↓                                              │
 │  Preprocessing                                       │
-│    - Remove headers/footers (page number patterns)   │
-│    - Normalize whitespace                            │
-│    - Split into logical sections (by heading)        │
+│    - Remove "-- N of M --" page markers              │
+│    - Normalize whitespace and line breaks            │
 │       ↓                                              │
-│  Chunking  (size=400 tokens, overlap=60 tokens)      │
-│    - Respect paragraph boundaries                    │
-│    - Never split a sentence across chunks            │
+│  Chunking  (size=400, overlap=60 estimated tokens)   │
+│    - LangChain RecursiveCharacterTextSplitter        │
+│    - Prefers paragraph, line, then sentence breaks   │
 │    - Overlapping window preserves cross-boundary ctx │
 │       ↓                                              │
-│  Embedding  (Voyage AI voyage-2 model)               │
-│    - Batch chunks in groups of 20 (rate limit safe)  │
+│  Embedding  (Voyage AI, VOYAGE_MODEL, default        │
+│              voyage-3)                               │
+│    - Batch chunks in groups of 8, retried on error   │
 │    - Each chunk → 1024-dimension float vector        │
 │       ↓                                              │
 │  Pinecone Upsert                                     │
 │    - namespace = workspaceId (team isolation)        │
 │    - id = `{docId}-chunk-{index}`                    │
 │    - values = embedding vector                       │
-│    - metadata = { docId, docTitle, chunkIndex,       │
-│                   text, pageNumber, workspaceId,     │
-│                   fileType, uploadedAt }             │
+│    - metadata = { documentId, workspaceId,           │
+│                   uploadedBy, chunkIndex, text,      │
+│                   fileType, embeddingModel }         │
 │       ↓                                              │
-│  MongoDB update: embeddingStatus = "indexed"         │
+│  Document Service status: "indexed" (or "failed")    │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -621,9 +669,9 @@ task:overdue         → daily digest email
 │  Embed the query (same model as indexing)            │
 │       ↓                                              │
 │  Pinecone query                                      │
-│    topK = 6                                          │
+│    topK = 5 by default (1–10)                        │
 │    namespace = workspaceId                           │
-│    filter = { fileType: "pdf" }  (optional)          │
+│    (no metadata filter yet)                          │
 │       ↓                                              │
 │  Retrieved chunks (ranked by cosine similarity)      │
 │    [chunk from paper A, score: 0.91]                 │
@@ -636,14 +684,17 @@ task:overdue         → daily digest email
 │    Context: retrieved chunks with source labels      │
 │    User: original question                           │
 │       ↓                                              │
-│  Claude API (streaming)                              │
+│  Groq / xAI via OpenAI SDK (streaming)               │
 │       ↓                                              │
 │  Stream answer token by token via SSE                │
-│    + include sources: [{ docTitle, chunkIndex }]     │
+│    + sources: [{ documentId, chunkIndex, score,      │
+│                  fileType }]                         │
 └──────────────────────────────────────────────────────┘
 ```
 
 ### 9.3 Chunking Algorithm
+
+> Design sketch. The implementation (`services/ai-service/src/services/chunking.service.ts`) uses LangChain's `RecursiveCharacterTextSplitter` with `chunkSize = 400` and `chunkOverlap = 60`, measured in estimated tokens (~4 characters per token).
 
 ```javascript
 function chunkDocument(text, options = {}) {
@@ -691,12 +742,12 @@ await pinecone.index(INDEX_NAME).namespace(workspaceId).upsert(vectors);
 // Query — always scope to workspaceId
 await pinecone.index(INDEX_NAME).namespace(workspaceId).query({ vector, topK });
 
-// Delete all vectors for a document
-await pinecone.index(INDEX_NAME).namespace(workspaceId).deleteMany({
-  filter: { docId: { "$eq": docId } }
+// Delete all vectors for a document (as implemented)
+await pineconeIndex.namespace(workspaceId).deleteMany({
+  documentId: { "$eq": documentId }
 });
 
-// Delete entire workspace (on workspace deletion)
+// Delete entire workspace (planned: workspace deletion is not implemented)
 await pinecone.index(INDEX_NAME).namespace(workspaceId).deleteAll();
 ```
 
@@ -704,15 +755,17 @@ await pinecone.index(INDEX_NAME).namespace(workspaceId).deleteAll();
 
 | Event | Pinecone Action |
 |-------|----------------|
-| Document uploaded + processed | Upsert all chunks |
-| Document re-uploaded / edited | Delete old chunks → upsert new |
-| Document deleted | Delete all chunks with docId filter |
-| Workspace deleted | Delete entire namespace |
-| Manual reindex triggered | Delete → re-chunk → re-embed → upsert |
+| Document uploaded + processed | Upsert all chunks (ids `{documentId}-chunk-{index}`, so a retry overwrites) |
+| Document re-uploaded / edited | Not supported (roadmap) |
+| Document deleted | Delete all chunks with `documentId` filter first; if that fails the deletion is rolled back (`503`) |
+| Workspace deleted | Not supported (roadmap) |
+| Manual reindex triggered | Re-queue → re-chunk → re-embed → upsert |
 
 ---
 
 ## 10. AI Agent System — Deep Dive
+
+> **Roadmap / not yet implemented.** There is no agent endpoint, tool executor or agent UI. The code samples below are design sketches; they reference the Anthropic SDK, which this project does not use (the LLM is Groq/xAI through the OpenAI SDK).
 
 ### 10.1 What the Agent Can Do
 
@@ -927,38 +980,39 @@ BEHAVIOR RULES:
 
 ## 11. All AI Features
 
-### 11.1 Semantic Q&A (RAG Search)
+### 11.1 Semantic Q&A (RAG Search) — Implemented
 
-**Endpoint:** `POST /ai/search`
+**Endpoint:** `POST /api/ai/query` (streamed). `POST /api/ai/search` takes the same `workspaceId` / `query` / `topK` fields and returns the raw retrieval results as JSON, without an answer.
 
 **Request:**
 ```json
 {
-  "question": "Which papers propose using attention mechanisms for our problem?",
-  "filters": { "fileType": "pdf" }
+  "workspaceId": "<24-hex workspace id>",
+  "query": "Which papers propose using attention mechanisms for our problem?",
+  "topK": 5
 }
 ```
+`query` is trimmed and must be 1–2000 characters; `topK` is optional, 1–10 (default 5); an optional `sessionId` may be sent. Metadata filters are not supported yet.
 
-**Response (streamed via SSE):**
-```json
-{
-  "answer": "Based on your uploaded papers, three sources discuss attention mechanisms...",
-  "sources": [
-    { "docId": "...", "docTitle": "Attention Is All You Need (uploaded)", "preview": "..." },
-    { "docId": "...", "docTitle": "Project Research Notes - Week 3", "preview": "..." }
-  ]
-}
+**Response (`text/event-stream`, one event per step):**
 ```
+event: start    data: { "query": "..." }
+event: sources  data: { "sources": [ { "documentId": "...", "chunkIndex": 3, "score": 0.87, "fileType": "pdf" } ] }
+event: token    data: { "text": "Based on" }        (repeated)
+event: done     data: { "sessionId": "...", "unverifiedCitations": [...] }
+event: error    data: { "message": "...", "partial": true|false }   (instead of done, if generation fails)
+```
+Past sessions: `GET /api/ai/sessions/workspace/:workspaceId`.
 
 ---
 
 ### 11.2 Meeting Notes Summarizer
 
-**Endpoint:** `POST /ai/summarize-meeting`
+**Endpoint:** `POST /api/ai/summarize-meeting` — Implemented
 
-**Input:** Raw meeting notes (pasted text or document ID)
+**Input:** `{ workspaceId, text }`. The text is pasted meeting notes, 10–50000 characters; selecting a document is not supported.
 
-**Output (structured JSON → saved as new document):**
+**Output (structured JSON, returned in the response; not streamed and not saved as a document):**
 ```json
 {
   "meeting_date": "2024-11-15",
@@ -978,13 +1032,13 @@ BEHAVIOR RULES:
 }
 ```
 
-The frontend displays this as a formatted summary and offers one-click task creation from action items.
+The frontend displays this as a formatted summary and offers task creation from selected action items (`POST /api/tasks/workspaces/:workspaceId/tasks/bulk` with an `importKey`, so repeating the same import does not duplicate tasks).
 
 ---
 
-### 11.3 Literature Review Generator
+### 11.3 Literature Review Generator — Roadmap / not yet implemented
 
-**Endpoint:** `POST /ai/generate-review`
+**Endpoint (planned):** `POST /ai/generate-review`
 
 **How it works:**
 ```
@@ -1022,9 +1076,9 @@ The frontend displays this as a formatted summary and offers one-click task crea
 
 ---
 
-### 11.4 Project Report Section Drafter
+### 11.4 Project Report Section Drafter — Roadmap / not yet implemented
 
-**Endpoint:** `POST /ai/draft-section`
+**Endpoint (planned):** `POST /ai/draft-section`
 
 **Request:**
 ```json
@@ -1038,9 +1092,9 @@ Agent searches the knowledge base for relevant notes, decisions, and technical d
 
 ---
 
-### 11.5 New Member Onboarding
+### 11.5 New Member Onboarding — Roadmap / not yet implemented
 
-**Endpoint:** `POST /ai/onboard`
+**Endpoint (planned):** `POST /ai/onboard`
 
 When a new team member joins:
 - AI searches all documents for: project overview, current status, key decisions
@@ -1050,6 +1104,8 @@ When a new team member joins:
 ---
 
 ### 11.6 Streaming Implementation
+
+> **Design sketch.** Only `POST /api/ai/query` streams today. The real server (`services/ai-service/src/controllers/query.controller.ts`, `services/rag.service.ts`) uses the OpenAI SDK against Groq/xAI and writes named events (`event: start|sources|token|done|error`), not the `data:`-only format shown here. The real client is `frontend/src/api/ai.api.ts` + `frontend/src/utils/sse.ts`.
 
 All writing AI features stream token-by-token via Server-Sent Events:
 
@@ -1128,6 +1184,14 @@ function useAIStream() {
 ---
 
 ## 12. Database Design
+
+> **Design vs. implementation.** The schemas below are the original design. What exists today (each service has its own database, named by its connection string):
+> - `users` (name, email, hashed password, avatar) and `refreshtokens` (userId, SHA-256 token hash, expiresAt, rotatedAt) — auth-service.
+> - `workspaces` (name, description, ownerId, `inviteCode`, `members` as a plain array of user ids; no roles, slug, domain or invite tokens) — workspace-service.
+> - `documents` (workspaceId, uploadedBy, originalName, fileType `pdf|docx`, fileSize, cloudinaryUrl, cloudinaryPublicId, extractedText, `embeddingStatus` `pending|indexing|indexed|failed`, embeddingAttempts, embeddingError, indexingStartedAt, deletedAt) — document-service.
+> - `boards` (workspaceId, name), `tasks` (status `todo|in_progress|done`, priority `low|medium|high`, assigneeId, dueDate, parentTaskId, createdBy, importKey/importIndex) and `taskactivities` — task-service.
+> - `aisessions` (workspaceId, userId, query, answer, sources, aiModel) — ai-service.
+> - `channels`, `messages` and `notifications` do not exist (roadmap).
 
 ### MongoDB Collections
 
@@ -1294,6 +1358,8 @@ function useAIStream() {
 
 ### Redis Key Design
 
+> **As implemented**, Redis holds only the gateway rate-limit counters (`rl:<limiter>:<key>`, via `rate-limit-redis`) and the embedding job list `researchmind:embedding:jobs`. Refresh tokens are in MongoDB, not Redis. The auth, caching, presence and notification keys below are design only.
+
 ```
 # Auth
 refresh:{userId}                     SHA256 of refresh token, TTL = 7d
@@ -1320,6 +1386,8 @@ embed:queue                          Redis list — docId pushed by Doc Service,
 
 ### MongoDB Indexes
 
+> Design. The implemented indexes are declared in each service's Mongoose models (`services/*/src/models`).
+
 ```javascript
 db.users.createIndex({ email: 1 }, { unique: true });
 
@@ -1343,6 +1411,8 @@ db.ai_sessions.createIndex({ workspaceId: 1, type: 1, createdAt: -1 });
 ## 13. API Reference
 
 ### Standard Response Envelope
+
+> **As implemented:** success responses are `{ "success": true, "data": ... }` (some also include `message`); errors are `{ "success": false, "message": "..." }` (zod validation failures also include `errors: [...]`). There are no `error.code` strings or `meta` pagination yet. The envelope below is the design.
 
 **Success:**
 ```json
@@ -1370,22 +1440,29 @@ db.ai_sessions.createIndex({ workspaceId: 1, type: 1, createdAt: -1 });
 | Code | HTTP | When |
 |------|------|------|
 | `UNAUTHORIZED` | 401 | Missing or expired token |
-| `FORBIDDEN` | 403 | Token valid but no access to this resource |
-| `NOT_FOUND` | 404 | Resource does not exist |
-| `VALIDATION_ERROR` | 422 | Invalid request body or params |
+| `FORBIDDEN` | 403 | Token valid but not a member of the workspace |
+| `NOT_FOUND` | 404 | Resource does not exist (also: unknown invite code) |
+| `VALIDATION_ERROR` | 400 | Invalid request body or params (zod), malformed workspace id, assignee not a workspace member |
+| `CONFLICT` | 409 | Already a member of the workspace; document is being indexed |
+| `UNSUPPORTED_FILE` | 415 | Upload is not PDF/DOCX, or its bytes do not match its extension |
+| `UNPROCESSABLE_FILE` | 422 | Uploaded file is empty or its text cannot be read |
 | `RATE_LIMITED` | 429 | Too many requests |
-| `EMBEDDING_PENDING` | 202 | Document uploaded but not yet indexed |
-| `AI_UNAVAILABLE` | 503 | AI provider error or timeout |
-| `FILE_TOO_LARGE` | 413 | Upload exceeds 20MB limit |
+| `BAD_GATEWAY` | 502 | AI provider error or timeout (non-streaming endpoints), Cloudinary unavailable on upload |
+| `SERVICE_UNAVAILABLE` | 503 | Membership check could not run, vector cleanup failed on delete, indexing queue unavailable, downstream service unreachable |
+| `FILE_TOO_LARGE` | 413 | Upload exceeds the 10 MB limit |
+
+The `Code` column is descriptive only; responses carry the HTTP status and a `message`.
 
 ---
 
 ## 14. Real-Time & System Design Concepts
 
 ### 14.1 API Gateway Pattern
-Single entry point. Services are not exposed directly. All auth, rate limiting, and logging happens once at the gateway — services trust the injected headers.
+Single entry point for the client. The gateway verifies the JWT and applies rate limits, but services do **not** trust injected headers: each service verifies the forwarded bearer token itself, and every workspace-scoped service asks workspace-service whether the caller is a member (malformed id → `400`, not a member → `403`, check could not run → `503`). In local development the services also listen on their own ports, so they are not network-isolated.
 
 ### 14.2 Redis Sliding Window Rate Limiter
+
+> **As implemented:** the gateway uses `express-rate-limit` with a Redis store (`rate-limit-redis`, fixed windows per limiter). If Redis is unreachable the limiters fail open. The function below is a design sketch.
 
 ```javascript
 async function slidingWindowRateLimit(key, limit, windowMs) {
@@ -1400,9 +1477,11 @@ async function slidingWindowRateLimit(key, limit, windowMs) {
 ```
 
 ### 14.3 JWT Refresh Token Rotation
-Stateless access token (15min) + stateful refresh token (7d, Redis-backed). On every refresh, the old token is deleted from Redis and a new one is issued. Token reuse detection → all sessions revoked.
+Stateless access token (default 15 min) + stateful refresh token (default 7 days). The refresh token travels in the JSON request body and is stored only as a SHA-256 hash in MongoDB (not Redis); the client keeps tokens in `localStorage`. On every refresh the presented token is atomically marked as rotated and a new pair is issued. Presenting a token that was already rotated revokes all of the user's sessions (reuse detection), except within `REFRESH_REUSE_GRACE_MS` (default 10 s), where a concurrent refresh is rejected without revoking anything.
 
-### 14.4 Redis Pub/Sub Event Bus
+### 14.4 Redis Pub/Sub Event Bus — Roadmap / not yet implemented
+
+> No pub/sub exists. Services call each other over HTTP (membership checks, internal routes with `X-Internal-Token`). The only Redis-based hand-off is the embedding job list `researchmind:embedding:jobs` (document-service → ai-service worker).
 
 Services communicate through events, not direct HTTP calls. This decouples them:
 
@@ -1414,7 +1493,7 @@ Notif Service   → subscribes → "workspace:events" channel
 Embed Worker    → consumes   → "embed:queue" list
 ```
 
-### 14.5 WebSocket Rooms (Socket.io)
+### 14.5 WebSocket Rooms (Socket.io) — Roadmap / not yet implemented
 
 ```javascript
 // User joins their personal room on connect
@@ -1431,7 +1510,9 @@ Socket.io Redis Adapter ensures rooms work across multiple Node.js processes (ho
 
 ### 14.6 Background Embedding Worker
 
-The embedding pipeline runs as a separate process to avoid blocking HTTP responses:
+> **As implemented:** the worker runs inside the AI Service process (optionally also as a standalone process via `npm run dev:worker`). It pops jobs from `researchmind:embedding:jobs` and claims each document from document-service before processing, so duplicate deliveries are skipped. It then reports `indexed` or `failed` (with a reason). There is no dead-letter list: a document is retried up to 3 attempts, and a 5-minute recovery sweep in document-service re-queues stuck or lost jobs. The loop below is a design sketch.
+
+The embedding pipeline runs off the HTTP request path, so uploads are not blocked:
 
 ```javascript
 // Worker process — continuously polls Redis queue
@@ -1451,7 +1532,7 @@ async function embeddingWorker() {
 }
 ```
 
-### 14.7 Caching Strategy
+### 14.7 Caching Strategy — Roadmap / not yet implemented
 
 | Data | Cache | TTL | Invalidate on |
 |------|-------|-----|---------------|
@@ -1468,6 +1549,8 @@ Each workspace has its own Pinecone namespace. Vectors from one team are complet
 ## 15. Frontend Modules
 
 ### Page Routes
+
+> **As implemented** (`frontend/src/routes/AppRouter.tsx`): `/login`, `/register`, `/create-workspace`, `/dashboard` (overview), `/dashboard/documents`, `/dashboard/ai-researcher` (AI Q&A, also `/app/workspace/:id/search`), `/dashboard/meeting-notes`, `/dashboard/tasks` (Kanban). `/dashboard/sources`, `/dashboard/analytics`, `/dashboard/literature-review`, `/dashboard/report-drafter` and `/dashboard/settings` are placeholder pages. Agent, chat, progress dashboard and account settings pages do not exist. The list below is the original design.
 
 ```
 /                               Landing + login
@@ -1488,6 +1571,8 @@ Each workspace has its own Pinecone namespace. Vectors from one team are complet
 ```
 
 ### Core Components
+
+> Design. Implemented components live in `frontend/src/components/{auth,dashboard,documents,kanban,layout,ui,workspace}`. Agent, literature review, chat and progress dashboard components do not exist.
 
 ```
 <AppShell>
@@ -1600,6 +1685,8 @@ Each workspace has its own Pinecone namespace. Vectors from one team are complet
 
 ### Zustand Stores
 
+> **As implemented:** only `useAuthStore` (`store/auth.store.ts`, user + tokens, persisted to `localStorage`) and `useWorkspaceStore` (`store/workspace.store.ts`). Server data (documents, tasks, sessions) is fetched with TanStack React Query. The other stores below are design only.
+
 ```javascript
 useAuthStore         // currentUser, tokens, login(), logout()
 useWorkspaceStore    // workspaces[], currentWorkspace, members
@@ -1615,25 +1702,27 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ## 16. Phase-by-Phase Build Plan
 
-### 🟦 Phase 1 — Foundation (Week 1–2) — [STATUS: 100% COMPLETE & VERIFIED]
+> Status labels reflect what exists in the code; a checked item means the code for it is present. It does not mean the item was formally verified. Automated tests live in `tests/` (`npm test`).
+
+### 🟦 Phase 1 — Foundation (Week 1–2) — [STATUS: implemented]
 **Goal:** All services boot. Auth works end to end.
 
 - [x] Set up monorepo folder structure
-- [x] Initialize services (Express + TypeScript + Winston)
+- [x] Initialize services (Express + TypeScript; Winston only in document-service)
 - [x] Docker Compose: MongoDB + Redis
 - [x] Auth Service: register, login, JWT, refresh, logout
-- [x] Workspace CRUD (create, invite, join)
+- [x] Workspaces: create, list, join by invite code (separate workspace-service; no update/delete, email invites or roles)
 - [x] API Gateway: routing + JWT middleware + rate limiting
 - [x] React app (Vite + Tailwind CSS + Lucide Icons)
 - [x] Login, Register, Workspace onboarding pages
 - [x] Axios instance with auto token refresh interceptor
 - [x] Protected routes
 
-✅ **Checkpoint:** Register → create workspace → see dashboard. (VERIFIED)
+✅ **Checkpoint:** Register → create workspace → see dashboard.
 
 ---
 
-### 🟦 Phase 2 — Document Ingestion (Week 3) — [STATUS: 100% COMPLETE & VERIFIED]
+### 🟦 Phase 2 — Document Ingestion (Week 3) — [STATUS: implemented for PDF and DOCX]
 **Goal:** Upload documents, extract text, view them in-app.
 
 - [x] Doc Service: upload endpoint with Multer (`POST /api/documents/upload`)
@@ -1642,47 +1731,47 @@ useUIStore           // sidebarOpen, activeModal, theme
 - [x] Store file on Cloudinary (`image` asset type for PDFs, `raw` for DOCX)
 - [x] Document library page (grid view with file type icons, search, filters)
 - [x] In-app PDF viewer (`react-pdf` in-app modal with page controls & zoom)
-- [x] Embedding status badge (`pending` / `indexed`)
+- [x] Embedding status badge (`pending` / `indexing` / `indexed` / `failed`)
 - [x] Redis queue for embedding jobs (producer side `researchmind:embedding:jobs`)
 
-✅ **Checkpoint:** Upload a PDF, see it in document library, text extracted and stored. (VERIFIED)
+✅ **Checkpoint:** Upload a PDF, see it in document library, text extracted and stored.
 
 ---
 
-### 🟦 Phase 3 — RAG Pipeline (Week 4) — [STATUS: BACKEND 100% COMPLETE]
+### 🟦 Phase 3 — RAG Pipeline (Week 4) — [STATUS: implemented]
 **Goal:** AI can answer questions from uploaded documents.
 
 - [x] Set up Pinecone project + index (`researchmind`)
 - [x] Embedding worker (consumes Redis queue `researchmind:embedding:jobs`)
 - [x] Chunking algorithm with paragraph overlap
-- [x] Voyage AI embedding API integration (`voyage-4`)
+- [x] Voyage AI embedding API integration (`VOYAGE_MODEL`, default `voyage-3`)
 - [x] Upsert chunks to Pinecone with metadata & workspace namespace isolation
 - [x] Vector delete on document delete (`deleteDocumentEmbeddings`)
 - [x] `/ai/search` endpoint (Retrieval debugging endpoint)
-- [x] `/ai/query` endpoint (Grok LLM prompt + SSE token streaming + source citations)
+- [x] `/ai/query` endpoint (Groq/xAI LLM prompt + SSE token streaming + source citations)
 - [x] AI session logged to MongoDB (`AISession` model & persistence)
-- [ ] Semantic search page with streaming answer + source citations (Frontend)
+- [x] Semantic search page with streaming answer + source citations (Frontend, `/dashboard/ai-researcher`)
 
 ✅ **Checkpoint:** Upload 3 papers, ask "What models are compared?", get a grounded answer with citations.
 
 ---
 
-### 🟦 Phase 4 — Meeting Summarizer + Task Creation (Week 5)
+### 🟦 Phase 4 — Meeting Summarizer + Task Creation (Week 5) — [STATUS: implemented]
 **Goal:** Paste meeting notes → structured summary → tasks auto-created.
 
-- [ ] Task Service: board + task CRUD
-- [ ] Bulk task creation endpoint
-- [ ] `/ai/summarize-meeting` endpoint (structured output)
-- [ ] Meeting Summarizer page: paste input → formatted output
-- [ ] "Create tasks from action items" button
-- [ ] Kanban board UI with @dnd-kit
-- [ ] Task detail modal (assignee, due date, priority, subtasks)
+- [x] Task Service: board + task CRUD
+- [x] Bulk task creation endpoint (max 50, all-or-nothing, idempotent with `importKey`)
+- [x] `/ai/summarize-meeting` endpoint (structured output)
+- [x] Meeting Summarizer page: paste input → formatted output
+- [x] "Create tasks from action items" button
+- [x] Kanban board UI with @dnd-kit
+- [x] Task detail modal (assignee, due date, priority, subtasks)
 
 ✅ **Checkpoint:** Paste meeting notes, get structured summary, click to create tasks on board.
 
 ---
 
-### 🟦 Phase 5 — AI Agent (Week 6)
+### 🟦 Phase 5 — AI Agent (Week 6) — [STATUS: not started]
 **Goal:** Agent executes multi-step instructions.
 
 - [ ] `/ai/agent` endpoint with ReAct loop
@@ -1695,7 +1784,7 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ---
 
-### 🟦 Phase 6 — Literature Review Generator (Week 7)
+### 🟦 Phase 6 — Literature Review Generator (Week 7) — [STATUS: not started; placeholder page only]
 **Goal:** Auto-generate a literature review from uploaded papers.
 
 - [ ] `/ai/generate-review` endpoint
@@ -1709,7 +1798,7 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ---
 
-### 🟦 Phase 7 — Real-Time Chat (Week 8)
+### 🟦 Phase 7 — Real-Time Chat (Week 8) — [STATUS: not started]
 **Goal:** Team can communicate in real time inside workspace.
 
 - [ ] Chat Service with channel CRUD
@@ -1725,7 +1814,7 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ---
 
-### 🟦 Phase 8 — Notifications + Dashboard (Week 9)
+### 🟦 Phase 8 — Notifications + Dashboard (Week 9) — [STATUS: not started]
 **Goal:** Smart notifications and progress visibility.
 
 - [ ] Notification Service with Redis pub/sub subscriber
@@ -1739,13 +1828,13 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ---
 
-### 🟦 Phase 9 — Polish + Deploy (Week 10)
+### 🟦 Phase 9 — Polish + Deploy (Week 10) — [STATUS: partial]
 **Goal:** Production-ready, live, presentable.
 
 - [ ] Loading states, error states, empty states throughout
 - [ ] Mobile responsive layout
-- [ ] Dark mode toggle
-- [ ] GitHub Actions CI (lint + test)
+- [x] Dark mode toggle
+- [x] GitHub Actions CI (typecheck + frontend build + tests; no lint step)
 - [ ] Deploy all services to Railway
 - [ ] Deploy React to Vercel
 - [ ] MongoDB Atlas + Upstash Redis + Pinecone Starter
@@ -1759,219 +1848,120 @@ useUIStore           // sidebarOpen, activeModal, theme
 
 ## 17. Folder Structure
 
+Actual layout (npm workspaces: `frontend`, `services/*`, `packages/*`). The original design used an `apps/` directory, a `chat-service`, a `doc-service` with an embedded worker, and workspaces inside auth-service; none of those exist.
+
 ```
-researchmind/
+ReserchMind/
 │
-├── apps/
-│   │
-│   ├── client/                             ← React 18 + Vite
-│   │   ├── public/
-│   │   └── src/
-│   │       ├── components/
-│   │       │   ├── documents/
-│   │       │   │   ├── DocumentCard.jsx
-│   │       │   │   ├── DocumentLibrary.jsx
-│   │       │   │   ├── UploadDropzone.jsx
-│   │       │   │   └── PDFViewer.jsx
-│   │       │   ├── ai/
-│   │       │   │   ├── SemanticSearch.jsx
-│   │       │   │   ├── AgentPage.jsx
-│   │       │   │   ├── AgentStepFeed.jsx
-│   │       │   │   ├── LiteratureReview.jsx
-│   │       │   │   ├── MeetingSummarizer.jsx
-│   │       │   │   └── StreamingText.jsx
-│   │       │   ├── tasks/
-│   │       │   │   ├── KanbanBoard.jsx
-│   │       │   │   ├── TaskCard.jsx
-│   │       │   │   └── TaskDetailModal.jsx
-│   │       │   ├── chat/
-│   │       │   │   ├── ChatChannel.jsx
-│   │       │   │   ├── MessageItem.jsx
-│   │       │   │   └── TypingIndicator.jsx
-│   │       │   ├── dashboard/
-│   │       │   │   └── ProgressDashboard.jsx
-│   │       │   └── ui/                     ← shadcn/ui wrappers
-│   │       ├── pages/
-│   │       ├── stores/                     ← Zustand
-│   │       ├── hooks/
-│   │       │   ├── useAIStream.js
-│   │       │   └── useSocket.js
-│   │       ├── lib/
-│   │       │   ├── axios.js                ← interceptors
-│   │       │   └── socket.js               ← socket.io client
-│   │       └── App.jsx
-│   │
-│   ├── api-gateway/                        ← Port 3000
-│   │   └── src/
-│   │       ├── middleware/
-│   │       │   ├── auth.js
-│   │       │   ├── rateLimiter.js
-│   │       │   └── requestId.js
-│   │       ├── routes/                     ← proxy definitions
-│   │       └── index.js
-│   │
-│   ├── auth-service/                       ← Port 3001
-│   │   └── src/
-│   │       ├── controllers/
-│   │       ├── models/
-│   │       │   ├── User.js
-│   │       │   └── Workspace.js
-│   │       ├── routes/
-│   │       ├── services/
-│   │       │   ├── tokenService.js
-│   │       │   └── emailService.js
-│   │       └── index.js
-│   │
-│   ├── doc-service/                        ← Port 3002
-│   │   └── src/
-│   │       ├── controllers/
-│   │       ├── models/
-│   │       │   └── Document.js
-│   │       ├── routes/
-│   │       ├── extractors/
-│   │       │   ├── pdfExtractor.js
-│   │       │   ├── docxExtractor.js
-│   │       │   └── mdExtractor.js
-│   │       ├── workers/
-│   │       │   └── embeddingWorker.js      ← background process
-│   │       └── index.js
-│   │
-│   ├── chat-service/                       ← Port 3003
-│   │   └── src/
-│   │       ├── controllers/
-│   │       ├── models/
-│   │       ├── routes/
-│   │       ├── sockets/
-│   │       ├── pubsub/publisher.js
-│   │       └── index.js
-│   │
-│   ├── task-service/                       ← Port 3004
-│   │   └── src/
-│   │       ├── controllers/
-│   │       ├── models/
-│   │       │   ├── Board.js
-│   │       │   ├── Task.js
-│   │       │   └── TaskActivity.js
-│   │       ├── routes/
-│   │       ├── pubsub/publisher.js
-│   │       └── index.js
-│   │
-│   ├── ai-service/                         ← Port 3005
-│   │   └── src/
-│   │       ├── controllers/
-│   │       │   ├── ragController.js        ← semantic search
-│   │       │   ├── agentController.js      ← AI agent
-│   │       │   ├── meetingController.js    ← meeting summarizer
-│   │       │   ├── reviewController.js     ← literature review
-│   │       │   └── draftController.js      ← report drafter
-│   │       ├── routes/
-│   │       ├── lib/
-│   │       │   ├── pinecone.js             ← Pinecone client + helpers
-│   │       │   ├── embeddings.js           ← Voyage AI
-│   │       │   ├── claude.js               ← Anthropic client
-│   │       │   └── chunker.js              ← text chunking
-│   │       ├── agent/
-│   │       │   ├── toolDefinitions.js
-│   │       │   ├── toolExecutor.js
-│   │       │   └── agentLoop.js
-│   │       ├── prompts/
-│   │       │   ├── systemPrompts.js
-│   │       │   ├── ragPrompt.js
-│   │       │   ├── agentPrompt.js
-│   │       │   ├── meetingPrompt.js
-│   │       │   └── reviewPrompt.js
-│   │       └── index.js
-│   │
-│   └── notification-service/               ← Port 3006
-│       └── src/
-│           ├── models/Notification.js
-│           ├── routes/
-│           ├── pubsub/subscriber.js
-│           ├── email/
-│           │   ├── mailer.js
-│           │   └── templates/
-│           └── index.js
+├── frontend/                               ← React 19 + Vite + TypeScript (port 5173)
+│   └── src/
+│       ├── api/                            ← axios client, auth interceptors, API modules
+│       ├── components/                     ← auth, dashboard, documents, kanban, layout, ui, workspace
+│       ├── hooks/                          ← React Query hooks (useDocuments, useAiQuery, ...)
+│       ├── layouts/                        ← AppShell
+│       ├── lib/                            ← query client, session, token refresh
+│       ├── pages/                          ← Overview, Documents, SemanticSearch, MeetingSummarizer, Kanban, ...
+│       ├── routes/                         ← AppRouter, ProtectedRoute
+│       ├── store/                          ← Zustand: auth.store, workspace.store
+│       ├── types/
+│       └── utils/                          ← SSE parser, document status, meeting tasks, ...
+│
+├── services/
+│   ├── api-gateway/                        ← Port 5000 (proxy, JWT check, rate limits, Swagger UI)
+│   ├── auth-service/                       ← Port 5001 (users, tokens, refresh rotation)
+│   ├── workspace-service/                  ← Port 5002 (workspaces, invite codes, membership)
+│   ├── document-service/                   ← Port 5003 (upload, extraction, Cloudinary, embedding queue)
+│   ├── task-service/                       ← Port 5004 (boards, tasks, activity, bulk import)
+│   ├── ai-service/                         ← Port 5006 (embedding worker, RAG SSE, meeting summarizer)
+│   │   └── src/{config,controllers,errors,middlewares,models,prompts,routes,scripts,services,types,utils,workers}
+│   └── notification-service/               ← Empty placeholder (not implemented)
+│   (each service: src/{config,controllers,middlewares,models,routes,services,...}, app.ts, server.ts)
 │
 ├── packages/
-│   └── shared/
-│       ├── constants.js                    ← event names, error codes
-│       └── validators.js                   ← shared Joi schemas
+│   ├── shared/                             ← auth (JWT, internal token, workspace membership), errors,
+│   │                                         secrets check, health check, Mongo/Redis lifecycle, shutdown
+│   └── validation/                         ← zod schemas (auth, workspace, document, task, ai) + validate()
 │
-├── docker-compose.yml
-├── docker-compose.prod.yml
-├── .env.example
-├── .gitignore
-├── .github/
-│   └── workflows/ci.yml
-└── README.md
+├── tests/                                  ← node:test suites (`npm test`), integration tests need TEST_MONGO_URI
+├── docs/                                   ← onboarding, architecture, docker notes
+├── postman/                                ← Postman collections
+├── docker-compose.yml                      ← MongoDB, Redis, Mongo Express (infrastructure only)
+├── .github/workflows/ci.yml
+└── ResearchMind_readme.md
 ```
+
+Each service and `frontend/` has its own `.env.example`; there is no root `.env.example`.
 
 ---
 
 ## 18. Environment Variables
 
-Copy `.env.example` into each service directory and fill in the values:
+Copy each service's own `.env.example` to `.env` in the same directory (`services/<service>/.env.example`, `frontend/.env.example`) and fill in the values. Never commit real values. Names below match the code; see `docs/onboarding.md` for a full example per service.
 
 ```env
-# ── Common ────────────────────────────────────────────
-NODE_ENV=development
-PORT=3001
+# ── Every backend service except notification-service ─────────────
+PORT=                       # defaults: gateway 5000, auth 5001, workspace 5002,
+                            #           document 5003, task 5004, ai 5006
+JWT_ACCESS_SECRET=          # required, >= 32 chars, IDENTICAL in every service
 
-# ── MongoDB ───────────────────────────────────────────
-MONGODB_URI=mongodb://localhost:27017/researchmind_auth
-# (each service gets its own DB name)
+# ── MongoDB ───────────────────────────────────────────────────────
+MONGO_URI=                  # auth-service and workspace-service read only MONGO_URI;
+                            # document-, task- and ai-service read MONGODB_URI first, then MONGO_URI
+                            # docker-compose enables auth: mongodb://<user>:<password>@host:27017/<db>?authSource=admin
 
-# ── Redis ─────────────────────────────────────────────
-REDIS_URL=redis://localhost:6379
+# ── API Gateway ───────────────────────────────────────────────────
+AUTH_SERVICE_URL=  WORKSPACE_SERVICE_URL=  DOCUMENT_SERVICE_URL=  TASK_SERVICE_URL=  AI_SERVICE_URL=
+REDIS_URL=                  # rate-limit store
 
-# ── Auth Service ──────────────────────────────────────
-JWT_SECRET=replace_with_64_char_random_string
-JWT_EXPIRES_IN=15m
-REFRESH_TOKEN_SECRET=replace_with_another_64_char_random_string
-REFRESH_TOKEN_EXPIRES_IN=7d
-BCRYPT_ROUNDS=12
+# ── Auth Service ──────────────────────────────────────────────────
+JWT_REFRESH_SECRET=         # required, different from JWT_ACCESS_SECRET
+ACCESS_TOKEN_EXPIRES=15m    # default 15m
+REFRESH_TOKEN_EXPIRES=7d    # default 7d
+REFRESH_REUSE_GRACE_MS=     # optional, default 10000
+REDIS_HOST=  REDIS_PORT=    # connected but unused
+INTERNAL_SERVICE_TOKEN=     # for /internal/users/bulk (same value as workspace-service)
 
-# ── Email (Auth + Notification Services) ──────────────
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=yourproject@gmail.com
-SMTP_PASS=your_gmail_app_password
-FROM_EMAIL=noreply@researchmind.dev
-# OR use Resend: RESEND_API_KEY=re_...
+# ── Workspace Service ─────────────────────────────────────────────
+AUTH_SERVICE_URL=  INTERNAL_SERVICE_TOKEN=   # optional, resolves member names
 
-# ── File Storage (Doc Service) ────────────────────────
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-MAX_FILE_SIZE_MB=20
+# ── Document Service ──────────────────────────────────────────────
+REDIS_URL=                  # embedding queue
+WORKSPACE_SERVICE_URL=  AI_SERVICE_URL=
+INTERNAL_SERVICE_TOKEN=     # required, same value as ai-service
+CLOUDINARY_CLOUD_NAME=  CLOUDINARY_API_KEY=  CLOUDINARY_API_SECRET=
+# Upload limit is fixed in code at 10 MB (no MAX_FILE_SIZE_MB variable)
 
-# ── AI (AI Service) ───────────────────────────────────
-ANTHROPIC_API_KEY=sk-ant-...
-VOYAGE_API_KEY=pa-...                # for embeddings
-PINECONE_API_KEY=pcsk-...
-PINECONE_INDEX_NAME=researchmind
-PINECONE_ENVIRONMENT=us-east-1-aws   # your index region
+# ── Task Service ──────────────────────────────────────────────────
+WORKSPACE_SERVICE_URL=
 
-# ── API Gateway ───────────────────────────────────────
-AUTH_SERVICE_URL=http://localhost:3001
-DOC_SERVICE_URL=http://localhost:3002
-CHAT_SERVICE_URL=http://localhost:3003
-TASK_SERVICE_URL=http://localhost:3004
-AI_SERVICE_URL=http://localhost:3005
-NOTIFICATION_SERVICE_URL=http://localhost:3006
-CLIENT_URL=http://localhost:5173
+# ── AI Service ────────────────────────────────────────────────────
+REDIS_URL=  DOCUMENT_SERVICE_URL=  WORKSPACE_SERVICE_URL=
+INTERNAL_SERVICE_TOKEN=     # required, same value as document-service
+XAI_API_KEY=                # Groq (gsk_...) or xAI key; GROQ_API_KEY also accepted
+XAI_MODEL=  XAI_BASE_URL=   # optional overrides
+VOYAGE_API_KEY=
+VOYAGE_MODEL=voyage-3       # default; must match the Pinecone index
+VOYAGE_EMBEDDING_DIMENSION=1024
+PINECONE_API_KEY=
+PINECONE_INDEX=researchmind
+LLM_REQUEST_TIMEOUT_MS=  LLM_STREAM_IDLE_TIMEOUT_MS=   # optional, defaults 60000 / 30000
+
+# ── Frontend ──────────────────────────────────────────────────────
+VITE_API_URL=http://localhost:5000/api   # must include /api
 ```
+
+Not used by the code (design only): `JWT_SECRET`, `JWT_EXPIRES_IN`, `REFRESH_TOKEN_SECRET`, `BCRYPT_ROUNDS`, SMTP/Resend variables, `ANTHROPIC_API_KEY`, `PINECONE_INDEX_NAME`, `PINECONE_ENVIRONMENT`, `DOC_SERVICE_URL`, `CHAT_SERVICE_URL`, `NOTIFICATION_SERVICE_URL`, `CLIENT_URL`, `MAX_FILE_SIZE_MB`. Optional `CORS_ORIGIN` (comma-separated) is read by document- and task-service.
 
 ---
 
 ## 19. Local Development Setup
 
 ### Prerequisites
-- Node.js 20 or higher
+- Node.js 22 (CI uses Node 22; several dependencies require `node >= 22`)
 - Docker Desktop (for MongoDB + Redis)
-- Pinecone account (free Starter plan)
-- Anthropic API key
-- Voyage AI API key (or OpenAI for embeddings)
+- Pinecone account, with an index of dimension 1024 (cosine)
+- Groq or xAI API key
+- Voyage AI API key
 - Cloudinary account (free tier)
 
 ### Step 1 — Clone the repository
@@ -1984,99 +1974,74 @@ cd researchmind
 ### Step 2 — Install dependencies
 
 ```bash
-# Install in all services at once
-for dir in apps/*/; do
-  echo "📦 Installing $dir"
-  (cd "$dir" && npm install)
-done
+# One install at the repository root covers frontend/, services/* and packages/* (npm workspaces)
+npm install
 ```
 
 ### Step 3 — Start infrastructure
 
 ```bash
-docker-compose up -d mongodb redis
+docker-compose up -d
 ```
 
-Verify they're running:
-```bash
-docker-compose ps
-# mongodb   running   0.0.0.0:27017->27017/tcp
-# redis     running   0.0.0.0:6379->6379/tcp
-```
+This starts MongoDB (`27017`, authentication enabled), Redis (`6379`) and Mongo Express (`8081`). Verify with `docker-compose ps`.
 
 ### Step 4 — Configure environment
 
 ```bash
-# Copy example env to each service
-for service in api-gateway auth-service doc-service chat-service task-service ai-service notification-service; do
-  cp .env.example apps/$service/.env
-  echo "✅ Created apps/$service/.env"
+# Each service has its own example file
+for dir in services/api-gateway services/auth-service services/workspace-service            services/document-service services/task-service services/ai-service frontend; do
+  cp "$dir/.env.example" "$dir/.env"
 done
-cp .env.example apps/client/.env
 ```
 
-Edit each `.env` file with your actual API keys and credentials.
+Edit each `.env` file with your actual keys and credentials (see Section 18 and `docs/onboarding.md`).
 
 ### Step 5 — Set up Pinecone index
 
-```javascript
-// Run once: scripts/setup-pinecone.js
-const { Pinecone } = require('@pinecone-database/pinecone');
-const pc = new Pinecone({ apiKey: process.env.PINECONE_API_KEY });
-
-await pc.createIndex({
-  name: 'researchmind',
-  dimension: 1024,           // Voyage AI voyage-2 dimension
-  metric: 'cosine',
-  spec: { serverless: { cloud: 'aws', region: 'us-east-1' } }
-});
-
-console.log('Pinecone index created!');
-```
-
-```bash
-node scripts/setup-pinecone.js
-```
+No setup script exists in the repository. Create the index yourself (Pinecone console or SDK) with dimension `1024` (matching `VOYAGE_EMBEDDING_DIMENSION`, Voyage `voyage-3`) and the cosine metric, and put its name in `PINECONE_INDEX`. `services/ai-service/src/scripts/test-pinecone.ts` can be used to check connectivity.
 
 ### Step 6 — Start all services
 
 ```bash
-npm install -g concurrently
+# From the repository root: gateway, auth, workspace, document, task, ai and frontend
+npm run dev
 
-concurrently \
-  "cd apps/api-gateway && npm run dev" \
-  "cd apps/auth-service && npm run dev" \
-  "cd apps/doc-service && npm run dev" \
-  "cd apps/chat-service && npm run dev" \
-  "cd apps/task-service && npm run dev" \
-  "cd apps/ai-service && npm run dev" \
-  "cd apps/notification-service && npm run dev" \
-  "cd apps/client && npm run dev"
+# Backend only
+npm run dev:services
 ```
+
+The AI service starts the embedding worker in-process; `npm run dev:worker --workspace=ai-service` runs an optional extra worker.
 
 ### Step 7 — Open the app
 
 | Service | URL |
 |---------|-----|
 | **React App** | http://localhost:5173 |
-| API Gateway | http://localhost:3000 |
-| Auth Service | http://localhost:3001 |
-| Doc Service | http://localhost:3002 |
-| AI Service | http://localhost:3005 |
+| API Gateway | http://localhost:5000 (Swagger UI at `/api-docs`) |
+| Auth Service | http://localhost:5001 |
+| Workspace Service | http://localhost:5002 |
+| Document Service | http://localhost:5003 |
+| Task Service | http://localhost:5004 |
+| AI Service | http://localhost:5006 |
 
-### Step 8 — Seed demo data (optional)
+### Step 8 — Seed demo data
+
+Roadmap / not yet implemented: there is no seed script and no demo account.
+
+### Step 9 — Run the tests
 
 ```bash
-node scripts/seed-demo.js
-# Creates: 1 workspace, 3 users, 5 sample documents, 4 tasks
-# Demo login: demo@researchmind.dev / Demo1234!
+npm test    # integration tests are skipped unless TEST_MONGO_URI points at a disposable MongoDB
 ```
 
 ---
 
 ## 20. Docker Setup
 
-### docker-compose.yml
+> **As implemented:** `docker-compose.yml` runs infrastructure only: `mongodb` (`mongo:7`, root credentials from `MONGO_ROOT_USERNAME` / `MONGO_ROOT_PASSWORD`), `redis` (`redis:7`) and `mongo-express` (port 8081, basic auth from `MONGO_EXPRESS_USERNAME` / `MONGO_EXPRESS_PASSWORD`). There are no Dockerfiles, and the services are not containerized. The compose file, Dockerfile and service commands below are the **roadmap design**. See `docs/deployment/docker-process.md`.
+
+### docker-compose.yml (design)
 
 ```yaml
 version: '3.8'
@@ -2166,7 +2131,7 @@ volumes:
   redis_data:
 ```
 
-### Dockerfile (identical for all Node services)
+### Dockerfile (design; no Dockerfiles exist yet)
 
 ```dockerfile
 FROM node:20-alpine AS base
@@ -2186,9 +2151,10 @@ CMD ["node", "src/index.js"]
 ### Commands
 
 ```bash
-# Start only infrastructure
-docker-compose up -d mongodb redis
+# Start infrastructure (works today)
+docker-compose up -d
 
+# --- The commands below need the roadmap compose file ---
 # Start everything
 docker-compose up --build
 
@@ -2205,6 +2171,8 @@ docker-compose up --build ai-service
 ---
 
 ## 21. Testing Strategy
+
+> **As implemented:** tests use Node's built-in test runner (`node:test`) via `tsx`, not Jest/Supertest. `npm test` runs `tests/*.test.ts`, covering auth flow and refresh rotation, workspace membership/isolation and join, upload and model validation, document extraction errors and lifecycle, the embedding worker, AI validation and streaming, client helpers, error middleware and service lifecycle. Integration tests (`*.integration.test.ts`) need `TEST_MONGO_URI` pointing at a disposable MongoDB; without it they are skipped. CI runs them against a MongoDB service container. The Jest, Supertest and k6 examples below are design sketches (the `/docs/...` routes and `embed:queue` they use do not exist).
 
 ### Unit Tests (Jest)
 
@@ -2288,6 +2256,8 @@ k6 run k6/search-load.js
 ---
 
 ## 22. Deployment Plan
+
+> **Roadmap / not yet implemented.** Nothing is deployed, and there are no Dockerfiles, Railway or Vercel configuration. The real CI workflow (`.github/workflows/ci.yml`) runs on pushes and pull requests to `develop` and `main`: it installs with `npm ci` on Node 22, typechecks the six backend services, builds the frontend and runs `npm test` with a MongoDB service container. It has no lint, per-service matrix or deploy step, unlike the sample below. If the frontend is deployed, `VITE_API_URL` must include the `/api` suffix.
 
 ### Production Stack
 
@@ -2391,6 +2361,8 @@ vercel --prod
 
 ## 23. Portfolio & Presentation Guide
 
+> This guide describes the **target** product. Several claims below are not true of the current code: no chat, WebSockets, Redis pub/sub, AI agent or literature review generator; no deployment, demo account or seed data; and five implemented backend services plus the gateway (not 7 microservices). Check [Current Implementation Status](#current-implementation-status) before presenting.
+
 ### Live Demo Checklist
 
 Before presenting, make sure:
@@ -2457,23 +2429,25 @@ Add this to your GitHub README. Draw it in [Excalidraw](https://excalidraw.com) 
 
 ## ✅ Master Checklist
 
+> Checked items have code in the repository; unchecked items are roadmap / not yet implemented.
+
 ### Core Infrastructure
-- [ ] API Gateway with JWT middleware and Redis rate limiting
-- [ ] 6 microservices independently deployable
+- [x] API Gateway with JWT middleware and Redis rate limiting
+- [ ] 6 microservices independently deployable (5 services + gateway run separately; no deployment)
 - [ ] Redis pub/sub event bus for cross-service communication
 - [ ] Socket.io with Redis adapter for real-time
-- [ ] MongoDB with proper indexes
-- [ ] Docker Compose local orchestration
+- [x] MongoDB indexes declared in the Mongoose models
+- [x] Docker Compose local orchestration (infrastructure only)
 
 ### Document Intelligence (RAG)
-- [ ] PDF / DOCX / MD / TXT text extraction
-- [ ] Chunking with overlap (paragraph-aware)
-- [ ] Voyage AI embedding generation
-- [ ] Pinecone upsert with workspace namespace
-- [ ] Background embedding worker (Redis queue)
-- [ ] Vector lifecycle: create / update / delete
-- [ ] Semantic search endpoint with SSE streaming
-- [ ] Source citation in search responses
+- [x] PDF / DOCX text extraction (MD / TXT not supported)
+- [x] Chunking with overlap (paragraph-aware)
+- [x] Voyage AI embedding generation
+- [x] Pinecone upsert with workspace namespace
+- [x] Background embedding worker (Redis queue)
+- [x] Vector lifecycle: create / delete (no in-place update)
+- [x] Semantic search endpoint with SSE streaming
+- [x] Source citation in search responses
 
 ### AI Agent
 - [ ] ReAct agent loop with tool calling
@@ -2482,24 +2456,24 @@ Add this to your GitHub README. Draw it in [Excalidraw](https://excalidraw.com) 
 - [ ] Agent session logged to MongoDB
 
 ### Specialized AI Features
-- [ ] Meeting notes summarizer (structured output)
+- [x] Meeting notes summarizer (structured output)
 - [ ] Literature review generator (multi-pass)
 - [ ] Report section drafter
 - [ ] New member onboarding summary
 - [ ] SSE streaming on all AI endpoints
 
 ### Application Features
-- [ ] JWT auth with refresh token rotation
-- [ ] Workspace creation and invite system
-- [ ] Document library with embedding status
+- [x] JWT auth with refresh token rotation
+- [x] Workspace creation and invite-code join (no email invites)
+- [x] Document library with embedding status
 - [ ] Real-time team chat with channels
-- [ ] Kanban task board with drag-and-drop
+- [x] Kanban task board with drag-and-drop
 - [ ] Progress dashboard
 - [ ] In-app + email notifications
 
 ### DevOps
 - [ ] Dockerfiles per service
-- [ ] GitHub Actions CI pipeline
+- [x] GitHub Actions CI pipeline
 - [ ] Deployed and accessible via public URL
 - [ ] Demo credentials and seeded workspace
 - [ ] Architecture diagram in README

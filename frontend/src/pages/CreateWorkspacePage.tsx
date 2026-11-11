@@ -60,7 +60,9 @@ export const CreateWorkspacePage: React.FC = () => {
   // Handle Join Workspace Submit
   const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedCode = inviteCode.trim();
+    if (joining) return;
+    // The input only LOOKS upper case (CSS); send the normalised code.
+    const trimmedCode = inviteCode.trim().toUpperCase();
     if (!trimmedCode) {
       setJoinError("Please enter a valid workspace invite code.");
       return;

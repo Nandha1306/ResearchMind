@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { documentApi } from "../api/document.api";
 import type { DocumentItem } from "../types/document.types";
+import { documentPollInterval } from "../utils/document-status";
 
 /** React Query hook to fetch documents for the active workspace. */
 export function useWorkspaceDocuments(workspaceId: string | undefined) {
@@ -12,6 +13,9 @@ export function useWorkspaceDocuments(workspaceId: string | undefined) {
     },
     enabled: Boolean(workspaceId),
     staleTime: 1000 * 60 * 2, // 2 minutes cache
+    // Keep statuses live while documents are being processed (P1-A22); stops
+    // once every document is indexed or failed. Paused in background tabs.
+    refetchInterval: (query) => documentPollInterval(query.state.data),
   });
 }
 

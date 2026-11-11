@@ -5,7 +5,7 @@ Notification dispatch microservice stub for the **ResearchMind** platform.
 ---
 
 ## 1. Purpose
-Planned microservice designated for sending real-time notifications, workspace alerts, and email notifications to users.
+**Roadmap / not yet implemented.** Planned microservice for real-time notifications, workspace alerts, and email notifications. The application currently sends no notifications of any kind.
 
 ---
 
@@ -38,21 +38,20 @@ notification-service/
 ---
 
 ## 5. Environment Variables
-*Not implemented.* (Default service port reserved: `5005`).
+*Not implemented.* No environment variables are read and no port is configured.
 
 ---
 
 ## 6. Dependencies
-- **`express`**: Base web framework dependency.
-- **`typescript`**: Compiler toolchain.
+- **`winston`**: Declared in `package.json`, not used yet.
+- **`typescript`**, **`ts-node`**, **`nodemon`**: Dev dependencies only. `express` is not a dependency yet.
 
 ---
 
 ## 7. Local Development Commands
 ```bash
-# Install dependencies
+# Install dependencies (from the repository root)
 npm install
 
-# Build workspace script (when implemented)
-npm run build
+# No dev, build or start scripts are defined yet.
 ```

@@ -9,10 +9,13 @@ export interface DocumentItem {
   originalName: string;
   fileType: DocumentFileType;
   fileSize: number;
-  cloudinaryUrl: string;
-  cloudinaryPublicId: string;
+  /** Null when the file has no stored copy (server-owned field). */
+  cloudinaryUrl: string | null;
+  cloudinaryPublicId: string | null;
   extractedText: string;
   embeddingStatus: EmbeddingStatus;
+  /** Why processing failed (set by the server when status is "failed"). */
+  embeddingError?: string | null;
   createdAt: string;
   updatedAt: string;
 }

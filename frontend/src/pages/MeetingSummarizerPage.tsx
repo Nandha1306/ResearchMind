@@ -3,6 +3,17 @@ import { Link } from "react-router-dom";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { summarizeMeeting } from "../api/ai.api";
 import { getWorkspaceBoards, createBoard, bulkCreateTasks } from "../api/task.api";
+import {
+  buildActionItemTasks,
+  buildImportKey,
+  MAX_TASKS_PER_IMPORT,
+} from "../utils/meeting-tasks";
+
+/** A random id for one generated summary (scopes its import keys). */
+const newSummaryKey = () =>
+  typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 import type { Board, MeetingSummary, Task } from "../types/task.types";
 import { Button } from "../components/ui/button";
 import { MathMarkdown } from "../components/ui/MathMarkdown";
@@ -36,6 +47,12 @@ export const MeetingSummarizerPage: React.FC = () => {
   const [summaryData, setSummaryData] = useState<MeetingSummary | null>(null);
   const [selectedActionIndices, setSelectedActionIndices] = useState<number[]>([]);
   const [createdTasksResult, setCreatedTasksResult] = useState<Task[] | null>(null);
+  /** True when the last import had already been created by an earlier request. */
+  const [createdTasksReplayed, setCreatedTasksReplayed] = useState(false);
+  /** Identifies the current summary; import keys are derived from it. */
+  const [summaryKey, setSummaryKey] = useState<string>("");
+  /** Action items of the current summary that are already tasks. */
+  const [createdIndices, setCreatedIndices] = useState<number[]>([]);
 
   // Quick Create Board State
   const [newBoardName, setNewBoardName] = useState<string>("");
@@ -130,6 +147,8 @@ export const MeetingSummarizerPage: React.FC = () => {
       });
 
       setSummaryData(summary);
+      setSummaryKey(newSummaryKey());
+      setCreatedIndices([]);
       if (summary.action_items && summary.action_items.length > 0) {
         setSelectedActionIndices(summary.action_items.map((_, idx) => idx));
       } else {
@@ -154,6 +173,8 @@ export const MeetingSummarizerPage: React.FC = () => {
 
   // Toggle Action Item Checkbox
   const toggleActionItem = (index: number) => {
+    // An action item that is already a task cannot be created again.
+    if (createdIndices.includes(index)) return;
     setSelectedActionIndices((prev) =>
       prev.includes(index) ? prev.filter((i) => i !== index) : [...prev, index]
     );
@@ -161,12 +182,19 @@ export const MeetingSummarizerPage: React.FC = () => {
 
   const toggleAllActionItems = () => {
     if (!summaryData?.action_items) return;
-    if (selectedActionIndices.length === summaryData.action_items.length) {
+    const selectable = summaryData.action_items
+      .map((_, idx) => idx)
+      .filter((idx) => !createdIndices.includes(idx));
+    if (selectable.every((idx) => selectedActionIndices.includes(idx))) {
       setSelectedActionIndices([]);
     } else {
-      setSelectedActionIndices(summaryData.action_items.map((_, idx) => idx));
+      setSelectedActionIndices(selectable);
     }
   };
+
+  // Selected action items that are not tasks yet.
+  const pendingIndices = selectedActionIndices.filter((idx) => !createdIndices.includes(idx));
+  const tooManySelected = pendingIndices.length > MAX_TASKS_PER_IMPORT;
 
   // 3. Create Tasks Handler
   const handleCreateTasks = async () => {
@@ -174,7 +202,9 @@ export const MeetingSummarizerPage: React.FC = () => {
       !currentWorkspace?._id ||
       !selectedBoardId ||
       !summaryData?.action_items ||
-      selectedActionIndices.length === 0
+      pendingIndices.length === 0 ||
+      tooManySelected ||
+      creatingTasks
     ) {
       return;
     }
@@ -182,49 +212,38 @@ export const MeetingSummarizerPage: React.FC = () => {
     setCreatingTasks(true);
     setTaskCreationError(null);
     setCreatedTasksResult(null);
+    setCreatedTasksReplayed(false);
+
+    const indices = [...pendingIndices];
 
     try {
-      const itemsToCreate = selectedActionIndices.map(
-        (idx) => summaryData.action_items[idx]
-      );
+      const result = await bulkCreateTasks(currentWorkspace._id, {
+        tasks: buildActionItemTasks(summaryData.action_items, indices, selectedBoardId),
+        // Same summary + board + selection => same key: a repeated submission
+        // returns the tasks created the first time instead of duplicating them.
+        importKey: buildImportKey(`${summaryKey}-${selectedBoardId}`, indices),
+      });
 
-      const bulkPayload = {
-        tasks: itemsToCreate.map((item) => {
-          let parsedDueDate: string | null = null;
-          if (item.due && item.due.trim() !== "") {
-            const d = new Date(item.due);
-            if (!isNaN(d.getTime())) {
-              parsedDueDate = d.toISOString();
-            }
-          }
-
-          return {
-            boardId: selectedBoardId,
-            title: item.task,
-            description: item.assignee ? `Assignee context: ${item.assignee}` : undefined,
-            status: "todo" as const,
-            priority: "medium" as const,
-            assigneeId: null,
-            dueDate: parsedDueDate,
-            parentTaskId: null,
-          };
-        }),
-      };
-
-      const createdTasks = await bulkCreateTasks(
-        currentWorkspace._id,
-        bulkPayload
-      );
-
-      setCreatedTasksResult(createdTasks);
+      setCreatedTasksResult(result.tasks);
+      setCreatedTasksReplayed(result.replayed);
+      setCreatedIndices((prev) => [...new Set([...prev, ...indices])]);
+      setSelectedActionIndices((prev) => prev.filter((idx) => !indices.includes(idx)));
     } catch (err: any) {
-      let errorMessage = "Failed to create tasks. Please verify selected board.";
+      // The import is all-or-nothing on the server: on any error, no task
+      // from this request was created.
+      let errorMessage = "Failed to create tasks. No tasks were created.";
       if (err.response?.status === 400) {
         errorMessage = err.response.data?.message || "Invalid task payload or board reference.";
       } else if (err.response?.status === 401) {
         errorMessage = "Your session has expired. Please sign in again.";
       } else if (err.response?.status === 403) {
         errorMessage = "You do not have access to this workspace.";
+      } else if (err.response?.status === 409) {
+        errorMessage =
+          err.response.data?.message ||
+          "These tasks are already being created. Please wait and try again.";
+      } else if (err.response?.data?.message) {
+        errorMessage = `${err.response.data.message} No tasks were created.`;
       } else if (err.message) {
         errorMessage = err.message;
       }
@@ -502,11 +521,14 @@ export const MeetingSummarizerPage: React.FC = () => {
               {summaryData.action_items && summaryData.action_items.length > 0 ? (
                 <div className="space-y-2.5">
                   {summaryData.action_items.map((item, idx) => {
-                    const isSelected = selectedActionIndices.includes(idx);
+                    const isCreated = createdIndices.includes(idx);
+                    const isSelected = !isCreated && selectedActionIndices.includes(idx);
                     return (
                       <div
                         key={idx}
                         onClick={() => toggleActionItem(idx)}
+                        aria-disabled={isCreated}
+                        title={isCreated ? "Already created as a task" : undefined}
                         className={`p-3.5 rounded-xl border transition-all cursor-pointer flex items-start gap-3 ${
                           isSelected
                             ? "bg-[#7C6AF7]/10 border-[#7C6AF7]/40 text-text-primary"
@@ -538,6 +560,12 @@ export const MeetingSummarizerPage: React.FC = () => {
                               <span className="px-2 py-0.5 rounded bg-bg-surface border border-border-default text-text-secondary flex items-center gap-1">
                                 <Calendar className="w-3 h-3 text-amber-400" />
                                 {item.due}
+                              </span>
+                            )}
+                            {isCreated && (
+                              <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 flex items-center gap-1">
+                                <CheckCircle2 className="w-3 h-3" />
+                                Task created
                               </span>
                             )}
                           </div>
@@ -641,10 +669,14 @@ export const MeetingSummarizerPage: React.FC = () => {
                       <div className="flex items-center justify-between font-semibold text-sm">
                         <div className="flex items-center gap-2">
                           <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-                          <span>{createdTasksResult.length} tasks created successfully!</span>
+                          <span>
+                            {createdTasksReplayed
+                              ? `These ${createdTasksResult.length} tasks had already been created; no duplicates were made.`
+                              : `${createdTasksResult.length} ${createdTasksResult.length === 1 ? "task" : "tasks"} created successfully!`}
+                          </span>
                         </div>
                         <Link
-                          to="/kanban"
+                          to="/dashboard/tasks"
                           className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs transition-colors flex items-center gap-1.5 no-underline font-normal"
                         >
                           <span>Open in Kanban</span>
@@ -659,6 +691,12 @@ export const MeetingSummarizerPage: React.FC = () => {
                     </div>
                   )}
 
+                  {tooManySelected && (
+                    <p className="text-[11px] text-amber-400">
+                      Select at most {MAX_TASKS_PER_IMPORT} action items at a time.
+                    </p>
+                  )}
+
                   <div className="flex justify-end pt-1">
                     <Button
                       onClick={handleCreateTasks}
@@ -666,7 +704,8 @@ export const MeetingSummarizerPage: React.FC = () => {
                         creatingTasks ||
                         boards.length === 0 ||
                         !selectedBoardId ||
-                        selectedActionIndices.length === 0
+                        pendingIndices.length === 0 ||
+                        tooManySelected
                       }
                       className="bg-[#7C6AF7] hover:bg-[#6b58f6] text-white gap-2 font-medium cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed text-xs h-9 px-4"
                     >
@@ -679,8 +718,8 @@ export const MeetingSummarizerPage: React.FC = () => {
                         <>
                           <Plus className="w-3.5 h-3.5" />
                           <span>
-                            Create {selectedActionIndices.length} Selected{" "}
-                            {selectedActionIndices.length === 1 ? "Task" : "Tasks"}
+                            Create {pendingIndices.length} Selected{" "}
+                            {pendingIndices.length === 1 ? "Task" : "Tasks"}
                           </span>
                         </>
                       )}

@@ -2,6 +2,7 @@ import React from "react";
 import type { DocumentItem } from "../../types/document.types";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { formatFileSize, formatDocumentDate, getSafeExternalUrl } from "../../utils/fileUtils";
+import { canRetryDocument, failureReasonForDisplay } from "../../utils/document-status";
 import { FileText, FileType, ExternalLink, Calendar, HardDrive, Trash2, RefreshCw } from "lucide-react";
 
 interface DocumentCardProps {
@@ -9,6 +10,8 @@ interface DocumentCardProps {
   onSelect?: (document: DocumentItem) => void;
   onDelete?: (document: DocumentItem) => void;
   onReindex?: (document: DocumentItem) => void;
+  /** A delete or re-index request for this document is in progress. */
+  isBusy?: boolean;
 }
 
 export const DocumentCard: React.FC<DocumentCardProps> = ({
@@ -16,8 +19,10 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
   onSelect,
   onDelete,
   onReindex,
+  isBusy = false,
 }) => {
   const isPdf = document.fileType === "pdf";
+  const showRetry = Boolean(onReindex) && canRetryDocument(document);
 
   // The card used to be an `<a href={cloudinaryUrl}>` (PDF: same tab, DOCX: new
   // tab). It became a `<div>` so it can contain the Delete/Retry buttons, which
@@ -52,6 +57,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
   const handleDelete = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (isBusy) return;
     if (onDelete && window.confirm(`Are you sure you want to delete "${document.originalName}"?`)) {
       onDelete(document);
     }
@@ -60,7 +66,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
   const handleReindex = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (onReindex) {
+    if (onReindex && !isBusy) {
       onReindex(document);
     }
   };
@@ -95,12 +101,17 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
-          {(document.embeddingStatus === "failed" || document.embeddingStatus === "pending") && onReindex && (
+          {showRetry && (
             <button
               type="button"
               onClick={handleReindex}
-              className="px-2 py-1 text-[10px] font-semibold rounded bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1 transition-colors cursor-pointer"
-              title="Retry embedding indexing"
+              disabled={isBusy}
+              className="px-2 py-1 text-[10px] font-semibold rounded bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/30 flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title={
+                document.embeddingStatus === "failed"
+                  ? "Retry embedding indexing"
+                  : "Processing appears stalled. Retry embedding indexing"
+              }
             >
               <RefreshCw className="w-3 h-3" />
               <span>Retry</span>
@@ -113,8 +124,9 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
             <button
               type="button"
               onClick={handleDelete}
-              className="p-1 rounded-lg text-text-muted hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
-              title="Delete document"
+              disabled={isBusy}
+              className="p-1 rounded-lg text-text-muted hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              title={isBusy ? "Request in progress" : "Delete document"}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -133,6 +145,11 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
         <p className="text-[11px] text-text-secondary uppercase tracking-wider font-semibold">
           {document.fileType.toUpperCase()} Document
         </p>
+        {document.embeddingStatus === "failed" && (
+          <p className="text-[11px] text-red-400 line-clamp-2">
+            {failureReasonForDisplay(document.embeddingError)}
+          </p>
+        )}
       </div>
 
       {/* Metadata Bottom Row */}

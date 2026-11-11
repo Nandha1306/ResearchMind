@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
 import { AppError } from "../errors/AppError";
+import { requireSecret } from "../config/secrets";
 
 export const INTERNAL_TOKEN_HEADER = "x-internal-token";
 
@@ -15,11 +16,15 @@ export const requireInternalServiceToken = (
   _res: Response,
   next: NextFunction
 ) => {
-  const expectedToken = process.env.INTERNAL_SERVICE_TOKEN;
-
-  if (!expectedToken) {
+  // Fail closed unless a real secret is configured: a missing value, an
+  // .env.example placeholder or a short/known-weak token would otherwise make
+  // the internal API reachable with a publicly known token.
+  let expectedToken: string;
+  try {
+    expectedToken = requireSecret("INTERNAL_SERVICE_TOKEN");
+  } catch (error) {
     console.error(
-      "[shared-auth] INTERNAL_SERVICE_TOKEN is not configured; rejecting internal request"
+      `[shared-auth] INTERNAL_SERVICE_TOKEN is not usable (${(error as Error).message}); rejecting internal request`
     );
     return next(new AppError("Unauthorized", 401));
   }

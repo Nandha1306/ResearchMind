@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useId } from "react";
 import { createTask } from "../../api/task.api";
 import type { Board, Task } from "../../types/task.types";
+import type { WorkspaceMember } from "../../types/workspace.types";
 import { Button } from "../ui/button";
 import {
   X,
@@ -20,7 +21,8 @@ interface CreateTaskModalProps {
   onRetryBoards?: () => void;
   /** Board currently shown on the Kanban; preselected for convenience. */
   defaultBoardId?: string;
-  members: string[];
+  /** Workspace members; options are keyed and valued by userId. */
+  members: WorkspaceMember[];
   onTaskCreated: (task: Task) => void;
 }
 
@@ -100,8 +102,11 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
   }, [onClose]);
 
   const assignableMembers = members
-    .filter((id): id is string => Boolean(id))
-    .map((userId) => ({ userId, label: userId }));
+    .filter((member) => Boolean(member.userId))
+    .map((member) => ({
+      userId: member.userId,
+      label: member.name || member.email || "Member",
+    }));
 
   const hasBoards = boards.length > 0;
   const trimmedTitle = title.trim();

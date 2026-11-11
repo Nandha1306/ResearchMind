@@ -40,6 +40,7 @@ export const JoinWorkspaceModal: React.FC<JoinWorkspaceModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
 
     const code = inviteCode.trim().toUpperCase();
     if (!code) {

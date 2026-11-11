@@ -35,6 +35,14 @@ export interface BulkCreateTaskInput {
 
 export interface BulkCreateTasksPayload {
   tasks: BulkCreateTaskInput[];
+  /** Same key => the server returns the earlier result instead of duplicating. */
+  importKey?: string;
+}
+
+export interface BulkCreateTasksResult {
+  tasks: Task[];
+  /** True when the tasks had already been created by an earlier identical request. */
+  replayed: boolean;
 }
 
 export interface MeetingActionItem {

@@ -76,11 +76,19 @@ export const uploadDocument = asyncHandler(
       });
     }
 
-    const isMember = await checkWorkspaceMembership(
-      workspaceId,
-      userId,
-      req.headers.authorization
-    );
+    let isMember: boolean;
+    try {
+      isMember = await checkWorkspaceMembership(
+        workspaceId,
+        userId,
+        req.headers.authorization
+      );
+    } catch (error) {
+      // Invalid workspace id (400) or the check could not run (503): the
+      // uploaded temp file must not be left behind.
+      await fs.unlink(req.file.path).catch(() => {});
+      throw error;
+    }
 
     if (!isMember) {
       await fs.unlink(req.file.path).catch(() => {});

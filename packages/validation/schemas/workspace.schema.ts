@@ -19,8 +19,10 @@ export const joinWorkspaceSchema =
   z.object({
     inviteCode: z
       .string()
+      .trim()
       .min(
         1,
         "Invite code is required"
-      ),
+      )
+      .max(64, "Invalid invite code"),
   });   

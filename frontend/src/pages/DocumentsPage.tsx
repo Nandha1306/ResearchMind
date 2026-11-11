@@ -10,7 +10,7 @@ import { DocumentErrorState } from "../components/documents/DocumentErrorState";
 import { UploadDocumentModal } from "../components/documents/UploadDocumentModal";
 import { PdfViewerModal } from "../components/documents/PdfViewerModal";
 import type { DocumentItem } from "../types/document.types";
-import { Plus, FileText, Sparkles } from "lucide-react";
+import { Plus, FileText, Sparkles, AlertCircle, X } from "lucide-react";
 import { Button } from "../components/ui/button";
 
 export const DocumentsPage: React.FC = () => {
@@ -26,6 +26,39 @@ export const DocumentsPage: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<FilterOption>("all");
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [selectedPdf, setSelectedPdf] = useState<DocumentItem | null>(null);
+
+  /*
+   * Delete / re-index feedback (P1-A22): a document with a request in flight
+   * is busy (its buttons are disabled, so a double click sends one request),
+   * and a failure is shown with the server's reason instead of being dropped.
+   */
+  const [busyDocumentIds, setBusyDocumentIds] = useState<string[]>([]);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const runDocumentAction = async (
+    doc: DocumentItem,
+    mutation: typeof deleteMutation | typeof reindexMutation,
+    verb: "delete" | "re-index"
+  ) => {
+    if (busyDocumentIds.includes(doc._id)) return;
+    setActionError(null);
+    setBusyDocumentIds((prev) => [...prev, doc._id]);
+    // mutateAsync per call: per-call `mutate` callbacks only fire for the most
+    // recent call, which would leave an earlier document stuck as busy.
+    try {
+      await mutation.mutateAsync(doc._id);
+    } catch (err) {
+      const serverMessage = (err as { response?: { data?: { message?: string } } })
+        .response?.data?.message;
+      setActionError(
+        `Could not ${verb} "${doc.originalName}": ${
+          serverMessage || (err as Error)?.message || "Please try again."
+        }`
+      );
+    } finally {
+      setBusyDocumentIds((prev) => prev.filter((id) => id !== doc._id));
+    }
+  };
 
   // Client-side local search & filter algorithm
   const filteredDocuments = useMemo(() => {
@@ -97,13 +130,32 @@ export const DocumentsPage: React.FC = () => {
             filteredCount={filteredDocuments.length}
           />
 
+          {actionError && (
+            <div
+              role="alert"
+              className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/30 text-xs text-destructive flex items-center gap-2"
+            >
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="flex-1">{actionError}</span>
+              <button
+                type="button"
+                onClick={() => setActionError(null)}
+                className="p-0.5 rounded hover:bg-destructive/10 cursor-pointer"
+                aria-label="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* Document Grid or No Results Message */}
           {filteredDocuments.length > 0 ? (
             <DocumentGrid
               documents={filteredDocuments}
               onSelectDocument={(doc) => setSelectedPdf(doc)}
-              onDeleteDocument={(doc) => deleteMutation.mutate(doc._id)}
-              onReindexDocument={(doc) => reindexMutation.mutate(doc._id)}
+              onDeleteDocument={(doc) => void runDocumentAction(doc, deleteMutation, "delete")}
+              onReindexDocument={(doc) => void runDocumentAction(doc, reindexMutation, "re-index")}
+              busyDocumentIds={busyDocumentIds}
             />
           ) : (
             <div className="p-8 bg-bg-surface border border-border-default rounded-xl text-center space-y-3 shadow-sm">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useId } from "react";
 import { getTaskById, getTaskActivities, getWorkspaceTasks, updateTask, createTask, deleteTask } from "../../api/task.api";
-import { workspaceApi, type WorkspaceMember } from "../../api/workspace.api";
+import { useWorkspaceMembers } from "../../hooks/useWorkspaceMembers";
+import { describeMember } from "../../utils/members";
 import type { Board, Task, TaskActivity } from "../../types/task.types";
 import { Button } from "../ui/button";
 import {
@@ -51,7 +52,11 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [task, setTask] = useState<Task | null>(null);
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<TaskActivity[]>([]);
-  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  // Members (stable user ids + names) for the assignee picker and activity.
+  const membersQuery = useWorkspaceMembers(workspaceId);
+  // undefined while loading, null if the list could not be loaded.
+  const loadedMembers = membersQuery.isError ? null : membersQuery.data;
+  const members = loadedMembers ?? [];
 
   // Form Fields State
   const [title, setTitle] = useState<string>("");
@@ -129,10 +134,6 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           .catch(() => setSubtasks([]))
           .finally(() => setSubtasksLoading(false));
 
-        // 4. Fetch Workspace Members
-        workspaceApi.getWorkspaceMembers(workspaceId)
-          .then(setMembers)
-          .catch(() => setMembers([]));
 
       } catch (err: any) {
         if (err.response?.status === 404) {
@@ -556,9 +557,17 @@ Its activity history will be permanently deleted too. This cannot be undone.`;
                     className="w-full p-2 rounded-lg bg-bg-surface border border-border-default text-text-primary text-xs focus:outline-none focus:ring-2 focus:ring-[#7C6AF7]/50"
                   >
                     <option value="">Unassigned</option>
+                    {/* A stored assignee that is not a current member (a former
+                        member, or a name saved before ids were enforced) stays
+                        visible instead of silently showing "Unassigned". */}
+                    {assigneeId && !members.some((m) => m.userId === assigneeId) && (
+                      <option value={assigneeId} disabled>
+                        {describeMember(loadedMembers, assigneeId)?.label}
+                      </option>
+                    )}
                     {members.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name || m.email || m.id}
+                      <option key={m.userId} value={m.userId}>
+                        {m.name || m.email || "Member"}
                       </option>
                     ))}
                   </select>
@@ -725,7 +734,7 @@ Its activity history will be permanently deleted too. This cannot be undone.`;
                       )}
 
                       <span className="text-[10px] text-text-muted block">
-                        User ID: {act.userId}
+                        By {describeMember(loadedMembers, act.userId)?.label ?? "Unknown user"}
                       </span>
                     </div>
                   ))}

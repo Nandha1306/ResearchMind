@@ -34,22 +34,21 @@ export const streamAiQuery = async (
     signal,
   });
 
-  // Handle 401 Unauthorized by attempting a token refresh and single stream retry
+  // 401: renew the access token (shared with axios, P1-A12) and retry once.
+  // Passing the rejected token lets a refresh that already happened elsewhere
+  // be reused. ensureFreshToken's errors carry the right message: "session
+  // expired" only when the session really ended.
   if (response.status === 401) {
-    try {
-      token = await ensureFreshToken(true);
-      response = await fetch(`${API_URL}/ai/query`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(request),
-        signal,
-      });
-    } catch {
-      throw new Error("Your session has expired. Please sign in again.");
-    }
+    token = await ensureFreshToken(true, token);
+    response = await fetch(`${API_URL}/ai/query`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(request),
+      signal,
+    });
   }
 
   if (!response.ok) {

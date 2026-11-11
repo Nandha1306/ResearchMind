@@ -11,6 +11,7 @@ import { getTaskActivities } from "../services/task-activity.service";
 import { AppError } from "../../../../packages/shared/errors/AppError";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 import { AuthRequest } from "../../../../packages/shared/auth/authenticate";
+import { getWorkspaceMemberIds } from "../utils/workspace-checker";
 
 const getUserId = (req: Request): string => {
   const user = (req as any).user;
@@ -31,6 +32,27 @@ const getWorkspaceId = (req: Request): string => {
   }
 
   return workspaceId;
+};
+
+/**
+ * An assignee is a stable user id that must belong to the task's workspace
+ * (P1-A16). Checked against workspace-service's member list with the caller's
+ * token; null / absent means unassigned and needs no lookup.
+ */
+const assertAssigneesAreMembers = async (
+  req: Request,
+  workspaceId: string,
+  assigneeIds: Array<string | null | undefined>
+) => {
+  const ids = [
+    ...new Set(assigneeIds.filter((id): id is string => typeof id === "string" && id.length > 0)),
+  ];
+  if (ids.length === 0) return;
+
+  const members = new Set(await getWorkspaceMemberIds(workspaceId, req.headers.authorization));
+  if (ids.some((id) => !members.has(id))) {
+    throw new AppError("Assignee must be a member of this workspace", 400);
+  }
 };
 
 export const createTaskHandler = asyncHandler(
@@ -57,6 +79,8 @@ export const createTaskHandler = asyncHandler(
       throw new AppError("Task title is required", 400);
     }
 
+    await assertAssigneesAreMembers(req, workspaceId, [assigneeId]);
+
     const task = await createTask({
       workspaceId,
       boardId,
@@ -81,17 +105,27 @@ export const bulkCreateTasksHandler = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const workspaceId = getWorkspaceId(req);
     const userId = getUserId(req);
-    const { tasks } = req.body;
+    const { tasks, importKey } = req.body;
 
-    const createdTasks = await bulkCreateTasks({
+    await assertAssigneesAreMembers(
+      req,
+      workspaceId,
+      tasks.map((task: { assigneeId?: string | null }) => task.assigneeId)
+    );
+
+    const result = await bulkCreateTasks({
       workspaceId,
       tasks,
       createdBy: userId,
+      importKey,
     });
 
-    res.status(201).json({
+    // 201 when this request created the tasks; 200 when it repeated an import
+    // that had already been created (nothing new was written).
+    res.status(result.replayed ? 200 : 201).json({
       success: true,
-      data: createdTasks,
+      data: result.tasks,
+      replayed: result.replayed,
     });
   }
 );
@@ -145,6 +179,10 @@ export const updateTaskHandler = asyncHandler(
       parentTaskId,
       boardId,
     } = req.body;
+
+    // Only a newly chosen assignee is checked; unassigning (null) and leaving
+    // the field out need no lookup.
+    await assertAssigneesAreMembers(req, workspaceId, [assigneeId]);
 
     const task = await updateTask(
       workspaceId,

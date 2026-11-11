@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore } from "../store/auth.store";
 import { useWorkspaceStore } from "../store/workspace.store";
+import { summarizeIndexing, describeIndexing } from "../utils/document-status";
 import { useWorkspaceDocuments } from "../hooks/useDocuments";
 import { fetchWorkspaceSessions } from "../api/ai.api";
 import type { AISessionHistoryItem } from "../utils/sse";
@@ -38,7 +39,7 @@ export const OverviewPage: React.FC = () => {
     if (!workspaceId) return;
     fetchWorkspaceSessions(workspaceId)
       .then((items) => setSessions(items))
-      .catch((err) => console.warn("Could not fetch sessions for overview:", err));
+      .catch((err) => console.warn("Could not fetch sessions for overview:", err?.message));
   }, [workspaceId]);
 
   // Polished greeting based on local client hour
@@ -49,9 +50,7 @@ export const OverviewPage: React.FC = () => {
     return "Good evening";
   };
 
-  const analyzingCount = documents.filter(
-    (d) => d.embeddingStatus === "pending" || d.embeddingStatus === "indexing"
-  ).length;
+  const indexing = summarizeIndexing(documents);
 
   const latestSession = sessions.length > 0 ? sessions[0] : null;
 
@@ -101,12 +100,8 @@ export const OverviewPage: React.FC = () => {
         <StatCard
           icon={<Database className="w-4 h-4 text-accent-primary" />}
           label="Sources Indexed"
-          value={`${documents.length} Document${documents.length === 1 ? "" : "s"}`}
-          subtext={
-            analyzingCount > 0
-              ? `${analyzingCount} sources processing`
-              : "All sources indexed & searchable"
-          }
+          value={`${indexing.indexed} of ${indexing.total} Document${indexing.total === 1 ? "" : "s"}`}
+          subtext={describeIndexing(indexing)}
         />
         <StatCard
           icon={<Brain className="w-4 h-4 text-[#38BDF8]" />}

@@ -1,4 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { readInitialQuery } from "../utils/navigation";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { useWorkspaceDocuments } from "../hooks/useDocuments";
 import { useAiQuery } from "../hooks/useAiQuery";
@@ -59,6 +61,24 @@ export const SemanticSearchPage: React.FC = () => {
 
   // Local Form Input & Filters State
   const [inputQuery, setInputQuery] = useState("");
+
+  /*
+   * A question handed over by the right-panel "Ask ResearchMind" box or the
+   * top-bar search arrives as router state (P1-A19). Submit it once per
+   * navigation, then drop it from the history entry so a refresh or Back does
+   * not ask it again.
+   */
+  const location = useLocation();
+  const navigate = useNavigate();
+  const consumedNavigationKey = useRef<string | null>(null);
+  useEffect(() => {
+    const initialQuery = readInitialQuery(location.state);
+    if (!initialQuery || !workspaceId || consumedNavigationKey.current === location.key) return;
+    consumedNavigationKey.current = location.key;
+    navigate(location.pathname, { replace: true, state: null });
+    setInputQuery(initialQuery);
+    submitQuery(initialQuery);
+  }, [location, workspaceId, submitQuery, navigate]);
   const [activeFilter, setActiveFilter] = useState<"all" | "pdf" | "docx">("all");
   const [selectedPdf, setSelectedPdf] = useState<DocumentItem | null>(null);
 
