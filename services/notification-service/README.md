@@ -53,5 +53,14 @@ notification-service/
 # Install dependencies (from the repository root)
 npm install
 
-# No dev, build or start scripts are defined yet.
+# No dev, build or start scripts are defined yet (the only script, `test`, is npm's
+# placeholder and exits with an error). The service is not started by `npm run dev`
+# and is not typechecked in CI.
 ```
+
+---
+
+## 8. Related Documentation
+
+- Planned notification features: `ResearchMind_readme.md` (Current Implementation Status and section 8.7)
+- [Developer onboarding](../../docs/onboarding.md)

@@ -6,7 +6,7 @@
 > **ResearchMind** brings it all into one intelligent workspace that doesn't just store information —
 > it *understands* it, and actively assists teams throughout the entire project lifecycle.
 
-[![Node.js](https://img.shields.io/badge/Node.js-20-339933?logo=nodedotjs)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs)](https://nodejs.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://reactjs.org)
 [![MongoDB](https://img.shields.io/badge/MongoDB-7-47A248?logo=mongodb)](https://mongodb.com)
 [![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis)](https://redis.io)
@@ -18,7 +18,7 @@
 
 ## Current Implementation Status
 
-This README describes the full product design. Much of it is **not built yet**. This section describes what the code in this repository actually does. Where a later section disagrees with it, this section is correct, and any feature not listed here as implemented is **Roadmap / not yet implemented**. Per-service details are in `services/*/README.md`, `docs/onboarding.md` and `docs/architecture/system-architecture.md`.
+This README describes the full product design. Much of it is **not built yet**. This section describes what the code in this repository actually does. Where a later section disagrees with it, this section is correct, and any feature not listed here as implemented is **Roadmap / not yet implemented**. Per-service details are in `services/*/README.md`; the maintained reference documentation is listed under [Documentation](#documentation).
 
 **Repository layout.** An npm-workspaces monorepo: `frontend/` (React 19 + Vite + TypeScript), `services/*` (Express 5 + TypeScript microservices) and `packages/{shared,validation}` (shared backend code and zod schemas). There is no `apps/` directory.
 
@@ -43,16 +43,61 @@ This README describes the full product design. Much of it is **not built yet**. 
 - **Documents**: upload PDF or DOCX only (max 10 MB; wrong type → `415`, empty or unreadable → `422`, too large → `413`). Text is extracted, the file is stored on Cloudinary, and the document is embedded in the background through a Redis queue consumed by an ai-service worker. Status is `pending` / `indexing` / `indexed` / `failed` (with a failure reason). Indexing is retried automatically up to 3 attempts, and manual re-index is available. Deleting a document removes its vectors first and answers `503` if that fails. Markdown and TXT are not supported.
 - **AI Q&A**: `POST /api/ai/query` streams Server-Sent Events: `start`, `sources`, `token`, then `done` (`sessionId`, `unverifiedCitations`), or `error` (`message`, `partial`). The query is trimmed and must be 1–2000 characters; `topK` is 1–10. `GET /api/ai/sessions/workspace/:workspaceId` lists past sessions, and `POST /api/ai/search` returns raw retrieval results. The frontend Q&A page streams from `/api/ai/query`.
 - **Meeting summarizer**: `POST /api/ai/summarize-meeting` returns structured JSON (not streamed). The page can create tasks from action items.
-- **Tasks**: boards, tasks, subtasks, activity log and a drag-and-drop Kanban board. The assignee must be a workspace member's user id (`400` otherwise). Bulk creation (`POST /api/tasks/workspaces/:workspaceId/tasks/bulk`) takes at most 50 tasks, is all-or-nothing, and is idempotent with an optional `importKey`.
-- **Tests/CI**: `npm test` runs `tests/*.test.ts` with Node's test runner via `tsx`. GitHub Actions (`.github/workflows/ci.yml`) typechecks the services, builds the frontend and runs the tests.
+- **Tasks**: boards, tasks, subtasks, activity log and a drag-and-drop Kanban board. The assignee must be a workspace member's user id (`400` otherwise). Bulk creation (`POST /api/tasks/workspaces/:workspaceId/tasks/bulk`) takes at most 50 tasks, is all-or-nothing through a compensating rollback (no database transaction; if the rollback itself fails, a partial import can remain and is only logged), and is idempotent with an optional `importKey`.
+- **Tests/CI**: `npm test` runs `tests/*.test.ts` with Node's test runner via `tsx`: 239 tests with `TEST_MONGO_URI` set (a disposable MongoDB), or 170 with the 11 MongoDB integration suites skipped without it. GitHub Actions (`.github/workflows/ci.yml`) typechecks the services, builds the frontend and runs the tests against a MongoDB service container. Frontend lint is not clean (42 pre-existing problems) and is not run in CI. See [docs/testing.md](docs/testing.md).
 
 **Known limitations / not yet implemented.** No notifications of any kind, no Google sign-in (button shows "coming soon"), no password reset, no profile editing, no real-time chat or WebSockets, no AI agent, no literature review generator, report drafter or onboarding summary, no progress dashboard (the Overview page only shows indexed-document, Q&A-session and member counts plus the latest session), no caching layer or Redis pub/sub, no Dockerfiles or deployment, no demo seed script. The Sources, Analytics, Literature Review, Report Drafter and Settings pages are placeholders.
+
+**Verification status.** How far each feature is backed by evidence. "Automated tests" means `npm test` (with `TEST_MONGO_URI`); no test calls a live provider, and React components are not tested.
+
+| Feature | Classification | Evidence / gap |
+|---------|----------------|----------------|
+| Refresh-token rotation, reuse detection, logout revocation | Implemented & verified (automated tests) | Unit + MongoDB integration tests; frontend refresh coordinator tested as a plain module |
+| JWT checks, internal-token auth, workspace membership gate (`400`/`403`/`503`) | Implemented & verified (automated tests) | Shared middleware and task/ai route tests |
+| Workspace join by invite code | Implemented & verified (automated tests) | MongoDB integration tests |
+| Upload validation and text extraction (type, signature, size, corrupt/empty files) | Implemented & verified (automated tests) | Upload route tested with Cloudinary stubbed |
+| Embedding job lifecycle (claim, fencing, 3 attempts, recovery sweep, re-index) and delete-removes-vectors-first | Implemented & verified (automated tests) | Integration + unit tests with the vector store and providers stubbed |
+| AI request validation, membership refusal, SSE stream pass-through and abort handling | Implemented & verified (automated tests) | Route tests; gateway stream test with a stub upstream |
+| Meeting summary parsing/normalisation | Implemented & verified (automated tests) | Fixture LLM output only |
+| Task assignee validation, bulk creation (all-or-nothing via compensating rollback, idempotent), subtask cycle protection | Implemented & verified (automated tests) | MongoDB integration + unit tests |
+| Error mapping, graceful shutdown, health handler | Implemented & verified (automated tests) | Unit tests |
+| Register, login, `GET /api/auth/me` | Implemented but partially verified | Token/service logic tested; no route-level register/login tests |
+| Workspace create/list/detail/members | Implemented but partially verified | Only join and non-member reads are tested |
+| Boards, task CRUD, activity log | Implemented but partially verified | Tested through assignee and bulk paths only |
+| Gateway proxying and Redis rate limits | Implemented but partially verified | Stream proxy tested; rate limits not tested |
+| AI session history, `POST /api/ai/search` results | Implemented but partially verified | Validation tested; result content not |
+| Frontend pages (Documents, AI Q&A, Meeting Notes, Kanban drag and drop, Overview) | Implemented but partially verified | Built and typechecked in CI; helpers unit-tested; pages checked manually only, no browser tests |
+| Document ingestion formats | Partially implemented | PDF and DOCX only; Markdown/TXT planned |
+| AI task creation | Partially implemented | Only via meeting action items → bulk creation; no agent |
+| Auth account features | Partially implemented | No password reset, Google sign-in or profile editing |
+| Workspace management | Partially implemented | No roles, rename/delete, member removal or expiring invites |
+| Deployment / DevOps (Phase 9) | Partially implemented | CI and infrastructure-only compose; no Dockerfiles or deployment |
+| Cloudinary storage, Voyage embeddings, Pinecone storage/search, Groq/xAI answers and summaries | Externally unverified (live providers) | Stubbed in every test; answer quality, citations and retrieval relevance unmeasured |
+| AI agent, literature review, report drafter, onboarding summary, chat, notifications, progress tracker, caching / pub-sub, seed data | Not implemented | Roadmap |
+
+---
+
+## Documentation
+
+| Topic | Document |
+|-------|----------|
+| Developer setup (prerequisites, install, environment, running, shutdown) | [docs/onboarding.md](docs/onboarding.md) |
+| Environment variables (every service) | [docs/reference/environment-variables.md](docs/reference/environment-variables.md) |
+| HTTP API reference | [docs/reference/api.md](docs/reference/api.md) (Swagger UI: `http://localhost:5000/api-docs`) |
+| System architecture | [docs/architecture/system-architecture.md](docs/architecture/system-architecture.md) |
+| Security model | [docs/architecture/security.md](docs/architecture/security.md) |
+| Documents, embeddings and AI | [docs/architecture/documents-and-ai.md](docs/architecture/documents-and-ai.md) |
+| Background jobs (embedding queue, worker, recovery sweep) | [docs/operations/background-jobs.md](docs/operations/background-jobs.md) |
+| Testing and CI | [docs/testing.md](docs/testing.md) |
+| Deployment and operations (infrastructure only; not production-ready) | [docs/deployment/docker-process.md](docs/deployment/docker-process.md) |
+| Architecture decision records | [docs/adr/](docs/adr/) |
+| Per-component notes | [frontend](frontend/README.md), [packages/shared](packages/shared/README.md), [api-gateway](services/api-gateway/README.md), [auth-service](services/auth-service/README.md), [workspace-service](services/workspace-service/README.md), [document-service](services/document-service/README.md), [task-service](services/task-service/README.md), [ai-service](services/ai-service/README.md), [notification-service](services/notification-service/README.md) |
 
 ---
 
 ## 📌 Table of Contents
 
-0. [Current Implementation Status](#current-implementation-status)
+0. [Current Implementation Status](#current-implementation-status) · [Documentation](#documentation)
 1. [Problem Statement](#1-problem-statement)
 2. [Proposed Solution](#2-proposed-solution)
 3. [Key Features](#3-key-features)
@@ -554,7 +599,7 @@ GET    /boards/:id             Board detail
 PATCH  /boards/:id             Update board
 DELETE /boards/:id             Delete board
 POST   /tasks                  Create task
-POST   /tasks/bulk             Bulk create tasks (max 50, all-or-nothing, idempotent with optional importKey)
+POST   /tasks/bulk             Bulk create tasks (max 50, all-or-nothing via compensating rollback, idempotent with optional importKey)
 GET    /tasks                  List tasks
 GET    /tasks/:id              Task detail
 GET    /tasks/:id/activities   Activity log
@@ -1760,7 +1805,7 @@ useUIStore           // sidebarOpen, activeModal, theme
 **Goal:** Paste meeting notes → structured summary → tasks auto-created.
 
 - [x] Task Service: board + task CRUD
-- [x] Bulk task creation endpoint (max 50, all-or-nothing, idempotent with `importKey`)
+- [x] Bulk task creation endpoint (max 50, all-or-nothing via compensating rollback, idempotent with `importKey`)
 - [x] `/ai/summarize-meeting` endpoint (structured output)
 - [x] Meeting Summarizer page: paste input → formatted output
 - [x] "Create tasks from action items" button
@@ -1896,7 +1941,7 @@ Each service and `frontend/` has its own `.env.example`; there is no root `.env.
 
 ## 18. Environment Variables
 
-Copy each service's own `.env.example` to `.env` in the same directory (`services/<service>/.env.example`, `frontend/.env.example`) and fill in the values. Never commit real values. Names below match the code; see `docs/onboarding.md` for a full example per service.
+Copy each service's own `.env.example` to `.env` in the same directory (`services/<service>/.env.example`, `frontend/.env.example`) and fill in the values. Never commit real values. Names below match the code; the maintained per-service reference is [docs/reference/environment-variables.md](docs/reference/environment-variables.md), and where this summary differs from it, that file is correct.
 
 ```env
 # ── Every backend service except notification-service ─────────────
@@ -1984,7 +2029,7 @@ npm install
 docker-compose up -d
 ```
 
-This starts MongoDB (`27017`, authentication enabled), Redis (`6379`) and Mongo Express (`8081`). Verify with `docker-compose ps`.
+This starts MongoDB (`27017`, authentication enabled), Redis (`6379`) and Mongo Express (`8081`). Verify with `docker-compose ps`. The ports are published on all network interfaces and the credentials fall back to weak defaults unless set in a root `.env`; read the warnings in [docs/onboarding.md](docs/onboarding.md#2-infrastructure-setup-docker) first.
 
 ### Step 4 — Configure environment
 
@@ -1995,7 +2040,7 @@ for dir in services/api-gateway services/auth-service services/workspace-service
 done
 ```
 
-Edit each `.env` file with your actual keys and credentials (see Section 18 and `docs/onboarding.md`).
+Edit each `.env` file with your actual keys and credentials (see [docs/reference/environment-variables.md](docs/reference/environment-variables.md) and [docs/onboarding.md](docs/onboarding.md)).
 
 ### Step 5 — Set up Pinecone index
 
@@ -2011,7 +2056,7 @@ npm run dev
 npm run dev:services
 ```
 
-The AI service starts the embedding worker in-process; `npm run dev:worker --workspace=ai-service` runs an optional extra worker.
+The AI service starts the embedding worker in-process; `npm run dev:worker --workspace=ai-service` runs an optional extra worker. These `dev` scripts were not executed in the latest audit; building and starting each service (`npm run build -w <service>`, then `npm start -w <service>`) was. See [docs/onboarding.md](docs/onboarding.md).
 
 ### Step 7 — Open the app
 
@@ -2034,6 +2079,8 @@ Roadmap / not yet implemented: there is no seed script and no demo account.
 ```bash
 npm test    # integration tests are skipped unless TEST_MONGO_URI points at a disposable MongoDB
 ```
+
+Details, typecheck/build commands and known gaps: [docs/testing.md](docs/testing.md).
 
 ---
 
@@ -2172,7 +2219,7 @@ docker-compose up --build ai-service
 
 ## 21. Testing Strategy
 
-> **As implemented:** tests use Node's built-in test runner (`node:test`) via `tsx`, not Jest/Supertest. `npm test` runs `tests/*.test.ts`, covering auth flow and refresh rotation, workspace membership/isolation and join, upload and model validation, document extraction errors and lifecycle, the embedding worker, AI validation and streaming, client helpers, error middleware and service lifecycle. Integration tests (`*.integration.test.ts`) need `TEST_MONGO_URI` pointing at a disposable MongoDB; without it they are skipped. CI runs them against a MongoDB service container. The Jest, Supertest and k6 examples below are design sketches (the `/docs/...` routes and `embed:queue` they use do not exist).
+> **As implemented:** tests use Node's built-in test runner (`node:test`) via `tsx`, not Jest/Supertest. `npm test` runs `tests/*.test.ts`, covering auth flow and refresh rotation, workspace membership/isolation and join, upload and model validation, document extraction errors and lifecycle, the embedding worker, AI validation and streaming, client helpers, error middleware and service lifecycle. Integration tests (`*.integration.test.ts`) need `TEST_MONGO_URI` pointing at a disposable MongoDB; without it they are skipped. CI runs them against a MongoDB service container. See [docs/testing.md](docs/testing.md) for how to run them and what is not covered (no browser end-to-end, component or live-provider tests). The Jest, Supertest and k6 examples below are design sketches (the `/docs/...` routes and `embed:queue` they use do not exist).
 
 ### Unit Tests (Jest)
 
@@ -2349,12 +2396,12 @@ jobs:
 ### Vercel Deployment
 
 ```bash
-cd apps/client
+cd frontend
 vercel --prod
 
 # Set env vars in Vercel dashboard:
-# VITE_API_URL=https://your-gateway.railway.app
-# VITE_SOCKET_URL=https://your-chat-service.railway.app
+# VITE_API_URL=https://your-gateway.example.com/api   # must include /api
+# (VITE_SOCKET_URL is roadmap only: no chat service exists and nothing reads it)
 ```
 
 ---

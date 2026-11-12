@@ -32,6 +32,8 @@ POST /api/ai/query → JWT Auth → Membership Check → Vector Search → Conte
 
 ## 4. API Endpoints
 
+This table summarises this service's routes. The cross-service reference (request/response shapes, errors) is [docs/reference/api.md](../../docs/reference/api.md); where they differ, that file and the code are correct.
+
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | `GET` | `/health` | No | Health check endpoint |
@@ -45,45 +47,45 @@ Membership is checked against workspace-service: malformed workspace id → `400
 
 ---
 
-## 5. Environment Variables (`services/ai-service/.env`, see `.env.example`)
+## 5. Environment Variables
 
-```env
-PORT=5006
-REDIS_URL=redis://127.0.0.1:6379
+Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
-VOYAGE_API_KEY=<your_voyage_key>
-# Must match the model/dimension the Pinecone index was built with (code default: voyage-3 / 1024).
-VOYAGE_MODEL=voyage-3
-VOYAGE_EMBEDDING_DIMENSION=1024
-
-PINECONE_API_KEY=<your_pinecone_key>
-PINECONE_INDEX=researchmind
-
-DOCUMENT_SERVICE_URL=http://localhost:5003
-WORKSPACE_SERVICE_URL=http://localhost:5002
-
-# Groq or xAI key (GROQ_API_KEY is accepted as an alternative name)
-XAI_API_KEY=<your_groq_or_xai_key>
-# Optional overrides: XAI_MODEL, XAI_BASE_URL, LLM_REQUEST_TIMEOUT_MS (default 60000), LLM_STREAM_IDLE_TIMEOUT_MS (default 30000)
-
-# MONGODB_URI is read first, then MONGO_URI
-MONGO_URI=mongodb://<user>:<password>@localhost:27017/researchmind_ai?authSource=admin
-
-# Required: the service refuses to start without these (min. 32 characters each)
-JWT_ACCESS_SECRET=<same value as every other service>
-INTERNAL_SERVICE_TOKEN=<same value as document-service>
-```
+- **Required (refuses to start without them):** `MONGODB_URI` or `MONGO_URI` (`MONGODB_URI` is read first), `JWT_ACCESS_SECRET` (same value in every service), `INTERNAL_SERVICE_TOKEN` (same value as document-service), `VOYAGE_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX`, and `XAI_API_KEY` (a Groq `gsk_...` key or an xAI key; `GROQ_API_KEY` is accepted instead). The two secrets must be at least 32 characters and not placeholders or known-insecure values.
+- **Embedding model:** `VOYAGE_MODEL` (default `voyage-3`) and `VOYAGE_EMBEDDING_DIMENSION` (default `1024`) must match the Pinecone index. At startup the service exits if the index is missing or its dimension differs; if Pinecone cannot be reached it logs a warning and continues. Changing the model requires re-indexing every document.
+- **Optional:** `PORT` (default `5006`), `REDIS_URL` (embedding queue, default `redis://127.0.0.1:6379`), `DOCUMENT_SERVICE_URL` (worker claim/status, default `http://localhost:5003`), `WORKSPACE_SERVICE_URL` (membership checks), `XAI_MODEL`, `XAI_BASE_URL`, `LLM_REQUEST_TIMEOUT_MS` (default `60000`), `LLM_STREAM_IDLE_TIMEOUT_MS` (default `30000`).
+- The standalone worker (`src/worker.ts`) reads the same `.env`; it needs `INTERNAL_SERVICE_TOKEN`, Redis, document-service and the Voyage/Pinecone settings, but not MongoDB or `JWT_ACCESS_SECRET`.
 
 ---
 
 ## 6. Local Development Commands
 
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/ai-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Start AI Service HTTP Server
-npm run dev
+npm run dev:ai                        # HTTP server + in-process worker, live reload; same as `npm run dev -w ai-service`  [UNTESTED]
+npm run dev:worker -w ai-service      # optional extra standalone worker, live reload  [UNTESTED]
+npm run build -w ai-service           # compile to services/ai-service/dist  [TESTED]
+npm start -w ai-service               # run the compiled HTTP server + worker  [TESTED, with dummy provider keys]
+npm run start:worker -w ai-service    # run the compiled standalone worker  [UNTESTED]
+./node_modules/.bin/tsc --noEmit -p services/ai-service   # typecheck, as CI does  [TESTED]
+curl http://localhost:5006/health     # MongoDB + Redis health  [UNTESTED]
 
-# Start AI Embedding Worker
-npm run dev:worker
+# Live-provider utilities (need real Pinecone keys)
+npm run test:pinecone -w ai-service   # upserts, then deletes, a test vector in namespace "researchmind-test-workspace"  [UNTESTED]
+npm run verify:vectors -w ai-service -- <documentId> <workspaceId>   # prints index stats and the workspace namespace's record count only (documentId is not used)  [UNTESTED]
+```
 
-# Typecheck TypeScript
-npx tsc --noEmit
+`test:pinecone` is not part of the automated test suite. The service's automated tests are in the root `tests/` folder and run with `npm test` (see [Testing](../../docs/testing.md)); they stub Voyage, Pinecone and the LLM. Graceful shutdown waits up to 30 s so an embedding job in progress can finish.
+
+---
+
+## 7. Related Documentation
+
+- [Developer onboarding](../../docs/onboarding.md)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [API reference](../../docs/reference/api.md)
+- [Documents and AI](../../docs/architecture/documents-and-ai.md)
+- [Background jobs](../../docs/operations/background-jobs.md)
+- [Testing](../../docs/testing.md)
+- [Deployment and operations](../../docs/deployment/docker-process.md)

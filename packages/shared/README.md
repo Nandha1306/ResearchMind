@@ -46,7 +46,7 @@ packages/shared/
 ---
 
 ## 4. API Endpoints
-*Not applicable.* This package is an internal npm workspace dependency imported directly by microservices.
+*Not applicable.* This folder has no `package.json` and is not an npm package: services import its files by relative path (for example `../../../packages/shared/errors/AppError`), and each service's `tsc` build compiles the imported files into that service's `dist/`.
 
 ---
 
@@ -58,6 +58,9 @@ Read by the shared code in whichever service imports it:
 | `JWT_ACCESS_SECRET` | `auth/authenticate.ts` | Required; same value in every service |
 | `INTERNAL_SERVICE_TOKEN` | `auth/internal-auth.middleware.ts` | Without it every internal request is rejected (`401`) |
 | `WORKSPACE_SERVICE_URL` | `auth/workspace-membership.ts` | Default `http://127.0.0.1:5002` |
+| `MONGO_URI` / `MONGODB_URI` | `lifecycle/mongo.ts` (`resolveMongoUri`) | The calling service chooses which names to read; see its README |
+
+Required secrets are checked by `config/secrets.ts` (minimum 32 characters). The full per-service list is in [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
 ---
 
@@ -83,7 +86,23 @@ app.use(errorMiddleware);
 ---
 
 ## 7. Local Development Commands
+
+There is nothing to build or start: the code is compiled as part of each service that imports it. From the repository root:
+
 ```bash
-# Referenced directly via npm workspace root dependencies
-npm install
+npm install   # installs the dependencies this code uses (express, mongoose, jsonwebtoken, ...) at the root
+npm test      # the shared code is covered by tests/lifecycle.test.ts, error-middleware.test.ts, internal-auth.test.ts, workspace-membership.test.ts and others  [TESTED]
 ```
+
+A change here affects every service that imports the changed file; typecheck all six services afterwards (see [Testing](../../docs/testing.md)).
+
+Related folders: `packages/validation` holds the zod request schemas (also imported by relative path). `packages/shared-config` (a stub `package.json` and `tsconfig.base.json`), `packages/shared-types` and `packages/shared-utils` (empty) are unused scaffolding.
+
+---
+
+## 8. Related Documentation
+
+- [Security model](../../docs/architecture/security.md) (JWT, internal token, membership checks, secrets)
+- [Deployment and operations](../../docs/deployment/docker-process.md) (health checks, graceful shutdown)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [Testing](../../docs/testing.md)

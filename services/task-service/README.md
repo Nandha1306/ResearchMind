@@ -15,7 +15,7 @@ The Task Service stores the boards and tasks of each research workspace, records
 - Task activity log (`GET .../tasks/:id/activities`).
 - Bulk task creation (`POST .../tasks/bulk`):
   - at most 50 tasks per request;
-  - all-or-nothing: the whole batch is validated first, and if a write fails the tasks already written are deleted again;
+  - all-or-nothing: the whole batch is validated first, and if a write fails the tasks already written are deleted again (a compensating rollback, not a database transaction; if that rollback itself fails, a partial import remains and is only logged);
   - idempotent when the optional `importKey` is sent: repeating the same import returns the tasks created the first time instead of duplicating them.
 - Every route checks that the caller is a member of the workspace in the URL by asking workspace-service (shared helper `packages/shared/auth/workspace-membership.ts`): malformed workspace id → `400`, not a member → `403`, membership check could not run → `503`.
 - An assignee must be the user id of a member of the workspace; otherwise the request is rejected with `400`.
@@ -45,6 +45,8 @@ task-service/
 
 ## 4. API Endpoints
 
+This table summarises this service's routes. The cross-service reference (request/response shapes, errors) is [docs/reference/api.md](../../docs/reference/api.md); where they differ, that file and the code are correct.
+
 Mounted under `/api/tasks` (default port 5004, proxied through API Gateway on port 5000). All routes except `/health` and `/api-docs/` require `Authorization: Bearer <accessToken>` and workspace membership.
 
 | Method | Endpoint | Description |
@@ -66,15 +68,12 @@ Mounted under `/api/tasks` (default port 5004, proxied through API Gateway on po
 
 ---
 
-## 5. Environment Variables (`services/task-service/.env`, see `.env.example`)
+## 5. Environment Variables
 
-| Variable | Description | Example / Default | Required |
-|----------|-------------|-------------------|----------|
-| `PORT` | Service listening port | default `5004` | No |
-| `MONGODB_URI` or `MONGO_URI` | MongoDB connection string (`MONGODB_URI` is read first) | `mongodb://<user>:<password>@127.0.0.1:27017/<db>?authSource=admin` | Yes |
-| `WORKSPACE_SERVICE_URL` | Workspace Service URL for membership checks | default `http://127.0.0.1:5002` | No (set it when not running locally) |
-| `JWT_ACCESS_SECRET` | Shared access-token signing key (same value in every service); the service refuses to start without it | _(none — required)_ | Yes |
-| `CORS_ORIGIN` | Comma-separated allowed origins | _(unset: any origin)_ | No |
+Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
+
+- **Required:** `MONGODB_URI` or `MONGO_URI` (`MONGODB_URI` is read first), `JWT_ACCESS_SECRET` (same value in every service; the service refuses to start without a valid one).
+- **Optional:** `PORT` (default `5004`), `WORKSPACE_SERVICE_URL` (membership checks and assignee validation, default `http://127.0.0.1:5002`; set it when not running locally), `CORS_ORIGIN` (comma-separated; unset allows any origin).
 
 ---
 
@@ -87,13 +86,25 @@ Mounted under `/api/tasks` (default port 5004, proxied through API Gateway on po
 ---
 
 ## 7. Local Development Commands
+
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/task-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Start dev server with nodemon & ts-node
-npm run dev
-
-# Compile TypeScript
-npm run build
-
-# Start compiled server
-npm run start
+npm run dev:task                    # live reload (nodemon + ts-node), same as `npm run dev -w task-service`  [UNTESTED]
+npm run build -w task-service       # compile to services/task-service/dist  [TESTED]
+npm start -w task-service           # run the compiled server  [TESTED]
+./node_modules/.bin/tsc --noEmit -p services/task-service   # typecheck, as CI does  [TESTED]
+curl http://localhost:5004/health             # service health  [UNTESTED]
 ```
+
+This service has no test script of its own; its tests are in the root `tests/` folder and run with `npm test` (see [Testing](../../docs/testing.md)).
+
+---
+
+## 8. Related Documentation
+
+- [Developer onboarding](../../docs/onboarding.md)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [API reference](../../docs/reference/api.md)
+- [Testing](../../docs/testing.md)
+- [Deployment and operations](../../docs/deployment/docker-process.md)

@@ -80,19 +80,26 @@ frontend/
 ---
 
 ## 7. Local Development Commands
+
+Run from the repository root: one `npm install` there installs every workspace. Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Install dependencies
-npm install
-
-# Start Vite local development server (port 5173 by default)
-npm run dev
-
-# Run TypeScript type check and build production bundle
-npm run build
-
-# Preview production build locally
-npm run preview
-
-# Lint source files
-npm run lint
+npm run dev:frontend       # Vite dev server on http://localhost:5173; same as `npm run dev -w frontend`  [UNTESTED]
+npm run build -w frontend  # tsc -b && vite build -> frontend/dist (also run in CI)  [TESTED]
+npm run preview -w frontend   # serve the production build locally  [UNTESTED]
+npm run lint -w frontend   # ESLint; currently reports 42 pre-existing problems, not a CI gate  [TESTED - fails]
 ```
+
+`VITE_API_URL` is read at build time, so rebuild after changing it. The backend (at least the gateway, auth- and workspace-service) must be running for the app to work; see [onboarding](../docs/onboarding.md).
+
+Testing: React pages and components have no automated tests and there are no browser end-to-end tests. Framework-free modules (`src/lib/token-refresh.ts`, `src/api/auth-interceptors.ts`, `src/utils/ai-stream.ts` and other helpers) are tested from the root `tests/client-*.test.ts` files with `npm test`; see [Testing](../docs/testing.md).
+
+---
+
+## 8. Related Documentation
+
+- [Developer onboarding](../docs/onboarding.md)
+- [Environment variables](../docs/reference/environment-variables.md)
+- [API reference](../docs/reference/api.md)
+- [Security model](../docs/architecture/security.md) (token storage and refresh)
+- [Testing](../docs/testing.md)

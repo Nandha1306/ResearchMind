@@ -40,6 +40,8 @@ auth-service/
 
 ## 4. API Endpoints
 
+This table summarises this service's routes. The cross-service reference (request/response shapes, errors) is [docs/reference/api.md](../../docs/reference/api.md); where they differ, that file and the code are correct.
+
 Mounted under `/api/auth` (port 5001, proxied through API Gateway on port 5000):
 
 | Method | Endpoint | Description | Auth Required | Request Body |
@@ -58,19 +60,11 @@ Swagger UI is not served by this service; the gateway serves Swagger UI (which i
 
 ## 5. Environment Variables
 
-| Variable | Description | Example / Default | Required |
-|----------|-------------|-------------------|----------|
-| `PORT` | Service listening port | default `5001` | No |
-| `MONGO_URI` | MongoDB connection string (this service reads only `MONGO_URI`) | `mongodb://<user>:<password>@127.0.0.1:27017/researchmind-auth?authSource=admin` | Yes |
-| `REDIS_HOST` / `REDIS_PORT` | Redis connection (connected at startup, not used by any route; startup does not wait for it) | `127.0.0.1` / `6379` | No |
-| `ACCESS_TOKEN_EXPIRES` | Access token lifetime | default `15m` | No |
-| `REFRESH_TOKEN_EXPIRES` | Refresh token lifetime | default `7d` | No |
-| `REFRESH_REUSE_GRACE_MS` | Grace window for concurrent refreshes (0 disables, max 60000) | default `10000` | No |
-| `JWT_ACCESS_SECRET` | Shared access-token signing key (same value in every service) | _(none — required)_ | Yes |
-| `JWT_REFRESH_SECRET` | Refresh-token signing key, different from `JWT_ACCESS_SECRET` | _(none — required)_ | Yes |
-| `INTERNAL_SERVICE_TOKEN` | Shared secret for `/internal/users/bulk` (same value as workspace-service); without it every internal request is rejected | _(none)_ | For member names in workspace-service |
+Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
-The service refuses to start if `JWT_ACCESS_SECRET` or `JWT_REFRESH_SECRET` is missing, a placeholder, or shorter than 32 characters.
+- **Required:** `MONGO_URI` (this service reads only `MONGO_URI`), `JWT_ACCESS_SECRET` (same value in every service), `JWT_REFRESH_SECRET` (different from `JWT_ACCESS_SECRET`). The service refuses to start if either secret is missing, a placeholder, shorter than 32 characters or a known-insecure value.
+- **For workspace member names:** `INTERNAL_SERVICE_TOKEN` (same value as workspace-service). It is not checked at startup, but `/internal/users/bulk` rejects every request while it is missing or weak.
+- **Optional:** `PORT` (default `5001`), `ACCESS_TOKEN_EXPIRES` (default `15m`), `REFRESH_TOKEN_EXPIRES` (default `7d`), `REFRESH_REUSE_GRACE_MS` (default `10000`; `0` disables, capped at `60000`), `REDIS_HOST` / `REDIS_PORT` (connected in the background, not used by any route; startup does not wait for Redis).
 
 ---
 
@@ -83,16 +77,26 @@ The service refuses to start if `JWT_ACCESS_SECRET` or `JWT_REFRESH_SECRET` is m
 ---
 
 ## 7. Local Development Commands
+
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/auth-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Install dependencies
-npm install
-
-# Start dev server with live reload
-npm run dev
-
-# Build TypeScript to dist/
-npm run build
-
-# Start compiled production server
-npm run start
+npm run dev:auth                    # live reload (nodemon + ts-node), same as `npm run dev -w auth-service`  [UNTESTED]
+npm run build -w auth-service       # compile to services/auth-service/dist  [TESTED]
+npm start -w auth-service           # run the compiled server  [TESTED]
+./node_modules/.bin/tsc --noEmit -p services/auth-service   # typecheck, as CI does  [TESTED]
+curl http://localhost:5001/health             # service health  [UNTESTED]
 ```
+
+This service has no test script of its own; its tests are in the root `tests/` folder and run with `npm test` (see [Testing](../../docs/testing.md)).
+
+---
+
+## 8. Related Documentation
+
+- [Developer onboarding](../../docs/onboarding.md)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [API reference](../../docs/reference/api.md)
+- [Testing](../../docs/testing.md)
+- [Deployment and operations](../../docs/deployment/docker-process.md)
+- [Security model](../../docs/architecture/security.md)

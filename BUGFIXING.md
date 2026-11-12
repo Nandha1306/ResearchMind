@@ -1,5 +1,7 @@
 # 🛠️ ResearchMind — Bug Fixing & Hardening Backlog
 
+> **Historical snapshot (status note 2026-11-11):** this backlog was written on 2026-08-26 against an earlier tree. Many items have since been fixed in later fix waves; the checkboxes and line numbers below are not maintained. For current behaviour see the [documentation index](docs/README.md) and the *Current Implementation Status* section of the [project README](ResearchMind_readme.md).
+
 **Source:** Phase 1 → Phase 4 Master Audit
 **Created:** 2026-08-26
 **Branch at time of audit:** `phase-4-meeting-summarizer-task-creatio`

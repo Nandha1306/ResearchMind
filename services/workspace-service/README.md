@@ -38,6 +38,8 @@ workspace-service/
 
 ## 4. API Endpoints
 
+This table summarises this service's routes. The cross-service reference (request/response shapes, errors) is [docs/reference/api.md](../../docs/reference/api.md); where they differ, that file and the code are correct.
+
 Mounted under `/api/workspaces` (default port 5002, proxied through API Gateway on port 5000):
 
 | Method | Endpoint | Description | Auth Required | Request Body / Path |
@@ -56,13 +58,11 @@ Swagger UI is not served by this service; use the gateway's `http://localhost:50
 
 ## 5. Environment Variables
 
-| Variable | Description | Example / Default | Required |
-|----------|-------------|-------------------|----------|
-| `PORT` | Service listening port | default `5002` | No |
-| `MONGO_URI` | MongoDB connection string (this service reads only `MONGO_URI`) | `mongodb://<user>:<password>@127.0.0.1:27017/researchmind-workspace?authSource=admin` | Yes |
-| `JWT_ACCESS_SECRET` | Shared access-token signing key (same value in every service); the service refuses to start without it | _(none — required)_ | Yes |
-| `AUTH_SERVICE_URL` | Auth Service URL for member name lookup | default `http://127.0.0.1:5001` | No |
-| `INTERNAL_SERVICE_TOKEN` | Shared secret sent to auth-service's `/internal/users/bulk` (same value as auth-service); without it member names are not resolved | _(none)_ | No |
+Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
+
+- **Required:** `MONGO_URI` (this service reads only `MONGO_URI`), `JWT_ACCESS_SECRET` (same value in every service; the service refuses to start without a valid one).
+- **Optional (member names):** `AUTH_SERVICE_URL` (default `http://127.0.0.1:5001`) and `INTERNAL_SERVICE_TOKEN` (same value as auth-service). Without a valid token, members are listed by user id with a placeholder name.
+- **Optional:** `PORT` (default `5002`).
 
 ---
 
@@ -73,16 +73,26 @@ Swagger UI is not served by this service; use the gateway's `http://localhost:50
 ---
 
 ## 7. Local Development Commands
+
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/workspace-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Install dependencies
-npm install
-
-# Start dev server with nodemon
-npm run dev
-
-# Build TypeScript to dist/
-npm run build
-
-# Start compiled production server
-npm run start
+npm run dev:workspace               # live reload (nodemon + ts-node), same as `npm run dev -w workspace-service`  [UNTESTED]
+npm run build -w workspace-service  # compile to services/workspace-service/dist  [TESTED]
+npm start -w workspace-service      # run the compiled server  [TESTED]
+./node_modules/.bin/tsc --noEmit -p services/workspace-service   # typecheck, as CI does  [TESTED]
+curl http://localhost:5002/health             # service health  [UNTESTED]
 ```
+
+This service has no test script of its own; its tests are in the root `tests/` folder and run with `npm test` (see [Testing](../../docs/testing.md)).
+
+---
+
+## 8. Related Documentation
+
+- [Developer onboarding](../../docs/onboarding.md)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [API reference](../../docs/reference/api.md)
+- [Testing](../../docs/testing.md)
+- [Deployment and operations](../../docs/deployment/docker-process.md)
+- [Security model](../../docs/architecture/security.md)

@@ -1,5 +1,7 @@
 # ResearchMind: Implemented System Documentation
 
+> **Historical snapshot (status note 2026-11-11):** this analysis describes the tree as of 2026-11-02 (HEAD `5f4be4f` plus uncommitted changes). Later fix waves changed much of the behaviour it describes, and it is not maintained. For current behaviour see the [documentation index](docs/README.md) and the *Current Implementation Status* section of the [project README](ResearchMind_readme.md).
+
 A reverse-engineered description of what ResearchMind is meant to be (`ResearchMind_readme.md`) and what the code actually does today, connected section by section.
 
 | | |

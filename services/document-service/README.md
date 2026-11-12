@@ -51,6 +51,8 @@ document-service/
 
 ## 4. API Endpoints
 
+This table summarises this service's routes. The cross-service reference (request/response shapes, errors) is [docs/reference/api.md](../../docs/reference/api.md); where they differ, that file and the code are correct.
+
 All document endpoints are mounted under `/api/documents` (default port 5003, proxied through API Gateway on port 5000):
 
 | Method | Endpoint | Description | Auth Required | Request Body / Form-Data |
@@ -70,21 +72,11 @@ All document endpoints are mounted under `/api/documents` (default port 5003, pr
 
 ## 5. Environment Variables
 
-| Variable | Description | Example / Default | Required |
-|----------|-------------|-------------------|----------|
-| `PORT` | Service listening port | default `5003` | No |
-| `MONGODB_URI` or `MONGO_URI` | MongoDB connection string (`MONGODB_URI` is read first) | `mongodb://<user>:<password>@127.0.0.1:27017/researchmind-documents?authSource=admin` | Yes |
-| `REDIS_URL` | Redis server connection URL (embedding queue) | default `redis://127.0.0.1:6379` | No |
-| `JWT_ACCESS_SECRET` | Shared access-token signing key (same value in every service) | _(none — required)_ | Yes |
-| `INTERNAL_SERVICE_TOKEN` | Shared secret for `/internal` routes and for calling ai-service's vector cleanup (same value as ai-service) | _(none — required)_ | Yes |
-| `AI_SERVICE_URL` | AI Service URL, used to remove vectors on delete | default `http://127.0.0.1:5006` | No |
-| `CLOUDINARY_CLOUD_NAME` | Cloudinary account cloud name | `<cloudinary-cloud-name>` | Yes |
-| `CLOUDINARY_API_KEY` | Cloudinary API key | `<cloudinary-api-key>` | Yes |
-| `CLOUDINARY_API_SECRET` | Cloudinary API secret | `<secret>` | Yes |
-| `WORKSPACE_SERVICE_URL` | URL of Workspace Service for membership checks | default `http://127.0.0.1:5002` | No |
-| `CORS_ORIGIN` | Comma-separated allowed origins | _(unset: any origin)_ | No |
+Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
-The service refuses to start if `JWT_ACCESS_SECRET` or `INTERNAL_SERVICE_TOKEN` is missing, a placeholder, or shorter than 32 characters.
+- **Required:** `MONGODB_URI` or `MONGO_URI` (`MONGODB_URI` is read first), `JWT_ACCESS_SECRET` (same value in every service), `INTERNAL_SERVICE_TOKEN` (same value as ai-service), `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. The service refuses to start if `JWT_ACCESS_SECRET` or `INTERNAL_SERVICE_TOKEN` is missing, a placeholder, shorter than 32 characters or a known-insecure value. Cloudinary settings are not checked at startup; uploads fail while they are wrong.
+- **Optional:** `PORT` (default `5003`), `REDIS_URL` (embedding queue, default `redis://127.0.0.1:6379`), `WORKSPACE_SERVICE_URL` (membership checks, default `http://127.0.0.1:5002`), `AI_SERVICE_URL` (vector removal on delete, default `http://127.0.0.1:5006`), `CORS_ORIGIN` (comma-separated; unset allows any origin).
+- The upload limit is fixed in code at 10 MB (there is no `MAX_FILE_SIZE_MB`). The `winston` logger also writes `error.log` and `combined.log` into the working directory.
 
 ---
 
@@ -101,16 +93,27 @@ The service refuses to start if `JWT_ACCESS_SECRET` or `INTERNAL_SERVICE_TOKEN` 
 ---
 
 ## 7. Local Development Commands
+
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/document-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Install dependencies
-npm install
-
-# Start dev server with nodemon & ts-node
-npm run dev
-
-# Compile TypeScript to dist/
-npm run build
-
-# Start production server
-npm run start
+npm run dev:doc                     # live reload (nodemon + ts-node), same as `npm run dev -w document-service`  [UNTESTED]
+npm run build -w document-service   # compile to services/document-service/dist  [TESTED]
+npm start -w document-service       # run the compiled server  [TESTED]
+./node_modules/.bin/tsc --noEmit -p services/document-service   # typecheck, as CI does  [TESTED]
+curl http://localhost:5003/health             # service health  [UNTESTED]
 ```
+
+This service has no test script of its own; its tests are in the root `tests/` folder and run with `npm test` (see [Testing](../../docs/testing.md)).
+
+---
+
+## 8. Related Documentation
+
+- [Developer onboarding](../../docs/onboarding.md)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [API reference](../../docs/reference/api.md)
+- [Testing](../../docs/testing.md)
+- [Deployment and operations](../../docs/deployment/docker-process.md)
+- [Documents and AI](../../docs/architecture/documents-and-ai.md)
+- [Background jobs](../../docs/operations/background-jobs.md)

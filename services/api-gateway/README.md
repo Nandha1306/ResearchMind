@@ -45,6 +45,8 @@ api-gateway/
 
 ## 4. API Endpoints
 
+This table summarises this service's routes. The cross-service reference (request/response shapes, errors) is [docs/reference/api.md](../../docs/reference/api.md); where they differ, that file and the code are correct.
+
 ### Native Gateway Endpoints
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
@@ -64,16 +66,11 @@ api-gateway/
 
 ## 5. Environment Variables
 
-| Variable | Description | Example / Default | Required |
-|----------|-------------|-------------------|----------|
-| `PORT` | Gateway listening port | default `5000` | No |
-| `AUTH_SERVICE_URL` | Downstream Auth Service URL | default `http://localhost:5001` | No |
-| `WORKSPACE_SERVICE_URL` | Downstream Workspace Service URL | default `http://localhost:5002` | No |
-| `DOCUMENT_SERVICE_URL` | Downstream Document Service URL | default `http://localhost:5003` | No |
-| `TASK_SERVICE_URL` | Downstream Task Service URL | default `http://localhost:5004` | No |
-| `AI_SERVICE_URL` | Downstream AI Service URL | default `http://localhost:5006` | No |
-| `REDIS_URL` | Redis for the rate limiters | default `redis://127.0.0.1:6379` | No |
-| `JWT_ACCESS_SECRET` | Shared access-token signing key (same value in every service); the gateway refuses to start without it | _(none — required)_ | Yes |
+Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
+
+- **Required:** `JWT_ACCESS_SECRET` (same value in every service). The gateway refuses to start if it is missing, a placeholder, shorter than 32 characters or a known-insecure value.
+- **Optional:** `PORT` (default `5000`); `AUTH_SERVICE_URL`, `WORKSPACE_SERVICE_URL`, `DOCUMENT_SERVICE_URL`, `TASK_SERVICE_URL`, `AI_SERVICE_URL` (default `http://localhost:<port>` of each service); `REDIS_URL` (rate-limit store, default `redis://127.0.0.1:6379`; without Redis the limiters fail open).
+- The gateway's `/health` always answers `200`; it does not check Redis or the downstream services.
 
 ---
 
@@ -88,16 +85,26 @@ api-gateway/
 ---
 
 ## 7. Local Development Commands
+
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/api-gateway/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+
 ```bash
-# Install dependencies
-npm install
-
-# Run dev server with live reload
-npm run dev
-
-# Build TypeScript to dist/
-npm run build
-
-# Start compiled production server
-npm run start
+npm run dev:gateway                 # live reload (nodemon + ts-node), same as `npm run dev -w api-gateway`  [UNTESTED]
+npm run build -w api-gateway        # compile to services/api-gateway/dist  [TESTED]
+npm start -w api-gateway            # run the compiled server  [TESTED]
+./node_modules/.bin/tsc --noEmit -p services/api-gateway   # typecheck, as CI does  [TESTED]
+curl http://localhost:5000/health             # service health  [UNTESTED]
 ```
+
+This service has no test script of its own; its tests are in the root `tests/` folder and run with `npm test` (see [Testing](../../docs/testing.md)).
+
+---
+
+## 8. Related Documentation
+
+- [Developer onboarding](../../docs/onboarding.md)
+- [Environment variables](../../docs/reference/environment-variables.md)
+- [API reference](../../docs/reference/api.md)
+- [Testing](../../docs/testing.md)
+- [Deployment and operations](../../docs/deployment/docker-process.md)
+- [Security model](../../docs/architecture/security.md)
