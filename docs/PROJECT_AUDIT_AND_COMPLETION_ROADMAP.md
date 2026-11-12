@@ -1,1959 +1,1743 @@
-# ResearchMind — Project Audit & Completion Roadmap
+# ResearchMind AI: Project Audit and Development Readiness Report
 
 | | |
 |---|---|
-| **Audit date** | 2026-11-10 |
-| **Repository** | `d:\ReserchMind` (npm-workspaces monorepo) |
-| **Branch / HEAD** | `phase-4-meeting-summarizer-task-creatio` @ `5f4be4f` (integration branch: `develop`) |
-| **Audited state** | The **on-disk working tree**, which has many uncommitted and untracked user changes. The baseline had 117 `git status --porcelain` entries. |
-| **Audit type** | Inspection, analysis, non-destructive testing and documentation only. **No application code, configuration, test or dependency was modified.** |
-| **Method** | One orchestrator, eight parallel specialist audits (Frontend, Backend, Database, AI/RAG, Security, QA, Architecture, Requirements), cross-module integration analysis, and an independent Verification Agent that re-checked findings against source and re-ran commands. |
-| **Runtime limits** | Docker, MongoDB and Redis were **not running**. No external AI, vector or storage service (Voyage, Pinecone, Groq/xAI, Cloudinary) was called. **No endpoint was exercised end to end.** "Executed" tests in this report run real application modules in isolation (see §14, §15). |
+| **Audit date** | 2026-11-12 |
+| **Repository** | `d:\ReserchMind` (npm workspaces monorepo) |
+| **Branch / revision** | `fix/wave-4` @ `e6d68ad47b640ab91ff715fd4c772917efec3b64`, clean working tree |
+| **Integration branch** | `develop` (`origin/develop` is 16 commits behind HEAD) |
+| **Audit type** | Audit only. The only repository change is this file. It replaces the audit of 2026-11-10, whose issues ISS-001 to ISS-052 are reconciled in section 6. The previous version remains in git history (`git show e6d68ad:docs/PROJECT_AUDIT_AND_COMPLETION_ROADMAP.md`). |
+| **Final decision** | **B. READY FOR DEVELOPMENT WITH CONDITIONS**, with strict prerequisites that must be completed before any new feature development begins (section 27) |
 
-> **Status vocabulary.** COMPLETE = implemented **and** verified to work by an executed check. PARTIALLY COMPLETE = some functionality exists, important parts missing or defective. NOT IMPLEMENTED = absent. BROKEN = exists but fails. UNVERIFIED = implementation exists and looks correctly wired, but only static evidence exists. NOT APPLICABLE = does not apply.
-> Because nothing ran end to end, most "looks correct" features are **UNVERIFIED**, not COMPLETE. That is deliberate, not pessimism.
+## How to read this report
 
-> **Evidence tags.** **[V]** = verified by reading the cited `file:line` or by an executed command. **[I]** = inferred from code or library semantics, not executed. Line numbers refer to the working tree on the audit date.
+- **Severity scale (current findings):**
+
+  | Level | Meaning |
+  |---|---|
+  | P0 Critical | Live, exploitable exposure or data loss. Act immediately. |
+  | P1 High | Must be fixed before development continues. |
+  | P2 Medium | Fix before work in the affected area and before any exposure beyond localhost. |
+  | P3 Low | Real defect or gap with limited impact. Schedule. |
+  | P4 Informational | Hygiene, documentation, minor UX or tracking items. |
+
+  The 2026-11-10 audit used Critical / High / Medium / Low. These map approximately to P0 / P1 / P2 / P3.
+- **Reconciliation status (section 6):** FIXED, PARTIALLY FIXED, STILL OPEN, REGRESSED, NOT REPRODUCIBLE, NOT VERIFIED.
+- **Requirement status (section 19):** COMPLETE (implemented, and executed evidence covers the whole requirement), NOT VERIFIED (implemented per code, but the user journey was never executed end to end), PARTIAL (part of the scope, or a material deviation), BROKEN (does not do what the specification says), NOT IMPLEMENTED (absent, placeholder, disabled control or empty service).
+- **Runtime result (section 21):** PASS, FAIL, INFO (a measurement with no pass/fail criterion), BLOCKED (could not run without a prerequisite such as a live provider), NOT VERIFIED.
+- **Root cause:** CONFIRMED (shown by code and/or execution) or SUSPECTED (plausible, not proven).
+- **Method tags:** S = static reading of the cited lines; T = a named automated test passed; R = runtime or command execution in this audit.
+- **ID prefixes:**
+
+  | Prefix | Source |
+  |---|---|
+  | ISS-nnn | Historical issue from the 2026-11-10 audit |
+  | ARC-nnn | Agent 1, architecture and codebase |
+  | RT-nnn | Agent 2, runtime and end-to-end QA |
+  | SEC-nnn | Agent 3, security, authentication and data integrity |
+  | REQ-nnn | Agent 4, README requirement (also used as a finding ID for the two requirement defects in section 7) |
+  | S1 to S15 | Product development scope items (missing capabilities, not bugs) |
+
+- **Precedence:** Agent 5 independently re-ran and re-graded findings. Where it differs from the original agent, Agent 5's result is used and the disagreement is recorded (section 7.2).
+- File line numbers refer to revision `e6d68ad`. No secret, credential, token, `.env` value, e-mail address or document content appears in this report; only counts, names of variables and file paths.
 
 ---
 
-## 1. Executive Summary
+## 1. Executive summary
 
-**Overall position.** ResearchMind has a **working-shaped core MVP**:
-- authentication;
-- workspaces;
-- PDF/DOCX ingestion;
-- an embedding pipeline into Pinecone;
-- streaming RAG Q&A with citation auditing;
-- a meeting summarizer that bulk-creates tasks;
-- a Kanban board with subtasks and activity history.
+**Position.** The core MVP is implemented and its API-level journeys work at runtime against the current source: authentication with refresh rotation, workspaces with invite-code join, PDF/DOCX upload and validation, the embedding job pipeline with claim/fencing/retry/sweep, streaming RAG Q&A, the meeting summarizer feeding an idempotent bulk task import, and a Kanban board with subtasks and activity history. Since the 2026-11-10 audit, fix waves 0 to 4 have fixed 23 of the 52 historical issues and partly fixed 13 more, with no regressions.
 
-The code is TypeScript across 6 active Express services and a React 19 SPA. All 6 services typecheck cleanly [V].
+The infrastructure on the development host and a few concentrated defects are not acceptable: the real MongoDB, Redis and mongo-express are reachable on every network interface with default or no credentials while the host is on a Public network (P0); a 19 KB crafted DOCX can exhaust document-service memory (P1); and a doubled slash in the URL bypasses the login, register and AI cost rate limits (P1). CI has never passed and has never run on any fix-wave code. External providers (Voyage, Pinecone, Groq/xAI, Cloudinary) were never exercised live, so no user journey that depends on them is verified.
 
-The README, however, describes a much larger system: 7 microservices, an AI agent, literature-review generation, chat, notifications, analytics, and deployment. **Roughly 40% of the README's requirements are not implemented.** Several README status claims are false or unsupported:
-- Phase 3 "BACKEND 100% COMPLETE": vector deletion on document delete is ticked but never happens.
-- Phases 1–2 "VERIFIED": the only tests import no application code.
-
-**Most important findings (all independently verified):**
-
-| # | Severity | Finding | Canonical ID |
-|---|---|---|---|
-| 1 | **Critical** | Deleting a document never deletes its Pinecone vectors, so "deleted" content is still retrieved, sent to the LLM and cited. | ISS-001 |
-| 2 | High | `POST /api/documents` accepts client-supplied `cloudinaryUrl` / `cloudinaryPublicId` / `extractedText`. Consequences: cross-tenant Cloudinary asset deletion, a stored `javascript:` URL opened via `window.open` (token theft), and RAG poisoning. | ISS-002 |
-| 3 | High | The in-app "Join Workspace" modal always fails (400), and the frontend production build (`tsc -b`) fails, so CI's build step would be red. | ISS-003 |
-| 4 | High | The task assignee dropdown saves the member's **display name** as `assigneeId` (silent data corruption). | ISS-004 |
-| 5 | High | Refresh-token rotation is non-atomic and tokens are identical within one second. Two browser tabs can trigger "reuse detection" and log the user out everywhere. | ISS-005 |
-| 6 | High | The embedding queue is at-most-once: crashed jobs are lost, documents get stuck in `indexing` forever, and every restart re-enqueues duplicates. | ISS-006 |
-| 7 | High | No effective tests or CI. The 2 test files test inline copies of logic; `tests/` and `.github/` are untracked; CI targets a non-existent `main`. | ISS-007 |
-| 8 | High | The working tree depends on **untracked** files (`packages/shared/auth/`, `internal.routes.ts`, `JoinWorkspaceModal.tsx`, …). A clone or partial commit will not compile. | ISS-008 |
-| 9 | High | No workspace roles: any member (including a would-be "advisor") can delete every document, board and task, and access cannot be revoked. | ISS-009 |
-
-**Counts.**
+**Key numbers**
 
 | Metric | Value |
 |---|---|
-| README requirements traced | 260 |
-| Features inventoried and reconciled (§6) | 62 |
-| Canonical issues after deduplication | 52 (Critical 1, High 8, Medium 28, Low 15) |
-| Raw specialist findings verified | 177 (135 confirmed, 25 confirmed with correction, 1 rejected, 3 unverifiable, 13 Low not sampled) |
-| Phase 1 tasks (all unchecked) | 43 (1A: 26, 1B: 10, 1C: 7) |
-| Phase 2 improvements | 33 (28 necessary, 5 optional), plus 6 optional enhancements and a technical-debt register |
-| Edge-case scenarios in the matrix | 149 (58 executed at module level: 29 pass, 28 fail, 1 partial; 91 not tested) |
+| Historical issues reconciled (section 6) | 52: FIXED 23, PARTIALLY FIXED 13, STILL OPEN 15, NOT REPRODUCIBLE 1, REGRESSED 0, NOT VERIFIED 0 |
+| Current findings (section 7) | 68: P0 1, P1 2, P2 5, P3 31, P4 29 |
+| Runtime checks against current source (Agent 2) | 190: 171 PASS, 7 FAIL, 11 INFO, 1 NOT VERIFIED; plus independent reproductions by Agents 3 and 5 |
+| Automated tests | 239/239 pass with a disposable MongoDB (3 independent runs); 170/170 without it (69 tests skipped silently) |
+| Typecheck and build | 6 services and the frontend typecheck clean; frontend build succeeds |
+| Frontend lint | 42 problems (38 errors, 4 warnings); not a CI gate |
+| `npm audit --omit=dev` | 30 advisories (2 critical, 14 high, 9 moderate, 5 low); no reachable exploit path identified |
+| README requirements (section 19) | 157: COMPLETE 15, NOT VERIFIED 44, PARTIAL 26, BROKEN 1, NOT IMPLEMENTED 71 |
+| CI history | Exactly one GitHub Actions run ever (2026-11-11, phase-4 branch): failed. No run on any fix-wave commit. No pull request exists. |
+| Readiness gates (section 24) | 4 CONDITIONAL PASS, 2 FAIL (Security, Operational readiness) |
 
-**Recommendation.**
-1. Execute **Phase 1A** (stabilize and fix the built MVP) first. It is mostly small, well-scoped work that protects what already exists.
-2. Then make an explicit **scope decision**: either build Phase 1B/1C (README features) or re-label them as roadmap in the README.
-3. Phase 2 (quality, performance, security hardening) follows.
+**Most important findings**
 
----
-
-## 2. Project Overview
-
-**Intent (from `ResearchMind_readme.md`, read in full, 2,509 lines).** ResearchMind is an AI research and project workspace for engineering student teams. The README sets three levels:
-1. A centralized knowledge base (upload PDF, DOCX, MD and TXT).
-2. Semantic intelligence: RAG Q&A with citations.
-3. Autonomous AI agents: ReAct tool-calling agent, literature review, meeting summarizer, task creation, report drafting, onboarding.
-
-It also specifies Kanban tasks, real-time chat, smart notifications, a progress dashboard, multi-tenant workspaces with lead/member/advisor roles, and deployment to Railway/Vercel.
-
-**README build plan (§16) vs. reality:**
-
-| Phase | README claim | Audit finding |
+| ID | Severity | Finding |
 |---|---|---|
-| 1 Foundation | "100% COMPLETE & VERIFIED" | Mostly built. The in-app join is broken (ISS-003). Workspace "invite" is a static code only. No automated verification exists. |
-| 2 Document ingestion | "100% COMPLETE & VERIFIED" | PDF/DOCX built. MD/TXT (promised in §3/§8.3) silently dropped. Not verified by tests. |
-| 3 RAG pipeline | "BACKEND 100% COMPLETE" | **False**: vector delete on document delete is ticked but not implemented (ISS-001). Title/page metadata and the `fileType` filter are missing. The frontend search page is built although unticked. |
-| 4 Meeting summarizer + tasks | all unticked | **Mostly built** (endpoint, page, bulk tasks, Kanban, task modal). Defects: assignee (ISS-004), broken link (ISS-019), non-atomic bulk (ISS-018). |
-| 5 AI agent | unticked | Not started. |
-| 6 Literature review | unticked | Not started (placeholder page). |
-| 7 Chat | unticked | Not started (no service). |
-| 8 Notifications + dashboard | unticked | Not started. `notification-service` source files are 0 bytes. The overview dashboard is partial. |
-| 9 Polish + deploy | unticked | Dark mode done; partial loading/error states; CI file untracked; no deployment artifacts. |
+| SEC-001 | P0 | Real MongoDB (root user, default password), mongo-express (default basic auth) and Redis (no password, protected mode off) published on all interfaces; Docker firewall Allow rule on the active Public profile. Default credentials verified to work through the host's own LAN address. |
+| SEC-002 | P1 | DOCX parsing in the request process has no decompressed-size or node limits: a 19 KB file takes 11.7 s, adds about 0.5 GB RSS per upload, stalls `/health`, and crashes the process under a constrained heap. |
+| SEC-003 | P1 | `//` in the path (`/api/auth//login`, `/api/auth//register`, `/api/ai//query`) bypasses the login, register and AI cost limiters. (Re-graded from P2 by Agent 5.) |
+| RT-001 | P2 | While Redis is down, every rate-limited request waits 9 to 31 s (fail-open is slow); AI queries exceed 30 s client timeouts. |
+| SEC-005, SEC-006, SEC-010, ISS-037 | P2 | Public Cloudinary assets; full document text carried and trusted through unauthenticated Redis; no roles or member removal; embedding provider calls without timeout can stall the only worker. |
+| ARC-005 / REQ-138 | P3 (gate condition) | CI quality gates incomplete, and CI has never been green. |
 
-**Other documentation in the repo** (`BUGFIXING.md`, `implemented.md`, `docs/*`, ADRs, service READMEs) was treated as **claims, not evidence**. Of these, `implemented.md` (untracked) is the most accurate narrative; its key claims were all re-confirmed in code.
+**What holds** (runtime-verified): HS256 pinning (alg=none, HS512, expired and wrong-key tokens rejected on every service); workspace isolation (21 cross-tenant probes); internal routes unreachable through the gateway; server-owned document fields; atomic refresh rotation with reuse detection (concurrent refreshes yield exactly one success); ordered, compensating document deletion; claim/fencing and retry limits in the embedding worker; atomic idempotent bulk import; fail-closed membership checks (503); graceful shutdown of all services in 1.5 to 3.2 s; all upload rejection paths.
 
----
-
-## 3. Existing Architecture
-
-### 3.1 Actual runtime architecture (verified)
-
-```mermaid
-flowchart TB
-  FE["React 19 SPA (Vite :5173)<br/>axios + fetch SSE<br/>VITE_API_URL || http://localhost:5000/api"]
-  GW["api-gateway :5000<br/>cors() open · helmet(CSP off) · morgan<br/>per-IP login/register limiters · JWT authenticate · per-user limiters (Redis store, fail-open)<br/>http-proxy-middleware (path preserved)"]
-  AUTH["auth-service :5001<br/>Mongo researchmind-auth<br/>/api/auth/* + /internal/users/bulk"]
-  WS["workspace-service :5002<br/>Mongo researchmind-workspace<br/>create/list/join/membership/members"]
-  DOC["document-service :5003<br/>Mongo researchmind-document · multer · pdf-parse · mammoth · Cloudinary<br/>/internal/documents/:id/embedding-status"]
-  TASK["task-service :5004<br/>Mongo researchmind-task<br/>boards · tasks · subtasks · activities · bulk"]
-  AI["ai-service :5006<br/>Mongo researchmind-ai (failure swallowed)<br/>/search · /query (SSE) · /sessions · /summarize-meeting<br/>+ in-process embedding worker"]
-  NOTIF["notification-service<br/>0-byte stub, not routed"]
-  REDIS[("Redis :6379<br/>list researchmind:embedding:jobs<br/>rate-limit counters")]
-  MONGO[("MongoDB :27017 standalone<br/>one DB per service")]
-  PC[("Pinecone<br/>namespace = workspaceId")]
-  VOY["Voyage AI embeddings"]
-  LLM["Groq / xAI via OpenAI SDK<br/>default openai/gpt-oss-120b"]
-  CLD["Cloudinary (public delivery)"]
-
-  FE --> GW
-  GW -->|/api/auth| AUTH
-  GW -->|/api/workspaces| WS
-  GW -->|/api/documents| DOC
-  GW -->|/api/tasks| TASK
-  GW -->|/api/ai| AI
-  DOC -->|GET membership (forwards JWT, no timeout)| WS
-  TASK -->|GET membership| WS
-  AI -->|GET membership| WS
-  WS -.->|/internal/users/bulk (only if INTERNAL_SERVICE_TOKEN set — it is not)| AUTH
-  DOC -->|RPUSH job incl. full extractedText| REDIS
-  REDIS -->|BLPOP| AI
-  AI -->|PATCH status X-Internal-Token| DOC
-  AI --> VOY
-  AI --> PC
-  AI --> LLM
-  DOC --> CLD
-  AUTH & WS & DOC & TASK & AI --> MONGO
-```
-
-### 3.2 Contrast with README §6 / §8 / §14
-
-| README | Actual | Status |
-|---|---|---|
-| Gateway :3000, services :3001–3006 | Gateway :5000; services :5001–5004, :5006 (5005 unused) | Drift |
-| Workspaces live in Auth Service | Separate `workspace-service` (undocumented in README) | Deviation |
-| Chat service + Socket.io + Redis adapter | Absent; no `socket.io` dependency | NOT IMPLEMENTED |
-| Notification service + mailer worker | 0-byte stub | NOT IMPLEMENTED |
-| Gateway: requestId → morgan → CORS → sliding-window limiter → JWT that injects `X-User-Id` | No requestId; open CORS; **fixed-window** `express-rate-limit` + Redis store; JWT verified at gateway **and** re-verified by every service (no header trust) | PARTIALLY COMPLETE (header model is a safer deviation) |
-| Redis pub/sub event bus (§14.4) | None; inter-service calls are synchronous HTTP | NOT IMPLEMENTED |
-| Embedding queue `embed:queue` + DLQ `embed:failed` | `researchmind:embedding:jobs`, plain list, BLPOP, no DLQ | PARTIALLY COMPLETE |
-| Caching (§14.7) | None | NOT IMPLEMENTED |
-| Refresh token hash in Redis, refresh in httpOnly cookie | Hash in Mongo `refreshtokens` (TTL); token in JSON body and localStorage | Deviation |
-| LLM: Anthropic Claude | OpenAI SDK pointed at Groq (`gsk_` key) or xAI | Deviation (ADR-0004 documents it; README not updated) |
-| Validation: Joi | zod | Deviation |
+**Decision.** **B. READY FOR DEVELOPMENT WITH CONDITIONS.** Before any new feature development begins: (1) remediate SEC-001 on the host; (2) fix SEC-003, SEC-002 and RT-001 with regression tests; (3) obtain a green CI run on a pull request into `develop`. Until gates 2 and 6 pass, nothing is exposed beyond localhost. If the prerequisites are not met, the decision reverts to C. Details in sections 24 to 27.
 
 ---
 
-## 4. Repository Structure
+## 2. Audit scope and methodology
 
-```
-d:\ReserchMind
-├── .github/workflows/ci.yml        CI (UNTRACKED → has never run)
-├── .postman/, postman/              Postman collections (auth, workspace)
-├── docker/{mongo,redis}/            empty directories
-├── docker-compose.yml               infra only: mongodb, redis, mongo-express
-├── docs/                            NOTE: `docs` is in .gitignore; only 3 files tracked
-│   ├── 00-START-HERE.md, README.md  (untracked) index
-│   ├── adr/0001..0004               (untracked) ADRs
-│   ├── architecture/, deployment/   (tracked) partly stale
-│   ├── onboarding.md                (tracked) not bootable as written (ISS-031)
-│   └── PROJECT_AUDIT_AND_COMPLETION_ROADMAP.md   ← this report
-├── frontend/                        React 19 + Vite 8 + TS SPA
-│   └── src/{api,components,hooks,layouts,lib,pages,routes,store,types,utils}
-├── packages/
-│   ├── shared/{auth,config,errors,health}   shared TS source, no package.json; auth/ and health/ UNTRACKED
-│   ├── validation/{schemas,validation.ts}   zod schemas, no package.json
-│   └── shared-config/                       tsconfig.base.json (extended by nobody)
-├── services/
-│   ├── api-gateway/        auth-service/        workspace-service/
-│   ├── document-service/   task-service/        ai-service/ (+ src/worker.ts)
-│   └── notification-service/  (0-byte app.ts / server.ts)
-├── tests/                           2 test files (UNTRACKED; import no app code)
-├── ResearchMind_readme.md           requirements spec (2,509 lines)
-├── BUGFIXING.md, implemented.md     prior work logs (claims)
-└── package.json                     workspaces: frontend, services/*, packages/*
-```
+**Scope.** The whole monorepo at `e6d68ad`: `services/` (api-gateway, auth, workspace, document, task, ai, notification stub), `packages/shared`, `packages/validation`, `packages/shared-config`, `frontend/`, `tests/`, `.github/workflows/ci.yml`, `docker-compose.yml`, `docs/` and `ResearchMind_readme.md` (plus the original specification at commit `31ef58d`). The developer host's Docker infrastructure was inspected read-only.
 
-**Size:** about 17.7k lines of TS/TSX (excluding node_modules).
+**Agents**
 
-**Module ownership used in the audit:**
-
-| Area | Paths | Specialist |
-|---|---|---|
-| Frontend | `frontend/src/**` | Agent 1 |
-| Backend services | `services/*/src/**`, `packages/**` | Agent 2 |
-| Database | `services/*/src/models`, `config/db.ts`, Redis config, queues | Agent 3 |
-| AI/RAG | `services/document-service` ingestion, `services/ai-service/**`, frontend AI consumers | Agent 4 |
-| Security | all, cross-cutting | Agent 5 |
-| Testing/QA | `tests/`, CI, command execution | Agent 6 |
-| Architecture/Infra | root config, compose, CI, tsconfigs, env, docs | Agent 7 |
-| Requirements | README vs whole repo | Agent 8 |
-
----
-
-## 5. Technology Stack
-
-| Area | README §7 | Actual (package.json evidence) | Note |
+| Agent | Scope | Executed | Static only |
 |---|---|---|---|
-| Runtime | Node 20 | CI Node 20; local Node v22.14.0; no `engines` / `.nvmrc` | Partial |
-| Language | JS (`.jsx`) | TypeScript ^6.0.3 (services), ~6.0.2 (frontend); ts-node, nodemon | Deviation |
-| Frontend | React 18 + Vite | React ^19.2.6, Vite ^8.0.12, react-router-dom ^7.17.0 | Newer |
-| State/data | Zustand (8 stores) | Zustand ^5 (2 stores) + TanStack Query ^5 | Deviation |
-| UI | Tailwind + shadcn | Tailwind ^4.3.1, shadcn, radix-ui, lucide | OK |
-| DnD / charts / PDF | @dnd-kit / Recharts / react-pdf | all present (Recharts unused on pages) | OK |
-| Upload / rich text / realtime | react-dropzone / TipTap / socket.io-client | none present | Not used |
-| Backend | Express | Express ^5.2.1 (body may be `undefined`; see ISS-010) | OK |
-| Auth | jsonwebtoken + bcrypt | jsonwebtoken ^9, bcryptjs ^3 (10 rounds) | OK |
-| Validation | Joi | zod ^4.4.3 (ai-service also has nested zod 3 via langchain) | Deviation |
-| Files | Multer + Cloudinary + pdf-parse + mammoth | multer ^2.2.0, cloudinary ^2, pdf-parse ^2.4.5, mammoth ^1.12.1 | OK (vulnerable versions; ISS-026) |
-| Logging | Winston + Morgan | Morgan in 5 services; Winston only in document-service | Partial |
-| Redis | ioredis | ioredis ^6 (gateway, document), ^5 (ai); node-redis in auth (unused) | Inconsistent |
-| Rate limiting | custom sliding window | express-rate-limit ^8 + rate-limit-redis (fixed window) | Deviation |
-| Vector DB | Pinecone | @pinecone-database/pinecone ^5.1.2 | OK |
-| Embeddings | Voyage (voyage-2) | LangChain VoyageEmbeddings; model voyage-3 in code/.env, voyage-4 in `.env.example` | Drift (ISS-027) |
-| LLM | Anthropic Claude | `openai` ^7.5.0 SDK → Groq/xAI; default `openai/gpt-oss-120b` | Deviation |
-| ORM | Mongoose | mongoose ^9.x, plus stray `@types/mongoose` v5 at root | Stray types |
-| Infra / CI / Deploy | Compose for all services; Actions matrix; Railway/Vercel | Compose for infra only; no Dockerfiles; 1 untracked CI job; no deploy config | Partial / not implemented |
+| Lead | Baseline, disposable infrastructure, final decisions | Recorded git state, tooling, Docker and port ownership; created disposable MongoDB (`127.0.0.1:27094`) and Redis (`127.0.0.1:6394`) | — |
+| 1 Architecture | Architecture map, module completeness, build/test/lint/CI, historical reconciliation, ARC findings | `tsc --noEmit` x6, frontend build, ESLint, `npm test` with and without MongoDB, build-and-start of workspace-service from `dist/`, `npm audit`, index-metadata read of the user's auth DB, a timezone computation | Module review, ISS-001 to 052 dispositions, CI workflow review |
+| 2 Runtime / E2E | All journeys through the gateway | Built all six services from current source into git-ignored `dist/`; ran them on ports 5980 to 5989 against disposable MongoDB/Redis with child-only environment; 190 checks including Redis outage, service kills, startup failures, signals, SSE truncation, Vite preview; `npm test` | — |
+| 3 Security | AuthN/AuthZ, data integrity, RAG security, dependencies | Services from source (tsx) on ports 5990 to 5997; JWT, isolation, mass-assignment, internal-route, rate-limit, DOCX-amplification, enumeration-timing probes; 78 security tests; `npm audit`; read-only aggregate counts on the user's MongoDB/Redis | Code review of all services and the frontend auth/rendering paths |
+| 4 Requirements | README traceability (157 requirements), feature matrix | `npm test` with MongoDB (239/239); read-only `gh run list` / `gh run view` | Requirement-by-requirement code tracing |
+| 5 Independent review | Re-verification, severity re-grades, contradiction resolution | Own instances on ports 5970 to 5979 from current-source `dist/`; reproduced SEC-001, SEC-002, SEC-003, RT-001, RT-002, RT-003, RT-007, RT-004, SEC-022; Redis outage simulated through a TCP proxy; `gh` read-only CI history | Static re-checks of REQ-128, REQ-082, SEC-005/006/010 |
+
+**Safety rules applied**
+- No repository file was modified except this report. `git status --porcelain` was empty before and after every agent's work. Builds wrote only to git-ignored `dist/`, `frontend/dist` and `frontend/node_modules/.tmp`.
+- All runtime tests used disposable MongoDB/Redis. Each service ran from a scratch working directory so that no repository `.env` could be loaded (logs confirm `injected env (0) from .env`). Secrets were fresh random values per run; provider keys were dummies.
+- The user's real infrastructure was inspected read-only and aggregate-only (counts, configuration flags, credential equality tested as booleans inside the containers). No document content, e-mail address or secret value was read or printed. Only variable names in `.env` files were inspected.
+- Outbound calls: three uploads reached Cloudinary with dummy credentials (401); provider calls with dummy keys failed (401); `npm audit` queried the npm registry. No real credential was used.
+- All started processes were stopped; disposable databases created by agents were dropped or flushed.
 
 ---
 
-## 6. Feature Inventory and Implementation Status
+## 3. Audit date and source revision
 
-### 6.1 Reconciled feature inventory
-
-The statuses below reconcile the Frontend, Backend, AI/RAG and Requirements reports, as corrected by the Verification Agent.
-
-**Abbreviations used in the table:**
-- "Static" = static code review.
-- "Mod-exec" = the real module was executed in isolation.
-- "E2E" = full stack (never available in this audit).
-
-| # | Feature | Expected (README) | Actual implementation | Key files | Missing | Bugs / issues | Testing performed | Result | Status | Next action | Priority |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| F01 | Register | §8.2 | POST /api/auth/register; zod; bcrypt 10 | `auth-service/src/services/auth.service.ts:32`; `frontend/src/components/auth/RegisterForm.tsx` | — | Concurrent duplicate → 500 (ISS-010); client rules weaker (ISS-039) | Mod-exec (schema TC-006..008) | Schema pass | UNVERIFIED | P1-A05 | Medium |
-| F02 | Login | §8.2 | JWT access (15m) + refresh (7d) in body | `auth.service.ts:74`; `LoginForm.tsx` | httpOnly cookie | Same-second refresh collision → 500 (ISS-005) | Mod-exec (TC-003/004); executed identical-token check | Collision confirmed | PARTIALLY COMPLETE | P1-A11 | High |
-| F03 | Refresh rotation + reuse detection | §8.2, §14.3 | Mongo hash store, rotate, revoke-all on reuse | `auth.service.ts:116-149`; `RefreshToken.ts` | atomicity, `jti` | ISS-005 race / global logout | Static; executed token-determinism | — | PARTIALLY COMPLETE | P1-A11, P1-A12 | High |
-| F04 | Logout | §8.2 | revoke presented refresh token | `auth.service.ts:152`; `frontend/src/lib/session.ts` | — | Stale-token retry after expiry (ISS-040) | Mod-exec (TC-024 schema) | — | PARTIALLY COMPLETE | P1-A12 | Low |
-| F05 | GET /auth/me | §8.2 | exists; unused by frontend | `auth.routes.ts:26` | boot-time session validation | — | Static | — | UNVERIFIED | P2-07 | Low |
-| F06 | PUT /auth/me, forgot/reset password | §8.2 | none; "Forgot password?" is a dead span | `LoginForm.tsx:115-119` | all | dead control (ISS-038) | Static | — | NOT IMPLEMENTED | P1-B10 | Low |
-| F07 | Axios refresh interceptor | §7, §16 P1 | 401 → queue → refresh → retry; separate `ensureFreshToken` for SSE | `frontend/src/api/axios.ts:46-163` | shared lock, cross-tab sync | ISS-005(c) | Static | — | PARTIALLY COMPLETE | P1-A12 | High |
-| F08 | Protected routes / onboarding guard | §16 P1 | Zustand-persist gate; guard with retry screen | `routes/ProtectedRoute.tsx`; `AppRouter.tsx:80-115` | redirect authed users from /login, `/` route | ISS-019 catch-all | Static | — | UNVERIFIED | P1-A19 | Low |
-| F09 | Create workspace | §8.2 | POST /api/workspaces (page + sidebar modal) | `workspace-service/src/services/workspace.service.ts:7`; `CreateWorkspaceModal.tsx` | — | — | Static | — | UNVERIFIED | QA-P1 tests | Low |
-| F10 | List / switch workspaces | §8.2, §15 | GET /api/workspaces; sidebar switcher | `workspace.service.ts:37`; `Sidebar.tsx:96-176` | pagination | — | Static | — | UNVERIFIED | — | Low |
-| F11 | Join workspace (onboarding page) | §8.2 | invite code join | `CreateWorkspacePage.tsx:63` | uppercase normalization | lowercase code fails (ISS-036) | Static | — | PARTIALLY COMPLETE | P1-A18 | Medium |
-| F12 | Join workspace (sidebar modal) | §8.2 | sends nested object | `JoinWorkspaceModal.tsx:59` | — | 400 always; TS2345 (ISS-003) | **tsc executed** | Fail | **BROKEN** | P1-A02 | High |
-| F13 | Member list (names/emails) | §8.2 | `/api/workspaces/:id/members` | `workspace.service.ts:105-155` | `INTERNAL_SERVICE_TOKEN` config | all members "Researcher", empty email (ISS-033) | Static (env names checked) | — | **BROKEN** (config) | P1-A03 | Medium |
-| F14 | Roles, member removal, role change | §5, §8.2, §12 | none; `members: [String]` | `Workspace.ts:35-39` | all | ISS-009 | Static | — | NOT IMPLEMENTED | P1-B01 | High |
-| F15 | Email invites / invite tokens with expiry | §8.2 | permanent invite code only | `utils/invite-code.ts` | email, expiry, rotation | — | Static | — | NOT IMPLEMENTED | P1-B01 | Medium |
-| F16 | Upload PDF/DOCX | §8.3 | multer → extract → Cloudinary → Mongo → enqueue | `document-service/src/services/document.service.ts:46-166` | — | >10 MB → 500; OR filter; `.doc` → 500; 0-byte accepted (ISS-010/011) | Mod-exec (multer config) | Fail (TC-076/077/078) | PARTIALLY COMPLETE | P1-A05, P1-A10 | Medium |
-| F17 | MD / TXT upload | §3, §8.3 | rejected | `upload.middleware.ts` | all | — | Mod-exec (TC-075 style) | rejected | NOT IMPLEMENTED | P1-B05 | Medium |
-| F18 | Text extraction (PDF, DOCX) | §8.3 | pdf-parse v2, mammoth | `utils/pdf-extractor.ts`, `docx-extractor.ts` | OCR, per-page output | corrupt files throw → 500 | **Mod-exec (offline on samples)** | Extracts | **COMPLETE** (module scope) | — | — |
-| F19 | Document library (list/search/filter) | §16 P2 | React Query list; client filters; skeleton/empty/error | `pages/DocumentsPage.tsx` | live status polling | ISS-034 | Static | — | PARTIALLY COMPLETE | P1-A22 | Medium |
-| F20 | In-app PDF viewer | §16 P2 | react-pdf modal | `PdfViewerModal.tsx` | — | pdf.js worker from CDN | Static | — | UNVERIFIED | P2-26 | Low |
-| F21 | Open DOCX | §16 P2 | card click does nothing | `DocumentCard.tsx:22-29` | — | regression (ISS-020) | Static (git diff) | — | **BROKEN** | P1-A20 | Medium |
-| F22 | Delete document | §8.3, §9.5 | Mongo + Cloudinary only | `document.service.ts:193-226` | **vector delete** | ISS-001 | Static (all callers traced) | — | **PARTIALLY COMPLETE** | P1-A06 | Critical |
-| F23 | Re-index document | §8.3 | delete-then-upsert via queue | `document.service.ts:228-265` | duplicate guard | Retry on `pending` duplicates jobs | Static | — | PARTIALLY COMPLETE | P1-A08 | Medium |
-| F24 | Embedding status badge | §15 | 4 states | `DocumentStatusBadge.tsx` | live update, failure reason | ISS-034 | Static | — | PARTIALLY COMPLETE | P1-A22 | Medium |
-| F25 | Embedding worker + queue | §9.1, §14.6 | BLPOP worker in-process in ai-service | `ai-service/src/workers/embedding.worker.ts` | ack, DLQ, retry, recovery | ISS-006 | Static | — | PARTIALLY COMPLETE | P1-A08 | High |
-| F26 | Chunking (400/60) | §9.3 | LangChain recursive splitter, chars/4 | `chunking.service.ts` | real tokenizer, page/heading awareness | overlap 0 at paragraph boundaries; 400-char fallback | **Mod-exec** | Params OK; overlap Fail | PARTIALLY COMPLETE | P2-19 | Medium |
-| F27 | Voyage embeddings | §9.1 | batches of 20 (×3 parallel sub-batches), 429 backoff | `embedding.service.ts`; `config/voyage.ts` | timeout; model pinning | ISS-027, ISS-037 | Static | — | UNVERIFIED | P1-A08, P1-A09 | Medium |
-| F28 | Pinecone upsert + namespace isolation | §9.1, §9.4 | ns = workspaceId, id `{docId}-chunk-{i}` | `vector-service.ts:24-104` | title, page, uploadedAt metadata | ISS-029 | Static | — | UNVERIFIED | P1-B04 | Medium |
-| F29 | `/api/ai/search` (retrieval debug JSON) | §8.6 (as SSE Q&A) | JSON chunks; unused by frontend | `ai.routes.ts:21-26` | — | whitespace → 500 | Static | — | UNVERIFIED | P1-A24 | Low |
-| F30 | `/api/ai/query` (SSE RAG) | §9.2, §11.1 | start/sources/token/done/error; timeouts; no fabricated fallback | `rag.service.ts:24-134`; `query.controller.ts` | threshold, filters, disconnect abort, multi-turn | ISS-015, ISS-028 | Mod-exec (context/citation helpers, schema) | mixed | PARTIALLY COMPLETE | P1-A24, P2-16/17 | High |
-| F31 | Citations | §4, §11.1 | `[Source N]` audit; IDs only | `citation-validator.service.ts` | title, page, preview | alt formats missed | **Mod-exec** | partial | PARTIALLY COMPLETE | P1-B04 | Medium |
-| F32 | AI session log + history | §12 `ai_sessions` | RAG sessions saved; last 20 for workspace | `ai-session.service.ts` | type, tokens, duration; meeting sessions | lost silently if Mongo down (ISS-013) | Static | — | PARTIALLY COMPLETE | P1-A14 | Low |
-| F33 | Semantic search page | §15, §16 P3 | streaming answer, source chips, history, citation warning | `pages/SemanticSearchPage.tsx`; `hooks/useAiQuery.ts`; `utils/sse.ts` | Markdown rendering; initialQuery | truncated stream shown complete (ISS-016); unsafe `window.open` (ISS-002) | **Mod-exec (SSE parser)** | parser pass; hook fail | PARTIALLY COMPLETE | P1-A21, P1-A07 | High |
-| F34 | Meeting summarizer endpoint | §11.2 | JSON (not SSE), zod-validated | `meeting-summarizer.service.ts:104-190` | JSON mode, max_tokens, persistence | nulls → 502 (ISS-030) | **Mod-exec (schema)** | null rejected | PARTIALLY COMPLETE | P1-A23, P1-B07 | Medium |
-| F35 | Meeting → create tasks | §11.2, §16 P4 | bulk POST; quick-create board | `MeetingSummarizerPage.tsx:172-237` | assignee mapping | `/kanban` link (ISS-019); duplicate re-click (ISS-018); free-text dates | Static | — | PARTIALLY COMPLETE | P1-A17, P1-A19 | High |
-| F36 | Boards CRUD | §8.5 | create/list/get/patch/delete(cascade) | `task-service/src/routes/board.routes.ts` | UI rename/delete; README "board + tasks" | no zod on board routes; bodiless → 500 | Static | — | UNVERIFIED | P1-A05 | Low |
-| F37 | Task CRUD + subtasks + activity | §8.5 | parentTaskId subtasks, cycle protection, diffed activity | `task.service.ts`; `task-activity.service.ts` | review status, urgent, position, linkedDocId, tags | assignee unvalidated (ISS-004) | Mod-exec (schemas TC-044..047) | schema pass | PARTIALLY COMPLETE | P1-A16, P1-B08 | High |
-| F38 | Bulk create tasks | §8.5 | 1–50 tasks, sequential | `task.service.ts:209-314` | atomicity, idempotency | ISS-018 | Mod-exec (schema) | 201-char title accepted | PARTIALLY COMPLETE | P1-A17 | Medium |
-| F39 | Task detail modal | §16 P4 | edit, subtasks, activity, delete | `TaskDetailModal.tsx` | names in activity | **assignee saves name** (ISS-004) | Static | — | **BROKEN** (assignee) | P1-A16 | High |
-| F40 | Kanban DnD | §16 P4 | @dnd-kit, optimistic PATCH with revert | `pages/KanbanPage.tsx` | review column, in-column order | raw IDs shown | Static | — | UNVERIFIED | P1-B08 | Medium |
-| F41 | Task summary / overdue / move endpoints | §8.5 | none | — | all | — | Static | — | NOT IMPLEMENTED | P1-B09 | Medium |
-| F42 | Overview dashboard | §15, mock 01 | real counts (docs, sessions, members) | `pages/OverviewPage.tsx` | progress, tasks, activity chart, workload | wrong "Sources Indexed" metric | Static | — | PARTIALLY COMPLETE | P1-B09 | Medium |
-| F43 | Analytics / progress dashboard page | §16 P8 | placeholder | `AppRouter.tsx` | all | — | Static | — | NOT IMPLEMENTED | P1-C07 | Low |
-| F44 | Sources page, Settings, global ⌘K search | mocks, §15 | placeholder / decorative input | `TopBar.tsx:139-154` | all | dead controls (ISS-038) | Static | — | NOT IMPLEMENTED | P1-A25 | Low |
-| F45 | Right-panel "Ask ResearchMind" | mock 01 | navigates, drops question | `RightContextPanel.tsx:78` | consume `initialQuery` | ISS-035 | Static | — | **BROKEN** | P1-A19 | Medium |
-| F46 | Notification bell | §8.7 | decorative, permanent red dot | `TopBar.tsx:184-192` | everything | fake indicator | Static | — | NOT IMPLEMENTED | P1-A25, P1-C04 | Medium |
-| F47 | Dark mode | §16 P9 | toggle (3 copies) | `TopBar.tsx:40-57` | central store | hard-coded hex in some screens | Static | — | PARTIALLY COMPLETE | P2-09 | Low |
-| F48 | Responsive layout | §16 P9 | desktop + mobile drawer | `layouts/AppShell.tsx` | close-on-navigate; Kanban overflow | — | Static | — | UNVERIFIED | P2-10 | Low |
-| F49 | AI agent (ReAct, 8 tools) | §10 | none | — | all | — | Static | — | NOT IMPLEMENTED | P1-C01 | Medium (scope) |
-| F50 | Literature review generator | §11.3 | placeholder page | — | all | — | Static | — | NOT IMPLEMENTED | P1-C02 | Medium (scope) |
-| F51 | Report drafter, explain-doc, suggest-tasks, onboard, embed | §11 | none | — | all | — | Static | — | NOT IMPLEMENTED | P1-C03 | Low |
-| F52 | Real-time chat | §8.4 | none | — | all | — | Static | — | NOT IMPLEMENTED | P1-C05 | Low |
-| F53 | Notification service | §8.7 | 0-byte stub | `services/notification-service/src/*` | all | — | Static | — | NOT IMPLEMENTED | P1-C04 | Low |
-| F54 | Gateway routing + JWT | §8.1 | 5 prefixes proxied; HS256 pinned | `api-gateway/src/app.ts` | request-id | — | Mod-exec (shared `authenticate`, TC-011..018) | 1 Fail (TC-018) | UNVERIFIED (gateway copy not executed) | P2-22 | Medium |
-| F55 | Rate limiting | §8.1 | per-route Redis limiters, fail-open | `rate-limit.middleware.ts` | sliding window, trust proxy, refresh limiter | ISS-024 | Static | — | PARTIALLY COMPLETE | P2-22 | Medium |
-| F56 | Fail-closed secret validation | (undocumented) | ≥32 chars, placeholder/denylist | `packages/shared/config/secrets.ts` | — | — | **Mod-exec (TC-032)** | Pass | **COMPLETE** (module scope) | — | — |
-| F57 | Docker Compose | §20 | infra only (Mongo, Redis, mongo-express) | `docker-compose.yml` | service containers, Dockerfiles | weak defaults; env-name mismatch (ISS-025) | Static (Docker not running) | — | PARTIALLY COMPLETE | P1-C06 | Medium |
-| F58 | CI pipeline | §22 | untracked; triggers on missing `main` | `.github/workflows/ci.yml` | lint, services, DB containers | ISS-007 | Static | — | **BROKEN / inactive** | P1-A04 | High |
-| F59 | Automated tests | §21 | 2 files, inline copies | `tests/*.test.ts` | everything real | ISS-007 | **Executed** (5/5 pass, meaningless) | — | NOT IMPLEMENTED (effectively) | P1-A04 | High |
-| F60 | Production start (`npm start`) | §22 | wrong `dist` paths for 4 services | `services/*/package.json` | — | ISS-017 | Static | — | **BROKEN** | P1-A15 | Medium |
-| F61 | Deployment (Railway/Vercel/Atlas/Upstash) | §22 | none | — | all | — | Static | — | NOT IMPLEMENTED | P1-C06 | Medium (scope) |
-| F62 | Pub/sub event bus, caching, presence | §14 | none | — | all | — | Static | — | NOT IMPLEMENTED | P1-C04/C05, P2-14 | Low |
-
-**Tally (62 features):**
-
-| Status | Count | Features |
-|---|---|---|
-| COMPLETE (module scope, executed) | 2 | F18, F56 |
-| PARTIALLY COMPLETE | 24 | |
-| UNVERIFIED | 13 | |
-| BROKEN | 7 | F12, F13, F21, F39, F45, F58, F60 |
-| NOT IMPLEMENTED | 16 | |
-
-### 6.2 README requirement traceability (summary)
-
-Agent 8 traced **260 concrete README requirements** (every endpoint, collection, index, route, store, phase checkbox, user story, infra item). Its counts use the definition "every hop is wired", which is a static traceability status:
-
-| Module | Rows | Wired ("COMPLETE") | PARTIAL | NOT IMPL | BROKEN | UNVERIFIED | N/A |
-|---|---|---|---|---|---|---|---|
-| Auth | 23 | 11 | 7 | 5 | 0 | 0 | 0 |
-| Workspace | 13 | 5 | 3 | 5 | 0 | 0 | 0 |
-| Documents | 26 | 12 | 6 | 8 | 0 | 0 | 0 |
-| RAG / Search | 40 | 21 | 10 | 8 | 1 | 0 | 0 |
-| AI features | 19 | 6 | 2 | 10 | 1 | 0 | 0 |
-| Agent | 14 | 0 | 0 | 14 | 0 | 0 | 0 |
-| Meeting / Tasks | 26 | 12 | 7 | 6 | 1 | 0 | 0 |
-| Chat | 9 | 0 | 0 | 9 | 0 | 0 | 0 |
-| Notifications | 5 | 0 | 0 | 5 | 0 | 0 | 0 |
-| Dashboard & FE shell | 14 | 2 | 6 | 5 | 0 | 1 | 0 |
-| Infra / DevOps / stack | 25 | 8 | 8 | 9 | 0 | 0 | 0 |
-| Data model & API | 12 | 3 | 6 | 2 | 0 | 1 | 0 |
-| Testing | 10 | 0 | 1 | 8 | 0 | 0 | 1 |
-| Deployment | 7 | 0 | 2 | 4 | 0 | 1 | 0 |
-| User stories | 17 | 3 | 8 | 6 | 0 | 0 | 0 |
-| **Total** | **260** | **83** | **66** | **104** | **3** | **3** | **1** |
-
-**Verification adjustment.** The Verification Agent sampled 33 of the 83 "wired" rows against the standard "COMPLETE = verified to work":
-- 5 stay COMPLETE, each backed by an executed module run (PDF extraction, DOCX extraction, chunk parameters, meeting output schema, SSE event parsing).
-- About 15 should be **PARTIALLY COMPLETE**, because code defects contradict them (e.g. refresh rotation, reuse detection, axios refresh, reindex, paragraph overlap, search page, one-click tasks, bulk create, task detail, overview).
-- The remainder are **UNVERIFIED (statically wired)** until the Phase 1 integration/E2E tests run.
-
-**Core MVP slice** (Auth, Workspace, Documents, RAG/Search, Meeting/Tasks = 128 rows): 61 wired, 33 partial, 32 not implemented, 2 broken. That is about 48% wired and about 75% at least partly built.
-
-### 6.3 README phase-claim verification (selected)
-
-| README item | README mark | Reality |
-|---|---|---|
-| P1 "Workspace CRUD (create, invite, join)" | [x] | PARTIAL: no update/delete/email invite; in-app join broken |
-| P1/P2 checkpoint "VERIFIED" | ✅ | UNVERIFIED: no runtime or real automated evidence |
-| P3 "Voyage AI (`voyage-4`)" | [x] | PARTIAL: code default and local `.env` = `voyage-3` |
-| P3 "Vector delete on document delete" | [x] | **FALSE** (ISS-001) |
-| P3 "BACKEND 100% COMPLETE" | — | **FALSE** |
-| P3 "Semantic search page (Frontend)" | [ ] | Built (stale checkbox) |
-| P4 items | [ ] | Mostly built; assignee broken |
-| P9 "Dark mode toggle" | [ ] | Built |
-| P9 "GitHub Actions CI" | [ ] | Partial (untracked, never run) |
-
-### 6.4 Documentation contradictions (explicit, not silently resolved)
-
-36 contradictions were recorded (DOC-001…036). The most consequential:
-
-| ID | Source A | Source B / code |
-|---|---|---|
-| DOC-001 | README §7/§10/§11.6/§18: LLM is **Anthropic Claude** | ADR-0004 and `ai-service/src/config/grok.ts:3-23`: **Groq/xAI** via OpenAI SDK |
-| DOC-002 | README: **Joi** | Code: **zod** (`packages/validation/validation.ts:2`) |
-| DOC-003 | README: ports 3000–3006 | Code: 5000–5004, 5006 |
-| DOC-004/005 | README: `apps/` layout; workspaces inside auth-service | `services/*`, `frontend/`; separate workspace-service |
-| DOC-006 | README: P1/P2 "VERIFIED", P3 "BACKEND 100%" | See §6.3 |
-| DOC-008 | README §9.1: voyage-2; README P3/ADR/.env.example: voyage-4 | Code default and `.env`: voyage-3 |
-| DOC-013 | README: refresh in httpOnly cookie + Redis | Body token + Mongo store + localStorage |
-| DOC-015 | ADR-0004: gateway validates workspace membership | Gateway does not; services do |
-| DOC-016 | ADR-0004: "33-phase end-to-end automated test suite" | 2 files / 5 tests, no app imports |
-| DOC-018 | `services/task-service/README.md`: "Not implemented" | Fully implemented service |
-| DOC-021 | `docs/onboarding.md`: `MONGODB_URI` for auth/workspace; omits `INTERNAL_SERVICE_TOKEN`, task-service | auth/workspace read only `MONGO_URI`; doc/ai require `INTERNAL_SERVICE_TOKEN` at boot. **Following it verbatim cannot boot the services** [I] |
-| DOC-022 | `frontend/README.md`: `VITE_API_URL=http://localhost:5000` | Code needs `/api` suffix |
-| DOC-028 | README §13: 422 / 413 @20 MB / 503 | 400 / 10 MB → 500 / 502 |
-| DOC-029 | README §3/§8.3: MD and TXT supported | PDF/DOCX only |
-| DOC-036 | `docs/00-START-HERE.md` is the documented entry point | `.gitignore` ignores `docs`; ADRs and index are untracked |
-
-**Undocumented functionality** found in code (25 items) includes:
-- the workspace-service, invite codes and the membership API;
-- `/api/ai/query` (the real SSE RAG endpoint) and `/api/ai/sessions/workspace/:id`;
-- internal routes (`/internal/users/bulk`, `/internal/documents/:id/embedding-status`);
-- `POST /api/documents` (metadata-only create; see ISS-002);
-- subtasks with cycle prevention and rich activity diffs;
-- per-route AI rate limits;
-- fail-closed secret validation and HS256 pinning;
-- the citation audit and the LLM failure taxonomy/watchdog;
-- the startup re-enqueue sweep;
-- Swagger UIs and mongo-express.
+| Item | Value |
+|---|---|
+| Audit date | 2026-11-12 (approximately 12:30 to 14:15 UTC) |
+| Branch | `fix/wave-4` |
+| Revision | `e6d68ad47b640ab91ff715fd4c772917efec3b64` ("docs(wave-4): align documentation with the implementation …") |
+| History | `e6d68ad` wave-4 docs, `c1464f7` wave-3, `4c405b7` wave-2, `0818907` wave-1, `bf2404b` wave-0, `e7dae6e` phase-4 |
+| Working tree | Clean (0 staged, unstaged or untracked). Ignored non-build items: `ResearchMind-page-images/`, `services/document-service/{combined.log,error.log,test_files/}` |
+| Remote | `origin/fix/wave-4` equals HEAD (pushed). `gh pr list --state all` is empty. |
+| Build provenance | `dist/` builds used at runtime were produced after the HEAD commit time from the clean tree, so they reflect the current source. |
 
 ---
 
-## 7. Module-by-Module Audit
+## 4. Environment and Docker status
 
-| Module | Purpose | State | Strengths | Key issues |
+**Plain statement.** No ResearchMind application container exists: the repository has no Dockerfiles, and `docker-compose.yml` defines infrastructure only. The user's Docker runs only MongoDB, Redis and mongo-express. Ports 5000 and 5173 on the host belong to other projects. **All runtime results in this report come from services started from the current source against disposable MongoDB/Redis. Nothing is attributed to old containers.**
+
+**Tooling:** Node v22.14.0, npm 10.9.2, Docker 28.4.0, Docker Compose v2.39.2-desktop.1, Windows 11.
+
+**Host resources:** disk C: about 2.5 GB free at the start and **0.8 GB free at the end of the audit** (operational risk on this development host: builds, Docker volumes and logs can fail); free virtual memory about 3.1 GB at the start, about 2.3 GB during runtime tests. Cold starts were slow under this pressure (section 22).
+
+| Item | Status |
+|---|---|
+| `researchmind-mongodb` (mongo:7) | Running, 0 restarts, `unless-stopped`, no healthcheck, published `0.0.0.0:27017` and `[::]:27017`. Logs routine. Not modified. |
+| `researchmind-redis` (redis:7.4.9) | Running, 0 restarts, no healthcheck, published `0.0.0.0:6379`, `requirepass` empty, `protected-mode no`, `bind * -::*`, AOF off. 1 key (`test`, no TTL); embedding queue length 0. Not modified. |
+| `researchmind-mongo-express` | Running, published `0.0.0.0:8081`; its log says the server is open to connections from anyone. Default basic-auth credentials. Not modified. |
+| Firewall / network | Wi-Fi profile **Public**. Effective default inbound action Block, overridden by two enabled "Docker Desktop Backend" Inbound Allow rules (TCP and UDP, any port, Public profile). |
+| Other containers | Unrelated projects (rate-limiter-gateway, fund-request-db, sonarqube), exited. |
+| `rm-audit-mongo` (disposable) | `127.0.0.1:27094`, no auth. Used for all runtime tests and `npm test`. |
+| `rm-audit-redis` (disposable) | `127.0.0.1:6394`. Created with `--rm`, so Agent 2's outage tests deleted and recreated it (about 13:12Z and 13:20Z); any queue contents in it are not evidence. Agent 5 simulated outages through a TCP proxy instead. |
+| Application containers | None exist (no Dockerfiles). "Containers run current source" is not applicable. |
+| Host port 5000 | An unrelated `node server.js` started 2026-11-05; `GET /health` returns 404. Not the ResearchMind gateway. The frontend default `VITE_API_URL` (`http://localhost:5000/api`) points at it when `frontend/.env` is absent (it is). |
+| Host port 5173 | Vite of a different project. |
+| `.env` presence | Present in all six services and the root; `frontend/.env` missing. Values not read. Names-only checks: the root `.env` uses `MONGO_ROOT_USER` while compose expects `MONGO_ROOT_USERNAME`; `INTERNAL_SERVICE_TOKEN` is absent from auth-service and workspace-service. |
+| Pre-existing artefacts | `services/document-service/uploads/` (git-ignored) holds leftover temporary upload files from earlier development runs: Agent 2 counted 9 dated 2026-08-04 to 2026-11-11, Agent 3 counted 7 from August 2026. Not created or deleted by the audit. The current code removed temp files on every tested path. |
+| Windows signals | `taskkill` without `/F` refuses to stop a Node service; `/F` kills without cleanup. Graceful stop on Windows works only with Ctrl+C in an attached console (agents used a preload script to emit the signal). |
+
+---
+
+## 5. Architecture overview
+
+### 5.1 Runtime topology (as implemented)
+
+```
+Browser SPA (React 19 + Vite, frontend/) --axios / fetch(SSE)--> VITE_API_URL || http://localhost:5000/api
+        |
+api-gateway :5000   cors() * | helmet (CSP off) | morgan | Swagger /api-docs (public)
+  POST /api/auth/login    -> login limiter (5 / 15 min / IP)
+  POST /api/auth/register -> register limiter (3 / h / IP)
+  /api/auth/*        -> auth-service :5001        (refresh, me, logout unthrottled)
+  /api/workspaces/*  -> authenticate + 100/min/user -> workspace-service :5002
+  /api/documents/*   -> authenticate + 100/min/user -> document-service :5003
+  /api/tasks/*       -> authenticate + 100/min/user -> task-service :5004
+  /api/ai/*          -> authenticate + AI limiters (query/search 30/h, summarize 20/h) + general -> ai-service :5006
+  GET /health        -> static 200
+  Rate-limit store: Redis (rate-limit-redis, passOnStoreError = fail open)
+
+auth-service       Mongo users, refreshtokens; node-redis client connected but unused; /internal/users/bulk
+workspace-service  Mongo workspaces (members: string[], inviteCode); join, membership, members
+document-service   Mongo documents; multer to disk; pdf-parse; mammoth; Cloudinary; ioredis producer;
+                   internal claim/status endpoints; recovery sweep every 5 min
+task-service       Mongo boards, tasks, taskactivities; bulk import; activities
+ai-service         Mongo aisessions; Voyage (LangChain); Pinecone (namespace = workspaceId); Groq/xAI (OpenAI SDK);
+                   /api/ai/search, /api/ai/query (SSE), sessions, summarize-meeting; internal vector delete;
+                   in-process embedding worker (BLPOP); optional standalone worker
+notification-service  0-byte app.ts/server.ts; not routed, not built
+Infrastructure (docker-compose.yml): mongo:7, redis:7, mongo-express only
+```
+
+### 5.2 Main flows
+
+- **Auth:** login/register issue an access token (15 min, HS256) and a refresh token (7 d, random `jti`). The refresh hash is stored with a TTL. Rotation is a single conditional `findOneAndUpdate` with a 10 s grace window (`auth.service.ts:139-170`). The client stores both tokens in `localStorage` and uses a single-flight refresh coordinator with Web Locks and cross-tab sync.
+- **Membership:** document, task and ai services call `GET workspace-service/api/workspaces/:id/membership` with the caller's token (3 s timeout; outcomes 400/401/403/503) via `packages/shared/auth/workspace-membership.ts`.
+- **Ingestion:** upload, extension filter and 10 MB cap, membership, magic bytes, text extraction (in the request process), Cloudinary, Mongo `pending`, `RPUSH` job carrying the full text, worker `BLPOP`, claim with fencing token, chunk (about 400 tokens, 60 overlap), Voyage embed (batch 20), delete old vectors, Pinecone upsert, PATCH `indexed`. Failures set `failed` with a reason; the sweep retries up to 3 attempts.
+- **Delete:** mark `deletedAt`, delete vectors through ai-service (rollback and 503 on failure), Cloudinary destroy, delete record.
+- **RAG:** validate (1 to 2000 characters, topK 1 to 10), membership, SSE `start`, query embedding, Pinecone topK (no score threshold), `sources`, LLM stream (`token`) with idle watchdog, citation audit, save session, `done`; failures send `error{message, partial}`.
+- **Meeting to tasks:** LLM JSON normalised by zod; the client builds a bulk payload with `importKey`; task-service inserts all-or-nothing with compensation and a unique `(workspaceId, importKey, importIndex)` index.
+
+### 5.3 Frontend
+
+| Route | Component | State |
+|---|---|---|
+| `/login`, `/register` | LoginPage / RegisterPage | Real |
+| `/create-workspace` | CreateWorkspacePage (create or join) | Real |
+| `/dashboard` | OverviewPage (indexing stats, AI session count, member count) | Real data |
+| `/dashboard/tasks` | KanbanPage with CreateTaskModal and TaskDetailModal | Real |
+| `/dashboard/documents` | DocumentsPage with upload and PdfViewerModal | Real |
+| `/dashboard/ai-researcher`, `/app/workspace/:id/search` | SemanticSearchPage (SSE Q&A, history) | Real; the `:id` alias is BROKEN (REQ-128) |
+| `/dashboard/meeting-notes` | MeetingSummarizerPage | Real |
+| `/dashboard/sources`, `/analytics`, `/literature-review`, `/report-drafter`, `/settings` | PlaceholderPage ("in development") | Placeholder |
+
+Guards: `ProtectedRoute`, then `OnboardingGuard`, then `AppShell`. State: zustand stores (`auth.store.ts`, `workspace.store.ts`) and TanStack Query. Dead code with no importers: the 5-step workspace wizard components, three dashboard mock cards, `MathMarkdown.tsx`, `App.css`, default assets (ARC-009).
+
+### 5.4 Shared packages and integrations
+
+- `packages/shared` (no `package.json`; consumed by deep relative imports): authenticate, internal-auth, workspace-membership, fail-closed secret validation, error middleware, health check, lifecycle (mongo, redis, shutdown).
+- `packages/validation`: zod schemas for auth, workspace, document, task, ai.
+- `packages/shared-config`: unreferenced placeholder.
+
+| Integration | Used by | Startup behaviour | Verified live in this audit |
+|---|---|---|---|
+| MongoDB | 5 data services | One bounded attempt (about 30 s), then exit 1 | Yes (disposable) |
+| Redis | gateway, document, ai, auth (unused) | Reconnect forever, non-blocking | Yes (disposable) |
+| Cloudinary | document-service | Not validated at startup; first upload fails with 502 | No (dummy credentials, 401) |
+| Voyage | ai-service | Key required at import | No (dummy key, 401) |
+| Pinecone | ai-service | Key/index required at import; dimension check warns and continues on failure | No (dummy key rejected) |
+| Groq / xAI | ai-service | Key required at import | No (dummy key) |
+
+### 5.5 Module completeness
+
+| Module | Status | Notes |
+|---|---|---|
+| api-gateway | PARTIAL | Agent 1 rated it COMPLETE; corrected by Agent 5: limiters bypassable (SEC-003), slow fail-open (RT-001), no upstream timeout (RT-003), static `/health` (ISS-044) |
+| auth-service | COMPLETE (core) | Runtime and integration tests; account management missing (scope) |
+| workspace-service | PARTIAL | No roles, removal, leave, rename, delete; member hydration without timeout (ARC-004) |
+| document-service | FUNCTIONAL, live providers unverified | Parser exhaustion (SEC-002); public Cloudinary (SEC-005); metadata-only endpoint (ARC-001) |
+| task-service | COMPLETE (backend) | Board rename/delete have no UI; replay compares count only (RT-004) |
+| ai-service RAG | FUNCTIONAL, live providers unverified | No disconnect abort (ISS-015), no relevance threshold (ISS-028), prompt injection (SEC-011), raw Markdown in UI (ARC-002), zod 3 at runtime (RT-005) |
+| ai-service meeting summarizer | FUNCTIONAL, live provider unverified | No JSON mode, not persisted (ISS-030) |
+| Embedding worker and sweep | FUNCTIONAL, live providers unverified | No provider timeout (ISS-037); full text in Redis (SEC-006) |
+| notification-service | NOT IMPLEMENTED | Empty files |
+| Agent, chat, literature review, report drafter, analytics | NOT IMPLEMENTED | Product scope |
+| Frontend | Core pages real; 5 placeholders | No component or browser tests |
+| Tests | PARTIAL | 239 tests; no UI/E2E/live-provider/limiter tests; no coverage |
+| CI | PARTIAL | Never green; no lint, audit, Redis, E2E |
+| Deployment | NOT IMPLEMENTED | No Dockerfiles or deployment configuration |
+
+---
+
+## 6. Previous audit reconciliation
+
+Each historical issue was checked against the current code, not against the fix-wave notes. Agent 5 corrections are applied: **ISS-011 is PARTIALLY FIXED** (Agent 1 said FIXED; parser resource exhaustion remains as SEC-002), and **ISS-025's original Medium severity was understated** (it is now SEC-001, P0). Where an item maps to a current finding, the finding ID is given; section 7 carries the details.
+
+| ID | Original title (short) | Orig. sev. | Disposition | Current evidence | Method |
+|---|---|---|---|---|---|
+| ISS-001 | Document delete never deletes Pinecone vectors | Critical | FIXED (live Pinecone delete-by-metadata not verified) | `document.service.ts:288-324` soft-marks, deletes vectors via ai-service, rolls back with 503; worker removes vectors if the document disappears mid-job; runtime rows 137-139 show rollback | S + T + R |
+| ISS-002 | `POST /api/documents` accepts client-owned URL/text fields | High | FIXED | `document.controller.ts:141-153` builds server-owned fields; URL guard before `window.open`; runtime row 95 and Agent 3 mass-assignment probe | S + T + R |
+| ISS-003 | Join modal sends wrong payload; frontend build fails | High | FIXED | `workspace.store.ts:128-133` sends `{inviteCode}`; frontend `tsc -b` passes | S + R |
+| ISS-004 | Assignee saved as display name | High | FIXED | Picker uses `member.userId`; server `assertAssigneesAreMembers`; runtime rows 49-51 | S + T + R |
+| ISS-005 | Non-atomic refresh rotation; identical tokens; no cross-tab sync | High | FIXED | Random `jti`; atomic claim + 10 s grace; client single-flight coordinator; runtime rows 12-17 (concurrent refresh: exactly one 200) | S + T + R |
+| ISS-006 | At-most-once embedding queue; stuck `indexing` | High | FIXED (residual stall tracked as ISS-037) | Claim with fencing, bounded retries, periodic sweep; runtime rows 126-136, 184 | S + T + R |
+| ISS-007 | No effective tests or CI | High | FIXED (CI gaps now ARC-005) | 20 test files import real modules; CI on `develop`/`main` with MongoDB; 239/239 pass | R |
+| ISS-008 | Working tree depends on untracked files; `docs` ignored | High | PARTIALLY FIXED | All code tracked; clean clone compiles. `.gitignore:40` still ignores `docs` | R + S |
+| ISS-009 | No roles, no member removal, permanent invite codes | High | STILL OPEN (now SEC-010; also product scope) | `Workspace.ts` `members: string[]`; no remove/role/leave routes; any member deletes boards and documents (runtime by Agent 3) | S + R |
+| ISS-010 | Client errors mapped to 500 | Medium | FIXED | `error.middleware.ts:60-93` maps 400/409/413/503; runtime rows 26, 87, 88, 125 | T + R |
+| ISS-011 | Weak upload filter; vulnerable parsers; DoS | Medium | **PARTIALLY FIXED** (corrected from FIXED) | Extension, magic-byte, empty and size checks fixed (runtime rows 81-91). Parser resource exhaustion remains: SEC-002 | T + R |
+| ISS-012 | Membership check: no timeout, errors as 403 | Medium | FIXED (sibling gap ARC-004) | Shared checker: 400 / 3 s timeout / 503; runtime rows 165-167 | T + R |
+| ISS-013 | DB fallback URI; ai-service runs without Mongo; no graceful shutdown | Medium | FIXED | No fallback; exit without Mongo (runtime row 170); graceful shutdown (rows 176-181) | S + T + R |
+| ISS-014 | Redis producer stops reconnecting; ai-service exits without Redis | Medium | FIXED | Reconnect forever with capped backoff; runtime rows 148-151, 173 | S + T + R |
+| ISS-015 | SSE generation not aborted on client disconnect | Medium | STILL OPEN | `query.controller.ts:73-103` has no `close` handler | S |
+| ISS-016 | Truncated SSE stream shown as complete | Medium | FIXED | Client marks streams without terminal event incomplete; gateway ends response on upstream abort (runtime row 157) | T + R |
+| ISS-017 | Wrong `npm start` paths | Medium | FIXED | Start scripts point at `dist/services/<svc>/src/server.js`; all six services started this way | R |
+| ISS-018 | Non-atomic, non-idempotent bulk tasks | Medium | FIXED (new defect RT-004) | All-or-nothing with compensation and unique index; runtime rows 66-73 | T + R |
+| ISS-019 | "Open in Kanban" link dead-ends | Medium | FIXED | `MeetingSummarizerPage.tsx:679` links `/dashboard/tasks` | S |
+| ISS-020 | DOCX card click does nothing | Medium | FIXED | `DocumentCard.tsx:30-42` opens DOCX via URL guard | S |
+| ISS-021 | Tokens in localStorage, no httpOnly cookie | Medium | STILL OPEN (now SEC-008) | `auth.store.ts:85-95`; gateway CSP disabled | S |
+| ISS-022 | Prompt-injection exposure | Medium | STILL OPEN (now SEC-011) | `context.service.ts:17-29`, `rag.prompt.ts:21-39` | S |
+| ISS-023 | Public Cloudinary delivery, guessable `public_id` | Medium | STILL OPEN (now SEC-005) | `document.service.ts:18-38`; real data: 67 of 67 URLs public | S + R |
+| ISS-024 | 0.0.0.0 binding, refresh unthrottled, no `trust proxy`, fail-open, wildcard CORS | Medium | PARTIALLY FIXED | Redis-backed per-route/per-user limiters added. Open: SEC-003, RT-001, SEC-004, SEC-015, SEC-021, SEC-025, RT-008 | S + R |
+| ISS-025 | Compose exposes Mongo/Redis/mongo-express with weak defaults | Medium (understated) | PARTIALLY FIXED (now SEC-001, P0) | Compose uses variables with defaults; ports still 0.0.0.0, Redis unauthenticated, root `.env` name mismatch; default credentials verified working | S + R |
+| ISS-026 | 47 dependency advisories | Medium | STILL OPEN (reduced; now SEC-022) | 30 advisories (2 critical, 14 high) | R |
+| ISS-027 | Embedding model drift; model not recorded | Medium | PARTIALLY FIXED | Pinned `voyage-3`, dimension check, model stored per vector. Open: retrieval does not compare model; ADR-0004 says voyage-4 | S + T |
+| ISS-028 | No relevance threshold; unvalidated queries | Medium | PARTIALLY FIXED | Validation fixed (runtime rows 105-110). Open: no score threshold | S + T + R |
+| ISS-029 | Weak citation provenance | Medium | PARTIALLY FIXED | UI resolves file names. Open: no title/page metadata, ObjectId labels in prompt, page markers stripped | S |
+| ISS-030 | Brittle meeting summarizer | Medium | PARTIALLY FIXED | Nulls normalised, `max_tokens` + truncation rejection, ISO dates. Open: no JSON mode; summary not persisted | S + T |
+| ISS-031 | Documentation untruthful / not bootable | Medium | PARTIALLY FIXED | Docs rewritten. Residuals: ADR-0004 lines 49, 61, 63; README:60 (ARC-012); `.gitignore:40` | S |
+| ISS-032 | Shared code not packages; undeclared dependencies | Medium | STILL OPEN | `packages/shared` has no `package.json`; auth/workspace/gateway/task/ai rely on hoisted deps; consequence RT-005 | S + R |
+| ISS-033 | `INTERNAL_SERVICE_TOKEN` absent; members shown as "Researcher" | Medium | PARTIALLY FIXED | Documented in `.env.example`; silent substitution remains (ARC-004); local auth/workspace `.env` lack the token (SEC-018) | S + R |
+| ISS-034 | Document status not live; no failure reason | Medium | FIXED | `documentPollInterval`; `embeddingError` stored | T |
+| ISS-035 | Right-panel question dropped | Medium | FIXED | `RightContextPanel.tsx:79` passes `initialQuery` | S + T |
+| ISS-036 | Invite code case mismatch | Medium | FIXED | Client uppercases; server normalises; runtime row 33 | T + R |
+| ISS-037 | Voyage: no timeout, nested retries, no SSE heartbeat | Medium | STILL OPEN | LangChain Voyage `fetch` has no signal; a hung call blocks the only in-process consumer | S |
+| ISS-038 | Fake status, dead controls, wrong metric | Low | FIXED | Fake card removed; bell disabled; metric corrected | S |
+| ISS-039 | Client register validation weaker than server | Low | STILL OPEN | Client name `min(1)`, password length only; server `min(2)` plus letter/digit | S |
+| ISS-040 | Logout after expiry does not revoke | Low | FIXED | Sign-out renews before revoking; runtime rows 19-24 | T + R |
+| ISS-041 | Envelope/status codes deviate from README | Low | PARTIALLY FIXED | README now documents the real envelope; no `error.code` (documented design choice) | S |
+| ISS-042 | Concurrent join duplicates member | Low | FIXED | Single conditional update; runtime rows 34-35 | T + R |
+| ISS-043 | Unbounded lists, no pagination | Low | STILL OPEN | `document.service.ts:201-212`, `task.service.ts:364-386`, `board.service.ts:31-37` | S |
+| ISS-044 | No request IDs; static health | Low | PARTIALLY FIXED | Service health reports Mongo/Redis; gateway `/health` static (runtime row 142); no request IDs | S + T + R |
+| ISS-045 | RefreshToken index change without migration | Low | NOT REPRODUCIBLE | User's auth DB has only the expected indexes; 0 legacy rows | R |
+| ISS-046 | No cross-service lifecycle (workspace/user delete) | Low | STILL OPEN (product scope) | No workspace or user delete; no namespace cleanup | S |
+| ISS-047 | Duplicated JWT verifiers and guards; unused auth Redis | Low | PARTIALLY FIXED | Membership checker unified; still 4 JWT verifiers, 2 internal guards, unused auth Redis (RT-009) | S + R |
+| ISS-048 | Roadmap features not built | Low | STILL OPEN (product scope) | No agent, chat, notifications, analytics, deployment | S |
+| ISS-049 | Signed token without `userId` accepted | Low | STILL OPEN (now part of SEC-019) | No `userId` presence check in authenticate implementations; runtime: 200 with 0 rows | S + R |
+| ISS-050 | Miscellaneous hygiene | Low | STILL OPEN | bcrypt cost 10; no iss/aud; public stale Swagger; pdf.js worker from unpkg; workspace-wide AI history; no workspace-name max | S + R |
+| ISS-051 | ESLint not enforced; tsconfig duplication | Low | STILL OPEN | 42 problems; `tsconfig.node.json` includes `src` and shares a build-info file; notification-service not typechecked | R + S |
+| ISS-052 | Document delete/retry fail silently | Low | FIXED | Action-error banner and busy guard | S |
+
+**Totals (52):** FIXED **23** · PARTIALLY FIXED **13** · STILL OPEN **15** · NOT REPRODUCIBLE **1** · REGRESSED **0** · NOT VERIFIED **0**. ISS-001's FIXED status depends on Pinecone delete-by-metadata, which was never exercised against a live index (section 23).
+
+**Documentation items from the old audit (DOC-xxx), current state:** DOC-001, 006, 018, 021, 022, 028, 029 fixed. DOC-002 (a remaining "Joi validators" mention at README:2231), DOC-003/004/005 (README compose example still uses `./apps/*` and ports 3000 to 3006), DOC-008 (ADR-0004 body says voyage-4), DOC-015 and DOC-016 (ADR-0004 lines 49, 61, 63 under correction notes) are partial. DOC-036 (`docs` git-ignored) remains. New: README:60 overstates SSE abort handling (ARC-012).
+
+---
+
+## 7. Current P0 to P4 findings
+
+### 7.1 Summary
+
+| Severity | Count | IDs |
+|---|---|---|
+| P0 | 1 | SEC-001 |
+| P1 | 2 | SEC-002, SEC-003 |
+| P2 | 5 | RT-001, SEC-005, SEC-006 (merged with ARC-007), SEC-010, ISS-037 |
+| P3 | 31 | ARC-001 to ARC-006; RT-002, RT-003, RT-004, RT-005, RT-006, RT-008; SEC-004, SEC-007, SEC-008, SEC-009, SEC-011, SEC-012, SEC-013, SEC-014, SEC-022; REQ-128; ISS-015, ISS-027, ISS-028, ISS-029, ISS-030, ISS-032, ISS-043, ISS-044, ISS-051 |
+| P4 | 29 | ARC-008 to ARC-013; RT-007, RT-009, RT-010, RT-011; SEC-015 to SEC-021, SEC-023, SEC-024, SEC-025; REQ-082; ISS-008, ISS-031, ISS-039, ISS-041, ISS-046, ISS-047, ISS-048, ISS-050 |
+| **Total** | **68** | |
+
+By source: 12 ARC entries (ARC-007 is merged into SEC-006), 11 RT, 25 SEC, 2 REQ defects, 18 historical ISS items with no newer equivalent. ISS-046 and ISS-048 are product-scope tracking items; they are listed for completeness and excluded from the stabilization roadmap.
+
+**Historical items carried by a newer finding** (not repeated as separate entries):
+
+| Historical | Disposition | Carried by |
+|---|---|---|
+| ISS-009 | STILL OPEN | SEC-010 |
+| ISS-011 | PARTIALLY FIXED | SEC-002 |
+| ISS-021 | STILL OPEN | SEC-008 |
+| ISS-022 | STILL OPEN | SEC-011 |
+| ISS-023 | STILL OPEN | SEC-005 |
+| ISS-024 | PARTIALLY FIXED | SEC-003, RT-001, SEC-004, SEC-015, SEC-021, SEC-025, RT-008 |
+| ISS-025 | PARTIALLY FIXED | SEC-001 |
+| ISS-026 | STILL OPEN | SEC-022 |
+| ISS-033 | PARTIALLY FIXED | ARC-004, SEC-018 |
+| ISS-049 | STILL OPEN | SEC-019 |
+
+Current severities for historical items are assigned in this report for the residual defect only; the original severity is in section 6.
+
+### 7.2 Severity re-grades and recorded disagreements
+
+| Item | Original agent position | Agent 5 position (applied) |
+|---|---|---|
+| SEC-003 severity | P2 (Agent 3) | **P1**: unlimited registration multiplied by the uncapped AI path defeats every AI cost control, and unlimited password guessing defeats the only brute-force control |
+| RT-002 severity | P2 (Agent 2) | **P3**: no data impact (claim/fencing makes a zombie worker harmless), detectable via `/health` |
+| SEC-002 magnitude | 213 s event-loop block, RSS to 1.2 GB (Agent 3) | **11.7 s per 19 KB file, about +0.5 GB RSS per upload, heap-limit crash demonstrated**. Agent 3's figure was a contention artefact on a memory-starved host. Severity P1 agreed; the crash threshold (about 150 to 200 KB, extrapolated) is lower than Agent 3 stated |
+| SEC-022 zod reachability | Flagged zod copies not used for request validation (Agent 3) | **Wrong**: ai-service's built validator resolves zod 3.25.76, the flagged copy (RT-005). Not practically exploitable (no constrained arrays in user-input schemas; 100 KB body cap) |
+| RT-001 root cause | SUSPECTED (Agent 2) | **CONFIRMED** by the logged `MaxRetriesPerRequestError` |
+| SEC-001 LAN reachability confidence | Medium (Agent 3) | **High**: effective firewall evaluation plus successful connects through the host's LAN address; a second-host test is still missing |
+| api-gateway module status | COMPLETE (Agent 1) | **PARTIAL** (SEC-003, RT-001, RT-003) |
+| ISS-011 disposition | FIXED (Agent 1) | **PARTIALLY FIXED** (SEC-002) |
+| ISS-025 severity | Medium (historical) | Understated; now SEC-001 (P0) |
+| REQ-134, REQ-023 | COMPLETE (Agent 4) | **PARTIAL** (insecure compose defaults; gateway static health, Redis brown-out, swallowed listen errors) |
+| ARC-007 vs SEC-006 | P3 (Agent 1) vs P2 (Agent 3) | **One item, P2 while SEC-001 is open**, P3 once Redis is private and authenticated |
+| REQ-015 evidence | "No 429 evidence" (Agent 4) | 429s observed at runtime on canonical paths; still no regression test; status PARTIAL unchanged |
+| REQ-001/002/006/029/147 | NOT VERIFIED (Agent 4) | Status unchanged (UI journey not run); annotated "backend runtime-verified" |
+| REQ-064 | Server SSE never run (Agent 4) | SSE error path runtime-verified; success path still unverified |
+| REQ-038/039 vs SEC-002 | COMPLETE | COMPLETE functionally, linked to SEC-002 robustness defect |
+| U1 SEC-001 exploitation from another host | — | UNRESOLVED (no second host) |
+| U2 live-provider journeys | — | UNRESOLVED / NOT VERIFIED by all agents |
+| U3 browser behaviour (REQ-128, ARC-002, ARC-003, refresh UX) | — | UNRESOLVED (static evidence only) |
+| U4 SEC-010 security vs product scope | P2 security (Agent 3) vs product scope (Agent 1) | UNRESOLVED by design: it is both; product owner decides before any multi-user release |
+| Parallel feature branches during prerequisites | Agent 5 proposed allowing isolated feature branches to proceed in parallel with the prerequisites | **Lead decision: prerequisites come first** (section 27). Recorded as an unresolved disagreement |
+
+### 7.3 P0 findings
+
+#### SEC-001: Real MongoDB, mongo-express and Redis exposed on all interfaces with default or no credentials
+- **Severity:** P0 · **Category:** Infrastructure / secrets · **Module:** `docker-compose.yml`; running `researchmind-*` containers; host firewall
+- **Description:** MongoDB publishes 27017 with the root user and the compose default password; mongo-express publishes 8081 with default basic auth; Redis publishes 6379 with no password and protected mode off. All bind `0.0.0.0` and `[::]`. Docker Desktop's inbound Allow rules apply to the Public profile, and the host's active Wi-Fi profile is Public. All five service `.env` Mongo URIs connect as the root user with the default password (see SEC-014). The root `.env` uses `MONGO_ROOT_USER` instead of `MONGO_ROOT_USERNAME`, so compose silently uses its default user.
+- **Evidence:** `docker-compose.yml:17-63`; `docker port`/`netstat` show `0.0.0.0`/`[::]` listeners owned by `com.docker.backend`; in-container boolean comparisons: credentials equal compose defaults; authenticated `ping` with the default works; Redis `CONFIG GET` shows empty `requirepass`, `protected-mode no`, `bind * -::*`; `Get-NetConnectionProfile` Public; effective firewall default Block overridden by "Docker Desktop Backend" Allow rules, 0 Docker block rules. Through the host's own LAN address, TCP connects to 27017, 6379 and 8081 succeed, and mongo-express returns 401 without and 200 with the default credentials (Agent 5). Exposed data (aggregate): 260 user accounts (254 match test patterns), 67 documents with full extracted text, 221 workspaces, 285 tasks, 43 AI sessions.
+- **Reproduction:** From another host on the same network, connect to MongoDB with the compose default credentials, run `redis-cli -h <host> PING`, or open `http://<host>:8081` with the default basic auth. Not executed from a second host (none available); executed via the host's LAN address.
+- **Expected:** Infrastructure bound to `127.0.0.1`, non-default credentials, Redis authentication, least-privilege database users.
+- **Actual:** Reachable on every interface with publicly documented credentials.
+- **Impact:** Anyone on the network can read or modify all data (password hashes, document text, workspaces, tasks), inject embedding jobs (SEC-006) or drop databases.
+- **Root cause:** CONFIRMED (configuration). Exploitation from a second host: SUSPECTED, high confidence.
+- **Remediation:** Publish ports as `127.0.0.1:<port>:<port>`; set non-default `MONGO_ROOT_PASSWORD` and mongo-express credentials and fix the root `.env` variable name; rotate credentials (recreate volumes or change users); enable Redis `requirepass` or ACLs and update every `REDIS_URL`; remove mongo-express or bind it to localhost; create one MongoDB user per service with `readWrite` on its own database (SEC-014); switch the network profile to Private or scope the Docker firewall rule. The repository part (compose binds 0.0.0.0 and ships weak fallback credentials) is a P1 configuration defect to fix in the same change.
+- **Verification:** `docker ps` shows `127.0.0.1:` bindings only; connects through the LAN address fail; `redis-cli PING` without a password returns NOAUTH; the default credentials fail; each service user cannot read another service's database.
+- **Confidence:** High.
+
+### 7.4 P1 findings
+
+#### SEC-002: DOCX decompression and parse amplification exhausts document-service
+- **Severity:** P1 · **Category:** File security / availability · **Module:** document-service (`upload.middleware.ts`, `document.service.ts:116-123`, `utils/docx-extractor.ts:18-24`)
+- **Description:** Uploads are parsed synchronously in the HTTP process. mammoth/JSZip inflate the whole archive and build a DOM with no limit on decompressed size, entry count or XML node count. The 10 MB cap applies to the compressed file only.
+- **Evidence (Agent 5, applied):** standalone mammoth is linear (180k paragraphs, 19 KB compressed, 6.1 MB XML: 11.5 s, 773 MB peak RSS). Through the service: a 9 KB file took 7.9 s (RSS 111 to 522 MB, 1 health timeout); a 19 KB file took 11.7 s (RSS 504 to 996 MB, 3 `/health` timeouts over 2 s); RSS was not released between uploads. With `--max-old-space-size=256` the 19 KB file produced "JavaScript heap out of memory", the process exited, the client got `ECONNRESET`, and the temp upload was left behind. Agent 3 measured 213 s and RSS to about 1.2 GB on a contended host (not reproducible; see 7.2).
+- **Reproduction:** Register, create a workspace, upload a DOCX whose `word/document.xml` repeats `<w:p><w:r><w:t>a</w:t></w:r></w:p>` 180,000 times, compressed at level 9.
+- **Expected:** Rejected in under 1 s, or parsed in an isolated worker with time and memory limits; `/health` stays responsive.
+- **Actual:** Event loop blocked for seconds per upload, memory grows about 0.5 GB per upload and is retained, crash under a constrained heap.
+- **Impact:** Any authenticated member can take document-service offline; there is no supervisor, so it stays down. Extrapolated (not run): a file of roughly 150 to 200 KB likely exceeds the default heap; on this low-memory host co-located processes are also affected. Crafted PDFs were not tested.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Before mammoth, inspect the zip central directory and cap total uncompressed size (for example 50 MB), entry count and compression ratio; run extraction in a `worker_thread` or child process with `resourceLimits` and a timeout; cap extracted text length; clean up temp files after failures; add per-user upload rate limits.
+- **Verification:** Regression test with the 19 KB / 180k-paragraph DOCX expects 413 or 422 in under 1 s with `/health` responsive throughout.
+- **Confidence:** High.
+
+#### SEC-003: Gateway rate limiters bypassed with a doubled slash (login, register, AI caps)
+- **Severity:** P1 (re-graded from P2 by Agent 5) · **Category:** Authentication / abuse · **Module:** api-gateway `app.ts:75-76`, `:133-135`
+- **Description:** Each limiter is mounted on an exact route. `POST /api/auth//login` does not match, but http-proxy normalises the URL when joining it to the target, so auth-service handles it as a normal login. The same applies to `//register` and `/api/ai//query`. Called directly, auth-service returns 404 for `//login`, so the gateway's forwarding creates the bypass.
+- **Evidence:** Agent 3 and Agent 5 (independent): `/api/auth/login` wrong password gives 401 five times then 429; `/api/auth//login` gives 401 eight times, never 429, and the correct password then returns 200 with a token; `///login` is also unlimited; `/login/`, upper-case and `/./` variants are limited; `/api/auth//register` returned 201 five times (limit 3 per hour) and the bypassed requests were not counted; `/api/ai/query` 200 thirty times then 429, while `/api/ai//query` returned 200 ten more times after the cap.
+- **Reproduction:** As above against a gateway with Redis.
+- **Expected:** Every path variant is limited (or rejected).
+- **Actual:** Unlimited password guessing per IP, unlimited registration, AI per-user caps bypassed (only the general 100 per minute remains).
+- **Impact:** Credential stuffing, account spam, and LLM/embedding cost exhaustion (unlimited accounts multiplied by 100 requests per minute each).
+- **Root cause:** CONFIRMED.
+- **Remediation:** Before routing, reject (400) or normalise any path containing repeated slashes or dot segments; or mount limiters by prefix on the normalised path; add per-account login throttling in auth-service.
+- **Verification:** Regression tests with a real Redis: every variant (`//`, `///`, trailing slash, case, dot segments) on login, register and AI routes returns 429 or 400 once the limit is reached.
+- **Confidence:** High.
+
+### 7.5 P2 findings
+
+#### RT-001: A Redis outage turns fail-open rate limiting into 9 to 31 s of added latency per request
+- **Severity:** P2 (promoted to a development prerequisite by lead decision) · **Category:** Reliability / availability · **Module:** `services/api-gateway/src/middlewares/rate-limit.middleware.ts`
+- **Description:** Limiters are configured to fail open and the code comment promises fast failure, but while Redis is down every limited request waits for the store command to fail. AI routes pass through two limiters and pay twice. Routes without a limiter are unaffected.
+- **Evidence:** Agent 2: three sequential `GET /api/workspaces` took 10.4, 14.4, 16.1 s; five concurrent about 15 s each; `POST /api/ai/query` 31.4 s (first run exceeded a 30 s client timeout); `GET /api/auth/me` 163 ms; 258 ms after recovery. Agent 5 (Redis down via TCP proxy): 9.2 to 15.5 s for workspaces, 30.8 s for AI query, 15.2 s for login, 27 ms for `/me`, 21 ms when back up; log shows `MaxRetriesPerRequestError: Reached the max retries per request limit (which is 2)`.
+- **Reproduction:** Run the gateway against a Redis, stop Redis (or the proxy), time limited routes.
+- **Expected:** Requests forwarded in well under 1 s while Redis is unavailable.
+- **Actual:** 9 to 31 s added per request.
+- **Impact:** A Redis blip becomes an API-wide brown-out; SSE answers start 30 s late or the client gives up.
+- **Root cause:** CONFIRMED: ioredis keeps the offline queue with `maxRetriesPerRequest: 2`, default reconnect backoff and no `commandTimeout`; each command waits for two to three reconnect cycles.
+- **Remediation:** Skip the store immediately when the limiter client is not `ready` (custom `skip` or wrapper store); set `commandTimeout` around 250 to 500 ms; keep the offline queue only until the first `ready`. Decide separately whether auth limiters should fail closed (SEC-025).
+- **Verification:** Outage-latency regression test: with Redis down, limited routes respond in under 1 s; with Redis back, limits apply again.
+- **Confidence:** High.
+
+#### SEC-005: Documents stored as public, unauthenticated Cloudinary assets
+- **Severity:** P2 · **Category:** File security / data exposure · **Module:** `document-service/src/services/document.service.ts:18-39`, `:235-262`; frontend `DocumentCard.tsx:36-40`, `PdfViewerModal.tsx:34`
+- **Description:** Uploads use the default public delivery type; `public_id` is `Date.now()-originalname` (partly guessable); the URL is given to every member and opened directly, bypassing application authorization; a failed `destroy` is only logged, so the file stays public after deletion.
+- **Evidence:** Code as cited. Real data (aggregate): 67 of 67 document URLs are public `upload` delivery (58 image, 9 raw), 0 authenticated or private.
+- **Reproduction:** Open a document's `cloudinaryUrl` in a private window with no session. Inferred from the delivery type; no real URL was fetched.
+- **Expected:** Authenticated or private delivery, served via short-lived signed URLs after a membership check.
+- **Actual:** Permanent public URLs.
+- **Impact:** Anyone who obtains a URL (forwarded link, browser history, logs, former collaborators) can read the document indefinitely.
+- **Root cause:** CONFIRMED (code and data).
+- **Remediation:** Upload with `type: "authenticated"` and a random `public_id`; add `GET /api/documents/:id/file` returning a signed short-lived URL after membership; migrate existing assets; retry or sweep failed destroys.
+- **Verification:** An unsigned URL returns 401/404; signed URLs expire; integration test for the file endpoint's membership check.
+- **Confidence:** High.
+
+#### SEC-006: Embedding jobs carry full document text through Redis, and the worker trusts it (merged with ARC-007)
+- **Severity:** P2 while SEC-001 is open; P3 once Redis is private and authenticated (Agent 5 resolution C8) · **Category:** RAG / data integrity / operational · **Module:** `document-service/src/queues/embedding.queue.ts:5-21`, `services/document.service.ts:166-172`, `:597-613`; `ai-service/src/workers/embedding.worker.ts:137-180`
+- **Description:** Each job contains the entire `extractedText`. The worker claims the document, checks that the claimed workspace matches the job, then embeds the job's text as given. The sweep can enqueue up to 100 such jobs per run. Anyone with Redis access can read queued document text or push a job for any `pending`/`failed` document id with arbitrary text, poisoning that workspace's index while answers stay attributed to the legitimate document. Cross-workspace injection is refused (runtime row 130). ARC-007 (Agent 1) describes the same design from the memory-pressure angle.
+- **Evidence:** Code as cited; real Redis has no password and is LAN-reachable (SEC-001); queue empty at inspection.
+- **Reproduction:** Not executed against real Redis (it would be a write); statically clear; a forged cross-workspace job was refused at runtime.
+- **Expected:** Queue carries the document id only; the worker fetches text over the authenticated internal API after the claim.
+- **Actual:** Text carried and trusted from the queue; a second plaintext copy of every queued document in Redis.
+- **Impact:** Content disclosure and integrity loss of RAG answers; Redis memory pressure.
+- **Root cause:** CONFIRMED (design).
+- **Remediation:** Pointer-only jobs; return text and workspace from the claim response (or a new internal endpoint); secure Redis (SEC-001).
+- **Verification:** Unit test: an injected job with forged text produces vectors from the stored text; `LRANGE` of the queue after an upload shows small id-only payloads.
+- **Confidence:** High.
+
+#### SEC-010: No role model, no member removal, no invite rotation
+- **Severity:** P2 (also product scope S7/S8; disagreement U4 unresolved) · **Category:** Authorization · **Module:** `workspace-service/src/routes/workspace.routes.ts`; document and task delete handlers
+- **Description:** Every member can delete any document (with vectors and file) and cascade-delete boards and their tasks. The permanent invite code is visible to all members. Members cannot be removed and cannot leave.
+- **Evidence:** Agent 3 runtime: after joining, member B deleted A's document (200) and cascade-deleted A's board (200); `DELETE /api/workspaces/:id/members/:userId` returns 404 (route absent). Real data: 221 workspaces whose invite codes cannot be rotated.
+- **Reproduction:** Join a workspace by code, then delete another member's document or board.
+- **Expected:** Owner/admin roles for destructive operations; member removal; invite rotation and expiry.
+- **Actual:** None of these exist.
+- **Impact:** A leaked invite code or departing collaborator keeps permanent access to all documents and AI history; any member can destroy shared data.
+- **Root cause:** CONFIRMED (design).
+- **Remediation:** Add `role` to membership; restrict destructive routes to owner/admin; add remove-member, leave and rotate-invite endpoints; optional expiry or single-use invites.
+- **Verification:** Integration tests: non-admin delete returns 403; a removed member loses access immediately; the old invite code fails after rotation.
+- **Confidence:** High.
+
+#### ISS-037: Embedding provider calls have no timeout; a hung call stalls the only in-process consumer
+- **Severity:** P2 (original Medium retained) · **Category:** Reliability · **Module:** ai-service embedding (`embedding.service.ts:28-33`, `query-embedding.service.ts:37-41`, LangChain `@langchain/community/.../embeddings/voyage.cjs:104`)
+- **Description:** LangChain's Voyage client calls `fetch` with no abort signal or timeout. Document embedding backs off 20 s / 40 s, query embedding 15 s / 30 s. There is no SSE heartbeat. ai-service runs a single in-process consumer, so one hung provider call blocks indexing for all workspaces until restart (shutdown waits up to 30 s).
+- **Evidence:** Static reading of the cited lines (Agent 1). Not exercised at runtime (no slow provider stub was run).
+- **Reproduction:** Point the Voyage base URL at a server that accepts and never responds, then upload a document.
+- **Expected:** Each provider call bounded (for example 30 s), the job fails with a reason, and the worker moves on; SSE clients receive heartbeats.
+- **Actual:** Unbounded wait.
+- **Impact:** Indexing stalls silently; SSE clients may time out during long embedding waits.
+- **Root cause:** CONFIRMED (static).
+- **Remediation:** Wrap embedding calls with `AbortSignal.timeout` (custom fetch or `Promise.race`); add a worker watchdog; send SSE comment heartbeats every 15 s.
+- **Verification:** Test with a hanging stub: the job fails within the timeout and the next job is processed.
+- **Confidence:** High.
+
+### 7.6 P3 findings
+
+#### ARC-001: Unused metadata-only `POST /api/documents` creates file-less documents that the sweep keeps re-queuing
+- **Severity:** P3 · **Category:** Dead endpoint / data integrity · **Module:** document-service
+- **Description:** Any member can create a document with no file and no text. No frontend code calls the route. The sweep re-queues it after 10 minutes; each attempt fails "Document contains no usable text"; after 3 attempts it shows as `failed` in everyone's library.
+- **Evidence:** `document.routes.ts:12-17`; `document.controller.ts:143-153`; `document.service.ts:587-603`; runtime rows 95, 126-127, 184.
+- **Reproduction:** `POST /api/documents` with metadata only; wait for the sweep.
+- **Expected:** Route removed, or file-less records never queued. **Actual:** Junk records and three wasted worker claims each.
+- **Impact:** Workspace clutter, wasted worker cycles; no data exposure.
+- **Root cause:** CONFIRMED (legacy route; sweep has no content condition).
+- **Remediation:** Remove the route and schema, or exclude documents without a stored file/text from the queue and sweep.
+- **Verification:** Route returns 404/410; sweep test with a file-less pending document asserts it is not enqueued.
+- **Confidence:** High.
+
+#### ARC-002: RAG answers requested as Markdown/LaTeX but rendered as plain text
+- **Severity:** P3 · **Category:** Frontend/backend contract, UX · **Module:** `ai-service/src/prompts/rag.prompt.ts:12-15`; `frontend/src/pages/SemanticSearchPage.tsx:290-291`
+- **Description:** The system prompt asks for headers, bold, tables and `$$` LaTeX; the page renders the answer in a `whitespace-pre-wrap` div. A Markdown/KaTeX renderer (`MathMarkdown.tsx`) exists but has no importer.
+- **Evidence:** Cited lines; grep shows no importer.
+- **Reproduction:** Ask a question whose answer contains a table or formula (needs a live LLM; not run).
+- **Expected:** Prompt and renderer agree. **Actual:** Raw markup shown.
+- **Impact:** Degraded readability of the main AI feature; no security impact.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Render with `MathMarkdown` (react-markdown without raw HTML) or remove the formatting rule from the prompt.
+- **Verification:** Component test rendering a fixture answer.
+- **Confidence:** High (static).
+
+#### ARC-003: Task due dates display one day early west of UTC
+- **Severity:** P3 · **Category:** Bug (date handling) · **Module:** frontend Kanban (`CreateTaskModal.tsx:167`, `TaskDetailModal.tsx:236`, `KanbanPage.tsx:176-179`)
+- **Description:** A date-only input is stored as UTC midnight and displayed with local `toLocaleDateString()`.
+- **Evidence:** With `TZ=America/Los_Angeles`, `new Date('2026-11-12T00:00:00.000Z').toLocaleDateString('en-US')` gives `11/11/2026` (executed).
+- **Reproduction:** Set the OS timezone to UTC-5, create a task due 12 Nov; the card shows 11 Nov.
+- **Expected:** The chosen calendar date everywhere. **Actual:** Off by one day for negative UTC offsets.
+- **Impact:** Wrong deadlines for some users.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Format with `timeZone: "UTC"` or store date-only strings.
+- **Verification:** Unit test of the display helper under a negative-offset timezone.
+- **Confidence:** High.
+
+#### ARC-004: Member hydration (workspace to auth) has no timeout and degrades silently
+- **Severity:** P3 · **Category:** Error handling / resilience · **Module:** `workspace-service/src/services/workspace.service.ts:120-162`
+- **Description:** `getWorkspaceMembers` calls auth-service `/internal/users/bulk` with plain `fetch` and no signal. If `INTERNAL_SERVICE_TOKEN` is unset or auth answers non-2xx, names silently become "Researcher" with no log line.
+- **Evidence:** No signal at lines 133-140; `if (internalToken)` at 131; non-OK ignored at 142-147. Runtime with the token configured: real names returned (row 39). The user's local auth/workspace `.env` lack the token (names-only check).
+- **Reproduction:** Unset the token, or point `AUTH_SERVICE_URL` at a server that never answers.
+- **Expected:** 3 s timeout (as the membership checker) and a warning. **Actual:** Possible hang; silent placeholders.
+- **Impact:** Unreadable assignee picker and activity history; hard to diagnose.
+- **Root cause:** CONFIRMED.
+- **Remediation:** `AbortSignal.timeout(3000)`; log once on missing token or non-OK; consider requiring the token at startup.
+- **Verification:** Unit tests with a stub that never answers and one that answers 401.
+- **Confidence:** High.
+
+#### ARC-005: CI quality gates incomplete, and CI has never been green
+- **Severity:** P3 (gate 4 condition; prerequisite 3) · **Category:** CI / test coverage · **Module:** `.github/workflows/ci.yml`, `tests/`
+- **Description:** CI typechecks, builds and runs `npm test` with MongoDB, but has no lint step, coverage, `npm audit`, Redis service, E2E or component tests. Gateway limiters are never exercised (tests point Redis at a dead port). The workflow triggers only on push/PR to `develop`/`main`; the only run ever (2026-11-11, phase-4 branch) failed at the frontend typecheck/build; no fix-wave commit has a run, and no pull request exists.
+- **Evidence:** `ci.yml:3-58`; `gh run list` shows one run, failed (`JoinWorkspaceModal.tsx` TS2345 and TS6133 errors at that commit); `gh pr list --state all` empty; no `*.tsx` tests.
+- **Reproduction:** `gh run list --limit 20`.
+- **Expected:** A green CI run on the current code with lint (or a ratchet), audit and coverage reporting. **Actual:** No CI evidence for the current code.
+- **Impact:** Regressions in UI, routing, rate limits and lint go unnoticed; SEC-003 and RT-001 could not have been caught.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Open a PR from `fix/wave-4` into `develop`; add lint with a baseline, coverage, a Redis service with a limiter test, and a Playwright smoke test (login, upload, ask).
+- **Verification:** A green CI run on the PR showing the new jobs.
+- **Confidence:** High.
+
+#### ARC-006: Skipped MongoDB suites are invisible in the test summary
+- **Severity:** P3 · **Category:** Test reliability · **Module:** `tests/helpers/test-mongo.ts`, Node test runner
+- **Description:** Without `TEST_MONGO_URI`, 11 suites (69 tests) are skipped at suite level, yet the summary prints `# pass 170`, `# skipped 0` and exit 0.
+- **Evidence:** 170 vs 239 tests between runs; `# SKIP TEST_MONGO_URI is not set` diagnostics only.
+- **Reproduction:** `npm test` without the variable.
+- **Expected:** In CI, a missing variable fails the run. **Actual:** Green run with 29% fewer tests.
+- **Impact:** A CI change could silently remove all integration coverage.
+- **Root cause:** CONFIRMED (suite-level skip not counted in the TAP summary).
+- **Remediation:** Fail fast when `CI` is set and `TEST_MONGO_URI` is not.
+- **Verification:** `CI=true npm test` without the variable exits non-zero.
+- **Confidence:** High.
+
+#### RT-002: Services log "running on port N" on EADDRINUSE and stay alive without listening
+- **Severity:** P3 (re-graded from P2 by Agent 5) · **Category:** Reliability / operability · **Module:** `services/*/src/server.ts` with Express 5.2.1
+- **Description:** Express 5 `app.listen` registers its callback as the `error` handler too; the callback ignores the error and logs success. The process keeps MongoDB connections and, for document/ai services, the sweep timer and the embedding worker.
+- **Evidence:** Agents 2 and 5: a second workspace-service on an occupied port logged "MongoDB Connected" and "Workspace Service running on port …", held 4 Mongo connections, and `netstat` showed only the original PID listening. Express `application.js:601-603`.
+- **Reproduction:** Start any service twice on the same port.
+- **Expected:** Error logged, exit 1. **Actual:** False success; live non-serving process.
+- **Impact:** On this host port 5000 (gateway default) is already taken by a foreign process; the gateway would claim success while another program answers. No data impact (claim/fencing protects the queue).
+- **Root cause:** CONFIRMED.
+- **Remediation:** `app.listen(PORT, (err) => { if (err) { log; process.exit(1); } … })` or a `server.on("error")` handler that exits.
+- **Verification:** Startup test for a port conflict expects exit 1 with EADDRINUSE.
+- **Confidence:** High.
+
+#### RT-003: Gateway has no upstream timeout
+- **Severity:** P3 · **Category:** Reliability · **Module:** `services/api-gateway/src/app.ts` (`createProxyMiddleware` without `proxyTimeout`/`timeout`)
+- **Description:** If an upstream accepts the connection and never answers, the gateway never answers either.
+- **Evidence:** Agent 2: no response after 150 s; Agent 5: no response after 90 s; no timeout option anywhere in `services/api-gateway/src`.
+- **Reproduction:** Stub upstream that never responds behind a gateway; call `GET /api/ai/sessions/workspace/<id>`.
+- **Expected:** 504/503 after a bounded time. **Actual:** Hang.
+- **Impact:** Accumulating sockets; endless spinners.
+- **Root cause:** CONFIRMED.
+- **Remediation:** `proxyTimeout` (for example 30 s) on non-streaming routes mapped to 504; an idle-gap timeout for `/api/ai/query`.
+- **Verification:** Re-run the stub test; expect 504 within the configured time.
+- **Confidence:** High.
+
+#### RT-004: Bulk-import `importKey` replay compares only the task count
+- **Severity:** P3 · **Category:** Data integrity / API correctness · **Module:** `task-service/src/services/task.service.ts:249`, `:346` (`bulkCreateTasks`)
+- **Description:** Reusing a key with different tasks of the same count returns `200 replayed:true` with the original tasks, dropping the new content. With a different count, the reply is a misleading 409 "Only part of this import exists".
+- **Evidence:** Runtime row 78 (different titles submitted, originals returned) and row 70; code `if (previous.tasks.length === tasks.length) return previous;`.
+- **Reproduction:** Bulk-create `{importKey:K, tasks:[A,B]}`, then `{importKey:K, tasks:[C,D]}`.
+- **Expected:** 409/422 "key reused with a different payload". **Actual:** Silent replay.
+- **Impact:** A client reusing keys loses action items without any error.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Store a canonical payload hash with the import and compare before replaying; distinct mismatch error.
+- **Verification:** Repeat the reproduction; expect 409/422 with a mismatch message.
+- **Confidence:** High.
+
+#### RT-005: ai-service validates requests with zod 3 while everything else uses zod 4
+- **Severity:** P3 · **Category:** Build/runtime consistency, test fidelity · **Module:** ai-service packaging, `packages/validation`
+- **Description:** The built shared validation under `services/ai-service/dist/packages/validation/` resolves `zod` to ai-service's nested copy 3.25.76 (a transitive dependency of `@langchain/*`). ai-service does not declare `zod`. Other services, dev mode and `npm test` use 4.6.7.
+- **Evidence:** `require.resolve('zod')` from the dist folder; `package-lock.json`; runtime error messages differ ("Required", "Expected number, received string") from other services' zod 4 messages.
+- **Reproduction:** Send a missing body or a string `topK` to the built ai-service.
+- **Expected:** One zod major everywhere. **Actual:** Built and tested code differ; the built copy is the one flagged by `npm audit` (not practically exploitable; see SEC-022).
+- **Impact:** Inconsistent errors; validation semantics can drift without any test failing.
+- **Root cause:** CONFIRMED (undeclared dependency; ISS-032).
+- **Remediation:** Declare `"zod": "^4.6.7"` in ai-service, or make `packages/validation` a workspace package; add a smoke test against `dist`.
+- **Verification:** `require.resolve('zod')` from ai-service dist resolves 4.x; messages match other services.
+- **Confidence:** High.
+
+#### RT-006: Invalid provider credentials reported as "unreachable"; `/health` stays healthy
+- **Severity:** P3 · **Category:** Operability / configuration validation · **Module:** `ai-service/src/utils/verify-pinecone.ts`; ai and document `/health`
+- **Description:** When Pinecone rejects the key at startup, the service logs "Could not verify the Pinecone index at startup; continuing" and starts; `/health` checks only Mongo and Redis. Voyage, Groq and Cloudinary key errors surface only per request.
+- **Evidence:** Runtime row 174 and the startup log.
+- **Reproduction:** Start ai-service with an invalid Pinecone key.
+- **Expected:** 401/403 is fatal or reported as degraded, distinct from a transient network error. **Actual:** Healthy while every upload, search and query fails.
+- **Impact:** A misconfigured deployment looks healthy to probes.
+- **Root cause:** CONFIRMED (catch-all treats every error as unreachable).
+- **Remediation:** Treat 401/403 as fatal at startup, or expose provider readiness in `/health`.
+- **Verification:** Bad key gives exit or degraded health.
+- **Confidence:** High.
+
+#### RT-008: Register limiter counts every request per IP; no `trust proxy`
+- **Severity:** P3 · **Category:** Availability / deployment · **Module:** api-gateway `rate-limit.middleware.ts`, `app.ts`
+- **Description:** Register is limited to 3 requests per hour per `req.ip`, counting 400 and 409 responses. Without `trust proxy`, every user behind a reverse proxy shares one IP: the site would allow 3 registrations per hour and share one login lockout bucket.
+- **Evidence:** Runtime rows 27-29 (409, 400 and 201 each consumed a slot; the 4th got 429).
+- **Reproduction:** Send four register requests from one IP within an hour.
+- **Expected:** A per-client limit meaningful behind a proxy. **Actual:** 3 per hour per egress IP.
+- **Impact:** Sign-up outages once deployed behind a proxy (topology unknown).
+- **Root cause:** CONFIRMED (behaviour); deployment impact SUSPECTED.
+- **Remediation:** Configure `trust proxy` for the deployment (after upgrading proxy-addr, SEC-022); consider counting only successful or failed registrations as intended.
+- **Verification:** Requests with `X-Forwarded-For` behind the configured proxy are keyed per client.
+- **Confidence:** Medium.
+
+#### SEC-004: Every service listens on 0.0.0.0 with permissive CORS; the gateway can be bypassed
+- **Severity:** P3 · **Category:** Architecture / exposure · **Module:** all `server.ts` (`app.listen(PORT)`); `document-service/app.ts:15-16`, `task-service/app.ts:16-17`, `ai-service/app.ts:12`
+- **Description:** Services bind every interface and accept direct traffic; only the gateway applies rate limits. Services still verify JWTs and membership.
+- **Evidence:** `netstat` showed `0.0.0.0` listeners; a direct call to document-service with a valid token returned 200 with no limiter; document-service reflects any `Origin`.
+- **Reproduction:** Call a service port directly.
+- **Expected:** Internal services bound to localhost or a private network. **Actual:** Directly reachable.
+- **Impact:** No limits on direct calls; SEC-002 reachable without the gateway. Depends on network exposure (no deployment config exists).
+- **Root cause:** CONFIRMED.
+- **Remediation:** `app.listen(PORT, process.env.HOST ?? "127.0.0.1")` for internal services; explicit `CORS_ORIGIN`; network policy in deployment.
+- **Verification:** `netstat` shows `127.0.0.1` for ports 5001 to 5006.
+- **Confidence:** High.
+
+#### SEC-007: Access tokens remain valid after logout and after reuse-triggered revocation
+- **Severity:** P3 · **Category:** Authentication / session · **Module:** `packages/shared/auth/authenticate.ts`; `auth.service.ts:168`, `:220-234`
+- **Description:** Access JWTs are stateless (15 min). Logout and reuse-triggered revocation delete only refresh records.
+- **Evidence:** After logout, `GET /api/auth/me` and `GET /api/workspaces` return 200 with the old access token (Agents 2 and 3).
+- **Reproduction:** Log in, log out, reuse the access token.
+- **Expected:** Revoked sessions stop promptly. **Actual:** Valid until expiry.
+- **Impact:** A stolen access token survives logout and the theft response.
+- **Root cause:** CONFIRMED.
+- **Remediation:** `sid`/`jti` in access tokens with a Redis denylist, or a per-user token version; shorter TTL (about 5 min).
+- **Verification:** After logout the old access token gets 401.
+- **Confidence:** High.
+
+#### SEC-008: Access and refresh tokens in localStorage, with no CSP (historical ISS-021)
+- **Severity:** P3 · **Category:** Token storage / client · **Module:** `frontend/src/store/auth.store.ts:85-94`; `api-gateway/src/app.ts:21-25`; `frontend/index.html`
+- **Description:** Any script on the frontend origin can read the 7-day refresh token; no CSP limits XSS impact. The original specification requires an httpOnly, Secure, SameSite=Strict cookie (REQ-004).
+- **Evidence:** Code as cited. No XSS sink found (answers render as plain text, ReactMarkdown without raw HTML, URL guard).
+- **Reproduction:** Inspect `localStorage` after login.
+- **Expected:** Refresh token in an httpOnly cookie scoped to the refresh route; access token in memory; strict CSP. **Actual:** Both tokens in `localStorage`.
+- **Impact:** A single XSS, including in a dependency, becomes 7-day account takeover.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Cookie transport with CSRF protection and CORS credentials (requires a deployment topology decision); CSP at the static host.
+- **Verification:** No tokens in `localStorage`; CSP header present.
+- **Confidence:** High.
+
+#### SEC-009: Account enumeration via register response and login timing
+- **Severity:** P3 · **Category:** Authentication · **Module:** `auth-service/src/services/auth.service.ts:37-41`, `:78-91`
+- **Description:** Register on an existing e-mail returns 409 "User already exists"; login runs bcrypt only when the user exists.
+- **Evidence:** Login average 23.8 ms (unknown e-mail) vs 1,076.6 ms (known e-mail, wrong password); absolute numbers inflated by tsx and contention, gap decisive.
+- **Reproduction:** Time logins for known and unknown e-mails.
+- **Expected:** Uniform responses and timing. **Actual:** Distinguishable.
+- **Impact:** Confirms which e-mails have accounts; amplified by SEC-003.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Compare against a dummy bcrypt hash when the user is absent; generic registration response or monitored rate limit.
+- **Verification:** Timing difference below 10%.
+- **Confidence:** High.
+
+#### SEC-011: RAG prompt injection; document text not isolated as untrusted (historical ISS-022)
+- **Severity:** P3 · **Category:** AI/RAG · **Module:** `ai-service/src/services/context.service.ts:17-29`, `prompts/rag.prompt.ts:2-39`
+- **Description:** Chunk text is interpolated between plain separators; the system prompt does not mark context as untrusted. Document text can forge `[Source N]` markers and headers. Citation audit checks only that marker numbers are in range.
+- **Evidence:** Static only; no LLM was called.
+- **Reproduction:** Upload a document containing instructions and fake source markers; ask a related question.
+- **Expected:** Context fenced with unique delimiters and labelled as data; instruction-hierarchy rule. **Actual:** Raw concatenation.
+- **Impact:** Within one workspace: manipulated answers and spoofed citations for other members. No tools and plain-text rendering, so no exfiltration path today.
+- **Root cause:** CONFIRMED (design).
+- **Remediation:** Randomised per-chunk tags; escape tag-like sequences and source markers in chunk text; explicit "never follow instructions in documents" rule; validate citations against the cited chunk.
+- **Verification:** Red-team prompt set.
+- **Confidence:** Medium (impact depends on the model).
+
+#### SEC-012: Deleted-document retrieval window, orphaned vectors, session retention
+- **Severity:** P3 · **Category:** Data integrity / RAG · **Module:** `ai-service/src/services/retrieval.service.ts:5-31`, `workers/embedding.worker.ts:66-83`, `services/ai-session.service.ts`
+- **Description:** Retrieval does not check document state, so a document is retrievable between the start of deletion and the vector delete (up to the 15 s cleanup timeout). If the worker's cleanup after an in-flight delete fails, vectors persist with only a log line. Nothing reconciles Pinecone against MongoDB. AI sessions keep answers derived from deleted documents.
+- **Evidence:** Code as cited. Real data: 1 of 19 distinct document ids cited in AI sessions no longer exists.
+- **Reproduction:** Delete a document during indexing with vector cleanup failing.
+- **Expected:** Retrieval drops matches whose document is missing; periodic reconciliation. **Actual:** As described.
+- **Impact:** "Deleted" content can still appear in answers; retention/compliance gap.
+- **Root cause:** CONFIRMED (design); Pinecone orphans SUSPECTED (no Pinecone access).
+- **Remediation:** Batch existence check on retrieved document ids; durable "vector cleanup pending" record; periodic reconciliation; redact sessions citing deleted documents.
+- **Verification:** Integration test: cleanup failure followed by a later successful sweep removes vectors.
+- **Confidence:** Medium-High.
+
+#### SEC-013: No Cloudinary compensation on upload failure; colliding public ids
+- **Severity:** P3 · **Category:** Data integrity / file · **Module:** `document.service.ts:18-39`, `:131-163`; `upload.middleware.ts:19-24`
+- **Description:** The asset is uploaded before `Document.create`; a database failure orphans a public asset. `public_id = Date.now()-originalname` can collide across tenants in the same millisecond, and the signed-upload default overwrites.
+- **Evidence:** Code. Real data: 0 shared public ids today.
+- **Reproduction:** Fail the database insert after a successful upload (not executed).
+- **Expected:** Random ids, `overwrite:false`, compensating destroy. **Actual:** Orphan and overwrite possible.
+- **Impact:** Orphaned public files; rare cross-tenant overwrite.
+- **Root cause:** CONFIRMED (code); collision not reproduced.
+- **Remediation:** UUID `public_id`, `overwrite:false`, try/catch with destroy, orphan sweep.
+- **Verification:** Unit test with a failing create asserts destroy is called.
+- **Confidence:** Medium.
+
+#### SEC-014: Every service connects to MongoDB as the root user with the default password
+- **Severity:** P3 · **Category:** Secrets / least privilege · **Module:** `services/*/.env` (real configuration)
+- **Description:** All five data services use the root user with `authSource=admin`.
+- **Evidence:** Boolean-only checks of the real configuration.
+- **Reproduction:** `db.getUsers()` per database (only root exists).
+- **Expected:** One user per service with `readWrite` on its own database. **Actual:** Shared root.
+- **Impact:** Database-per-service isolation (ADR 0003) is only logical; one compromised service compromises all databases; compounds SEC-001.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Per-service users; rotate root credentials (part of prerequisite 1).
+- **Verification:** Each service's credentials fail against other databases.
+- **Confidence:** High.
+
+#### SEC-022: Vulnerable production dependencies (historical ISS-026)
+- **Severity:** P3 · **Category:** Dependencies · **Module:** root `package-lock.json`
+- **Description:** 30 advisories: 2 critical (proxy-addr, handlebars), 14 high, 9 moderate, 5 low. Fixes available for all; shadcn and zod need major changes.
+- **Evidence:** `npm audit --omit=dev --json` run by Agents 1, 3 and 5 with identical totals. Agent 5 correction: the flagged zod 3.25.76 is on ai-service's runtime validation path (RT-005), contrary to Agent 3's statement; not practically exploitable.
+- **Reproduction:** `npm audit --omit=dev`.
+- **Expected:** No high/critical advisories in production dependencies. **Actual:** 16 high/critical.
+- **Impact:** No reachable exploit path identified; latent risk (proxy-addr becomes relevant if `trust proxy` is enabled, as RT-008 recommends).
+- **Root cause:** CONFIRMED.
+- **Remediation:** `npm audit fix`; upgrade express (proxy-addr) before enabling `trust proxy`; upgrade axios, react-router, @langchain packages; declare zod 4 in ai-service; re-run tests.
+- **Verification:** `npm audit --omit=dev` shows 0 critical/high, tests green.
+- **Confidence:** Medium (reachability is a static judgement).
+
+#### REQ-128: Workspace-scoped Q&A deep link ignores its workspace id
+- **Severity:** P3 (Agent 5 grading) · **Category:** Bug (routing) · **Module:** `frontend/src/routes/AppRouter.tsx:179`; `frontend/src/pages/SemanticSearchPage.tsx:29-30`
+- **Description:** `/app/workspace/:id/search` is declared and documented as the Q&A alias, but the page uses the stored `currentWorkspace` and never reads `:id`.
+- **Evidence:** Cited lines; no `useParams` (static, Agents 4 and 5).
+- **Reproduction:** With workspace A selected, open a link for workspace B.
+- **Expected:** Page switches to B or warns. **Actual:** Shows and queries A, labelled A, with no notice.
+- **Impact:** Shared links and bookmarks query the wrong workspace (within the user's own memberships).
+- **Root cause:** CONFIRMED (static).
+- **Remediation:** Read `:id`, verify membership, switch the current workspace or show an error.
+- **Verification:** Component/E2E test opening the link for a non-current workspace.
+- **Confidence:** High (not run in a browser).
+
+#### ISS-015: SSE generation is not aborted on client disconnect
+- **Severity:** P3 · **Category:** Reliability / cost · **Module:** `ai-service/src/controllers/query.controller.ts:73-103`, `services/grok.service.ts:97-126`
+- **Description:** No `close` handler; the LLM abort controller is not linked to the request. Generation continues (and the session is saved) after the client leaves. README:60 overstates this (ARC-012).
+- **Evidence:** Static; `docs/reference/api.md:405` acknowledges it.
+- **Reproduction:** Start a query and close the tab (needs a streaming LLM; not run).
+- **Expected:** Generation aborted on disconnect. **Actual:** Continues.
+- **Impact:** Wasted provider cost and rate budget.
+- **Root cause:** CONFIRMED (static).
+- **Remediation:** `req.on("close")` aborts the controller; decide whether partial answers are persisted.
+- **Verification:** Test with a fake streaming LLM asserting abort on disconnect.
+- **Confidence:** High.
+
+#### ISS-027: Retrieval does not compare the embedding model (residual)
+- **Severity:** P3 · **Category:** RAG correctness · **Module:** `ai-service/src/services/retrieval.service.ts:10-14`; `docs` ADR-0004 lines 26, 45
+- **Description:** Model is pinned and stored per vector, but queries do not filter or compare `embeddingModel`; ADR-0004's body still says voyage-4.
+- **Evidence:** Static.
+- **Reproduction:** Change `VOYAGE_MODEL` with existing vectors and query (not run).
+- **Expected:** Mismatched vectors excluded or refused. **Actual:** Silently mixed.
+- **Impact:** Silent retrieval degradation after a model change.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Metadata filter on `embeddingModel` or a startup refusal on mismatch; correct the ADR.
+- **Verification:** Unit test with mixed-model matches.
+- **Confidence:** High.
+
+#### ISS-028: No relevance threshold in retrieval (residual)
+- **Severity:** P3 · **Category:** RAG quality · **Module:** `ai-service/src/services/retrieval.service.ts:18-30`
+- **Description:** Query validation is fixed; topK matches are used regardless of score.
+- **Evidence:** Static; validation verified at runtime (rows 105-110).
+- **Reproduction:** Ask an off-topic question in a workspace with documents (needs live providers).
+- **Expected:** Low-score matches dropped; "no relevant documents" answer. **Actual:** Irrelevant chunks cited.
+- **Impact:** Misleading citations; wasted tokens.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Minimum score threshold calibrated on an evaluation set.
+- **Verification:** Unit test with low-score matches; evaluation set.
+- **Confidence:** High.
+
+#### ISS-029: Weak citation provenance (residual)
+- **Severity:** P3 · **Category:** RAG quality · **Module:** `context.service.ts:21`, `chunking.service.ts:13`, `vector-service.ts`
+- **Description:** UI resolves file names, but vectors carry no title/page metadata, the prompt labels sources by ObjectId, and page markers are stripped. Page-level citation is product scope (REQ-067).
+- **Evidence:** Static.
+- **Reproduction:** Inspect the prompt for any query.
+- **Expected:** Title and page in source metadata. **Actual:** ObjectId only.
+- **Impact:** README "source plus page" unmet; harder verification by users.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Store title and page in chunk metadata; label sources by title.
+- **Verification:** Unit test of chunk metadata.
+- **Confidence:** High.
+
+#### ISS-030: Meeting summarizer has no JSON mode and is not persisted (residual)
+- **Severity:** P3 · **Category:** AI robustness · **Module:** `ai-service/src/services/meeting-summarizer.service.ts`
+- **Description:** Normalisation and truncation handling are fixed; the LLM is not asked for JSON response mode; summaries are not stored (persistence is also scope REQ-085).
+- **Evidence:** Static plus fixture tests; runtime row 120 (502 with dummy key).
+- **Reproduction:** Not reproducible without a live LLM.
+- **Expected:** Provider JSON mode where supported. **Actual:** Free-form output parsed.
+- **Impact:** Occasional 502s on malformed output; summaries lost.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Enable `response_format` JSON where the provider supports it; persist summaries (scope decision).
+- **Verification:** Contract test against the provider.
+- **Confidence:** Medium.
+
+#### ISS-032: Shared code is not packaged; services rely on undeclared hoisted dependencies
+- **Severity:** P3 · **Category:** Build / packaging · **Module:** `packages/shared`, service `package.json` files
+- **Description:** `packages/shared` has no `package.json` and is imported by deep relative paths. auth-service lacks express/cors/helmet/morgan/dotenv declarations; workspace-service lacks express/mongoose/dotenv; gateway/task/ai lack jsonwebtoken; version drift (dotenv 16/17, ioredis 5/6). RT-005 is a direct consequence.
+- **Evidence:** Static reading of the package files; RT-005 runtime.
+- **Reproduction:** Install a single service in isolation (`npm ci -w <svc>`), then start it (not run).
+- **Expected:** Each service declares what it imports. **Actual:** Relies on hoisting.
+- **Impact:** Isolated installs and per-service Docker images fail; version skew between built and tested code.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Make `packages/shared` and `packages/validation` workspace packages; declare dependencies; align versions.
+- **Verification:** Isolated install and start of each service succeeds.
+- **Confidence:** High.
+
+#### ISS-043: Unbounded list endpoints, no pagination
+- **Severity:** P3 · **Category:** Scalability · **Module:** `document.service.ts:201-212`, `task.service.ts:364-386`, `board.service.ts:31-37`; AI sessions capped at 20
+- **Description:** Lists return every row; AI history is hard-capped at 20 with no paging.
+- **Evidence:** Static.
+- **Reproduction:** Create thousands of tasks and list them (not run).
+- **Expected:** Cursor pagination with indexes. **Actual:** Full scans.
+- **Impact:** Latency and memory growth with data size.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Cursor pagination plus supporting indexes; `meta` in the envelope.
+- **Verification:** API tests for page size and cursor.
+- **Confidence:** High.
+
+#### ISS-044: Gateway health is static; no request IDs (residual)
+- **Severity:** P3 · **Category:** Operability · **Module:** `api-gateway/src/app.ts:150-155`
+- **Description:** Services report Mongo/Redis in `/health`; the gateway returns a static 200; no request-ID propagation; structured logging only in document-service.
+- **Evidence:** Runtime row 142 (gateway 200 while Redis down).
+- **Reproduction:** Stop Redis; `GET /health` on the gateway.
+- **Expected:** Readiness reflects the limiter store and upstreams; `X-Request-ID` propagated. **Actual:** Static.
+- **Impact:** Probes cannot detect a degraded gateway; no cross-service log correlation.
+- **Root cause:** CONFIRMED.
+- **Remediation:** Gateway readiness endpoint; request-ID middleware propagated to services and logs.
+- **Verification:** Health shows Redis down; logs share a request id.
+- **Confidence:** High.
+
+#### ISS-051: Frontend lint not enforced; TypeScript project duplication
+- **Severity:** P3 · **Category:** Code quality · **Module:** `frontend/`, `frontend/tsconfig.node.json`
+- **Description:** ESLint reports 42 problems (38 errors, 4 warnings; mostly `no-explicit-any` and React hooks rules), not gated. `tsconfig.node.json` includes `src` instead of `vite.config.ts` and shares a build-info file with `tsconfig.app.json`. notification-service is not typechecked.
+- **Evidence:** `npm run lint -w frontend` exit 1 (R).
+- **Reproduction:** Run the lint command.
+- **Expected:** Lint gated or ratcheted in CI. **Actual:** Not gated.
+- **Impact:** Quality drift; several errors are in dead files (ARC-009).
+- **Root cause:** CONFIRMED.
+- **Remediation:** Fix or baseline the 42 problems; add a CI lint step; correct `tsconfig.node.json`.
+- **Verification:** CI lint job green.
+- **Confidence:** High.
+
+### 7.7 P4 findings
+
+#### ARC-008: ai-service `/health` reports 503 when Redis is down although its HTTP API does not need Redis
+- **Severity:** P4 · **Category:** Operational · **Module:** `ai-service/src/routes/health.routes.ts:13-16`
+- **Description:** Liveness and worker readiness are combined. **Evidence:** cited lines; runtime row 141. **Reproduction:** stop Redis, `GET /health`. **Expected:** 200 with `redis:"down"` or separate readiness. **Actual:** 503.
+- **Impact:** An orchestrator would evict a working Q&A API during a Redis blip. **Root cause:** CONFIRMED. **Remediation:** split liveness/readiness. **Verification:** Redis down gives 200 liveness. **Confidence:** High.
+
+#### ARC-009: Dead code with maintenance risk
+- **Severity:** P4 · **Category:** Maintainability · **Module:** frontend, packages, notification-service
+- **Description:** Unused wizard components (collect invite e-mails that are never sent), three dashboard mock cards, `MathMarkdown.tsx`, `App.css`, assets, `packages/shared-config`, 0-byte notification files, `verifyPineconeIndex`. **Evidence:** grep shows 0 importers. **Reproduction:** grep. **Expected:** deleted or wired. **Actual:** present.
+- **Impact:** Lint noise; misleading building blocks. **Root cause:** CONFIRMED. **Remediation:** delete or wire up. **Verification:** grep and build. **Confidence:** High.
+
+#### ARC-010: Deprecated APIs in use
+- **Severity:** P4 · **Category:** Dependency hygiene · **Module:** `task-service/src/services/board.service.ts:69`, `task.service.ts:481`
+- **Description:** Mongoose `new: true` deprecated (5 warnings per run); DEP0060 `util._extend` from the proxy chain. **Evidence:** test run warnings. **Reproduction:** `npm test`. **Expected:** no deprecation warnings. **Actual:** warnings.
+- **Impact:** Breaks on a future major. **Root cause:** CONFIRMED. **Remediation:** `returnDocument: "after"`. **Verification:** clean test log. **Confidence:** High.
+
+#### ARC-011: Single 1.56 MB JavaScript bundle
+- **Severity:** P4 · **Category:** Performance · **Module:** frontend build
+- **Description:** KaTeX, pdf.js and react-markdown are eagerly bundled. **Evidence:** build output 1,561.74 kB (gzip 459.65 kB), Vite warning. **Reproduction:** `npm run build -w frontend`. **Expected:** route-level chunks. **Actual:** one chunk.
+- **Impact:** Slow first load. **Root cause:** CONFIRMED. **Remediation:** `lazy()` for the PDF viewer, meeting summarizer, Q&A page. **Verification:** chunk sizes. **Confidence:** High.
+
+#### ARC-012: README claims verified SSE "abort handling"
+- **Severity:** P4 · **Category:** Documentation accuracy · **Module:** `ResearchMind_readme.md:60`
+- **Description:** Reads as client-abort support; only gateway end-on-upstream-abort exists (ISS-015 open). **Evidence:** README:60 vs `docs/reference/api.md:405`, `docs/architecture/security.md:241`. **Reproduction:** read. **Expected:** accurate wording. **Actual:** overstated.
+- **Impact:** Misleading status. **Root cause:** CONFIRMED. **Remediation:** reword. **Verification:** docs review. **Confidence:** High.
+
+#### ARC-013: Numeric LLM timeout settings not validated
+- **Severity:** P4 · **Category:** Configuration robustness · **Module:** `ai-service/src/services/grok.service.ts:8-20`, `meeting-summarizer.service.ts:156`
+- **Description:** `Number(env)` of a non-numeric value yields `NaN`; Node treats a `NaN` timer as 1 ms, so the idle watchdog would abort every stream. **Evidence:** static; listed in `docs/architecture/security.md:250`. **Reproduction:** set `LLM_STREAM_IDLE_TIMEOUT_MS=abc` (not run). **Expected:** bounded parse with defaults. **Actual:** `NaN`.
+- **Impact:** Misconfiguration breaks all streams. **Root cause:** CONFIRMED (static). **Remediation:** parse with bounds as `refreshReuseGraceMs` does. **Verification:** unit test. **Confidence:** Medium.
+
+#### RT-007: Provider errors leak into logs and the user-visible `embeddingError`
+- **Severity:** P4 · **Category:** Security hygiene / information exposure · **Module:** document-service upload controller (`console.error("Cloudinary upload failed:", storageError)`), ai-service LLM error logging, worker `describeFailure`
+- **Description:** A rejected Cloudinary key is echoed in logs (identifier, not the secret; only when rejected); LLM SDK errors dump provider headers including `set-cookie`; raw provider reasons are stored in `embeddingError` and shown to all members.
+- **Evidence:** Agent 2 and Agent 5 logs show only dummy key identifiers; Agent 5 boolean scan of the user's existing git-ignored logs found none of the 19 credential values and no tokens; runtime row 129. **Reproduction:** upload with a bad Cloudinary key; read the log. **Expected:** redacted logs; generic user reason. **Actual:** raw errors.
+- **Impact:** Credential identifiers and internal details exposed. **Root cause:** CONFIRMED. **Remediation:** log `http_code` and name only; store a user-safe reason. **Verification:** grep logs and API responses after repeating the tests. **Confidence:** High.
+
+#### RT-009: auth-service holds an unused Redis connection and floods its log during outages
+- **Severity:** P4 · **Category:** Operability · **Module:** `auth-service/src/config/redis.ts`
+- **Description:** No auth route uses Redis. **Evidence:** 129 of 173 log lines were Redis errors during outage tests. **Reproduction:** stop Redis. **Expected:** no client, or one log per outage. **Actual:** log flood.
+- **Impact:** Noise. **Root cause:** CONFIRMED. **Remediation:** remove the client. **Verification:** quiet log during outage. **Confidence:** High.
+
+#### RT-010: A never-indexed document cannot be deleted while the vector store is unavailable
+- **Severity:** P4 · **Category:** Resilience (design trade-off) · **Module:** `document.service.ts` delete path; `vector-cleanup.client.ts`
+- **Description:** Delete always calls vector cleanup, so a document that was never claimed returns 503 and rolls back when Pinecone is unavailable. **Evidence:** runtime rows 137-139. **Reproduction:** delete with a dummy Pinecone key. **Expected:** skip cleanup when `embeddingAttempts` and `claimSequence` are 0. **Actual:** 503.
+- **Impact:** Minor; fail-safe and truthful. **Root cause:** CONFIRMED. **Remediation:** skip cleanup for never-claimed documents. **Verification:** integration test. **Confidence:** Medium (on whether to change it).
+
+#### RT-011: `POST /api/ai/search` returns a generic 500 for provider failures
+- **Severity:** P4 · **Category:** Error mapping · **Module:** `ai-service/src/controllers/query.controller.ts` (`searchHandler`)
+- **Description:** The SSE path and summarize return truthful 502/SSE errors for the same failure. **Evidence:** runtime row 114. **Reproduction:** search with a dummy Voyage key. **Expected:** 502/503 with the SSE message. **Actual:** 500.
+- **Impact:** Low (frontend does not call it). **Root cause:** CONFIRMED. **Remediation:** map retrieval failures. **Verification:** route test. **Confidence:** High.
+
+#### SEC-015: CORS wildcard at the gateway and origin reflection in services
+- **Severity:** P4 · **Category:** Headers / CORS · **Module:** `api-gateway/src/app.ts:20`; auth, ai, document, task `app.ts`
+- **Description:** `cors()` wildcard; `origin: true` when `CORS_ORIGIN` is unset (unset in the real configuration). **Evidence:** `ACAO: *` at the gateway; arbitrary origin reflected by document-service. **Reproduction:** send an `Origin` header. **Expected:** allow-list. **Actual:** any origin.
+- **Impact:** Low with bearer tokens; significant if cookies are adopted (SEC-008). **Root cause:** CONFIRMED. **Remediation:** explicit allow-list. **Verification:** foreign origin not reflected. **Confidence:** High.
+
+#### SEC-016: Swagger UI publicly served
+- **Severity:** P4 · **Category:** Information exposure · **Module:** `api-gateway/src/app.ts:28`, `document-service/app.ts:21`, `task-service/app.ts:22`
+- **Description:** `/api-docs/` is public and partly stale (missing several routes). **Evidence:** `GET /api-docs/` 200 without authentication. **Reproduction:** open it. **Expected:** disabled in production or authenticated. **Actual:** public.
+- **Impact:** Reconnaissance. **Root cause:** CONFIRMED. **Remediation:** environment flag or auth. **Verification:** 404/401 in production mode. **Confidence:** High.
+
+#### SEC-017: Security headers incomplete
+- **Severity:** P4 · **Category:** Headers · **Module:** `workspace-service/src/app.ts` (no helmet); gateway CSP disabled
+- **Description:** `x-powered-by: Express` passes through the gateway; no CSP. **Evidence:** response headers. **Reproduction:** `GET /api/workspaces`. **Expected:** helmet everywhere; header stripped. **Actual:** missing.
+- **Impact:** Fingerprinting. **Root cause:** CONFIRMED. **Remediation:** helmet in workspace-service; strip header at the gateway. **Verification:** headers absent. **Confidence:** High.
+
+#### SEC-018: `INTERNAL_SERVICE_TOKEN` missing in auth and workspace configuration; member e-mails visible to all members
+- **Severity:** P4 · **Category:** Configuration / privacy · **Module:** real `.env`; `workspace.service.ts:114-163`
+- **Description:** With the token missing, member hydration degrades silently (names "Researcher", empty e-mails). With it configured, every member sees every other member's e-mail. **Evidence:** boolean configuration check; runtime row 39 with the token configured. **Reproduction:** `GET /api/workspaces/:id/members`. **Expected:** token configured in all four services; e-mails shown only where needed. **Actual:** missing; e-mails to all members.
+- **Impact:** Unreadable member lists today; privacy question once fixed. **Root cause:** CONFIRMED. **Remediation:** configure the token; decide e-mail visibility. **Verification:** names returned; policy documented. **Confidence:** High.
+
+#### SEC-019: JWT hardening gaps (includes historical ISS-049)
+- **Severity:** P4 · **Category:** Authentication · **Module:** `packages/shared/config/secrets.ts`, `auth-service/src/utils/jwt.ts:29-38`, `auth.service.ts:19-20`, all `authenticate` implementations
+- **Description:** No `iss`/`aud`/`typ`; access/refresh secret inequality not enforced; tokens without a well-formed `userId` accepted; `REFRESH_TOKEN_EXPIRES` ignored by the stored 7-day record; several near-duplicate `authenticate` copies. **Evidence:** static; a signed token without `userId` got 200 with 0 rows (no leak). **Reproduction:** sign such a token with the secret. **Expected:** rejected. **Actual:** accepted.
+- **Impact:** Low (requires the secret); defence in depth. **Root cause:** CONFIRMED. **Remediation:** typed/audience claims, secret inequality check at boot, 24-hex `userId` validation, derive stored expiry, consolidate middleware. **Verification:** unit tests. **Confidence:** High.
+
+#### SEC-020: File signature check accepts polyglots
+- **Severity:** P4 · **Category:** File validation · **Module:** `document-service/src/utils/file-signature.ts:17-25`
+- **Description:** `%PDF-` anywhere in the first 1 KB passes. **Evidence:** an HTML/PDF polyglot reached the storage step. **Reproduction:** upload such a file. **Expected:** `%PDF-` at offset 0; DOCX structure check before parsing. **Actual:** accepted.
+- **Impact:** Low (served from Cloudinary's domain). **Root cause:** CONFIRMED. **Remediation:** stricter signature checks. **Verification:** polyglot rejected with 415. **Confidence:** High.
+
+#### SEC-021: No rate limiting on `/api/auth/refresh`, `/me`, `/logout`
+- **Severity:** P4 · **Category:** Abuse · **Module:** `api-gateway/src/app.ts`
+- **Description:** `/api/auth` sits outside the general limiter. **Evidence:** 30 invalid refresh attempts, 30 x 401, no 429. **Reproduction:** repeat refresh calls. **Expected:** per-IP limit. **Actual:** none.
+- **Impact:** Low (high-entropy tokens); unthrottled load on auth-service. **Root cause:** CONFIRMED. **Remediation:** apply a per-IP limiter to `/api/auth/*`. **Verification:** 429 after the limit. **Confidence:** High.
+
+#### SEC-023: All members can read every member's AI question history
+- **Severity:** P4 · **Category:** Privacy · **Module:** `ai-service/src/services/ai-session.service.ts:34-36`
+- **Description:** Sessions endpoint returns the last 20 sessions of the whole workspace. **Evidence:** static. **Reproduction:** list sessions as another member. **Expected:** per-user filter unless shared history is intended. **Actual:** shared.
+- **Impact:** Privacy expectation mismatch. **Root cause:** CONFIRMED. **Remediation:** filter by `userId` or document the choice. **Verification:** route test. **Confidence:** High.
+
+#### SEC-024: Legacy data hygiene
+- **Severity:** P4 · **Category:** Data integrity · **Module:** user's MongoDB/Redis data; `services/document-service/uploads/`
+- **Description:** 135 of 221 invite codes come from a legacy generator (2 are 13 characters) and cannot be rotated; unused collections (`workspacemembers` with 2 records, an empty `workspaces` in the document DB); stale temp upload files on disk; a Redis key `test` with no TTL. **Evidence:** aggregate counts. **Reproduction:** aggregate queries. **Expected:** clean data. **Actual:** as listed.
+- **Impact:** Low. **Root cause:** CONFIRMED (counts); legacy generator origin SUSPECTED. **Remediation:** rotate codes once SEC-010 exists; drop unused collections after confirmation; delete stale uploads; use an OS temp directory. **Verification:** counts return 0. **Confidence:** High.
+
+#### SEC-025: Login limiter design: per-IP only, fails open, no proxy awareness
+- **Severity:** P4 · **Category:** Authentication / abuse · **Module:** `api-gateway/src/middlewares/rate-limit.middleware.ts:88`, `:100-112`
+- **Description:** Keyed only by IP, skips successful requests (no per-account lockout); no limiting while Redis is down; behind a proxy every user shares one bucket. **Evidence:** static plus RT-001 runtime. **Reproduction:** distributed guessing across IPs (not run). **Expected:** account-keyed throttle; auth limiters fail closed. **Actual:** IP only, fail open.
+- **Impact:** Distributed guessing not slowed. **Root cause:** CONFIRMED. **Remediation:** account-keyed limiter in auth-service; fail closed for auth limiters; correct `trust proxy`. **Verification:** tests per account. **Confidence:** High.
+
+#### REQ-082: 50,000-character meeting notes conflict with the 100 KB JSON body limit
+- **Severity:** P4 · **Category:** Validation boundary · **Module:** `packages/validation/schemas/ai.schema.ts:40-41`; `ai-service/src/app.ts:14`
+- **Description:** The documented limit is 50,000 characters; `express.json()` keeps the 100 KB default; 50,000 characters of 3-byte UTF-8 text is about 150 KB. **Evidence:** cited lines; runtime row 125 (413 above 100 KB). **Reproduction:** submit 40,000 characters of Tamil or CJK text. **Expected:** accepted. **Actual:** 413.
+- **Impact:** Non-English users rejected inside the documented limit. **Root cause:** CONFIRMED (by composition). **Remediation:** raise the body limit for this route to about 200 KB. **Verification:** route test with multi-byte text. **Confidence:** High.
+
+#### ISS-008: `docs` still git-ignored (residual)
+- **Severity:** P4 · **Category:** Repository hygiene · **Module:** `.gitignore:40`
+- **Description:** Existing docs are force-added; new files under `docs/` are silently untracked. **Evidence:** `.gitignore:40`. **Reproduction:** create a file under `docs/`; `git status` does not show it. **Expected:** docs tracked. **Actual:** ignored.
+- **Impact:** New documentation can be lost. **Root cause:** CONFIRMED. **Remediation:** remove the `docs` entry. **Verification:** `git check-ignore` returns nothing. **Confidence:** High.
+
+#### ISS-031: Documentation residuals
+- **Severity:** P4 · **Category:** Documentation · **Module:** `docs/` ADR-0004, `ResearchMind_readme.md`
+- **Description:** ADR-0004 lines 26, 45 (voyage-4), 49, 61 (gateway membership claim), 63 (33-phase test suite) remain under correction notes; README:2231 mentions Joi; README:2115-2141 compose example uses `./apps/*` and ports 3000 to 3006; README:60 (ARC-012). **Evidence:** static. **Reproduction:** read. **Expected:** accurate docs. **Actual:** residual inaccuracies.
+- **Impact:** Misleads readers. **Root cause:** CONFIRMED. **Remediation:** edit the cited lines. **Verification:** docs review. **Confidence:** High.
+
+#### ISS-039: Client registration validation weaker than server
+- **Severity:** P4 · **Category:** UX / validation drift · **Module:** `frontend/src/lib/validations/auth.schema.ts:15-34` vs `packages/validation/schemas/auth.schema.ts:3-16`
+- **Description:** Client name `min(1)`, password length only; server name `min(2)` plus letter and digit rules. **Evidence:** static. **Reproduction:** register with a one-letter name. **Expected:** same rules client-side. **Actual:** server rejects late.
+- **Impact:** Late errors. **Root cause:** CONFIRMED. **Remediation:** share or mirror the schema. **Verification:** unit test. **Confidence:** High.
+
+#### ISS-041: No machine-readable error codes in the response envelope
+- **Severity:** P4 · **Category:** API contract · **Module:** `packages/validation/validation.ts:15-19`
+- **Description:** README now documents the real envelope; `error.code` and `meta` remain absent (documented design choice; REQ-020 PARTIAL). **Evidence:** static. **Reproduction:** any 400. **Expected (original spec):** `{error:{code,message,field}}`. **Actual:** `{success:false,message}`.
+- **Impact:** Clients match on message text. **Root cause:** CONFIRMED. **Remediation:** add codes when external clients need them. **Verification:** contract tests. **Confidence:** High.
+
+#### ISS-046: No cross-service lifecycle for workspace or user deletion (product scope)
+- **Severity:** P4 (scope tracking) · **Category:** Product scope (S8) · **Module:** workspace-service, ai-service
+- **Description:** No workspace or user delete; no Pinecone namespace cleanup. **Evidence:** static. **Reproduction:** n/a. **Expected (spec):** delete with data and namespace purge (REQ-034). **Actual:** absent.
+- **Impact:** Future orphans when deletion is built. **Root cause:** CONFIRMED (not built). **Remediation:** design with S8. **Verification:** integration test of the purge. **Confidence:** High.
+
+#### ISS-047: Duplicated verifiers and guards (residual)
+- **Severity:** P4 · **Category:** Maintainability · **Module:** `packages/shared/auth/authenticate.ts`, gateway, auth-service and workspace-service middlewares; `document-service/src/middlewares/internal-auth.middleware.ts`
+- **Description:** 4 JWT verifiers, 2 internal-token guards, unused auth Redis (RT-009), empty notification stubs. **Evidence:** static. **Reproduction:** grep. **Expected:** one shared implementation. **Actual:** duplicates.
+- **Impact:** Divergent fixes (for example SEC-019). **Root cause:** CONFIRMED. **Remediation:** consolidate on the shared middleware. **Verification:** grep shows one implementation. **Confidence:** High.
+
+#### ISS-048: Roadmap features not built (product scope)
+- **Severity:** P4 (scope tracking) · **Category:** Product scope (S1 to S15) · **Module:** whole product
+- **Description:** No AI agent, chat, notifications, analytics, literature review, report drafter or deployment. **Evidence:** section 19 (71 NOT IMPLEMENTED requirements). **Reproduction:** n/a. **Expected (spec):** built. **Actual:** absent.
+- **Impact:** Scope gap versus the README; not a defect. **Root cause:** CONFIRMED (not built). **Remediation:** product planning (section 25.6). **Verification:** per-feature acceptance. **Confidence:** High.
+
+#### ISS-050: Miscellaneous security hygiene (residual)
+- **Severity:** P4 · **Category:** Hygiene · **Module:** `auth-service/src/utils/hash.ts:3`, `frontend/src/components/documents/PdfViewerModal.tsx:17`, `packages/validation/schemas/workspace.schema.ts:5-10`
+- **Description:** bcrypt cost 10; pdf.js worker loaded from unpkg at runtime; workspace name has no maximum length. (Other parts are tracked as SEC-009, SEC-016, SEC-019, SEC-023.) **Evidence:** static. **Reproduction:** read. **Expected:** cost 12, self-hosted worker, bounded names. **Actual:** as listed.
+- **Impact:** Minor. **Root cause:** CONFIRMED. **Remediation:** adjust each item. **Verification:** unit tests and build. **Confidence:** High.
+
+---
+
+## 8. Security assessment
+
+**Overall:** the application layer is substantially stronger than the infrastructure around it. Gate 2 (Security) is **FAIL** because of one live P0 exposure and two P1 defects.
+
+**Controls that hold (runtime-verified by Agents 2, 3 and 5)**
+- JWT: HS256 pinned; `alg=none`, HS512 with the same key, expired, wrong-key and refresh-as-access tokens all rejected (401) at gateway, auth, workspace, document and task services.
+- Workspace isolation: 21 cross-tenant probes returned 403, 404 or 400; by-id routes check the stored record's workspace.
+- Internal routes: require a constant-time shared token; unreachable through the gateway with dot-segment and encoded traversal (404).
+- Mass assignment: forged server-owned fields are ignored; `{$ne:null}` payloads rejected by zod; Express 5's simple query parser neutralises `?field[$ne]=x`.
+- Refresh rotation: atomic; 6 concurrent refreshes of one token gave exactly one success; reuse within grace keeps sessions, reuse after grace revokes the family.
+- Deletion: ordered and compensating; 4 concurrent deletes gave one 200 and three 404s.
+- Secrets: services refuse to start with weak or known-insecure secrets and name only the variable (runtime row 171). The real `.env` secrets are at least 32 characters, not known-weak, and consistent across services (boolean checks only).
+- Uploads: extension, MIME distrust, magic bytes, empty and oversize files handled (runtime rows 81-91); multer reduced a path-traversal filename to its basename.
+- No XSS sink found in the frontend (plain-text answers, ReactMarkdown without raw HTML, URL guard before `window.open`).
+
+**Problems, by severity**
+
+| ID | Severity | Summary |
+|---|---|---|
+| SEC-001 | P0 | Real infrastructure on all interfaces with default credentials; Public network profile; Docker Allow rule |
+| SEC-002 | P1 | DOCX parse amplification crashes document-service |
+| SEC-003 | P1 | `//` bypasses login, register and AI limiters |
+| SEC-005 | P2 | Public Cloudinary assets (67 of 67 real documents) |
+| SEC-006 | P2 | Document text through unauthenticated Redis; worker trusts it |
+| SEC-010 | P2 | No roles, removal or invite rotation |
+| SEC-004, 007, 008, 009, 011, 012, 013, 014, 022 | P3 | Direct service exposure, stateless revocation, localStorage tokens, enumeration, prompt injection, deleted-document window, Cloudinary compensation, root DB user, dependencies |
+| SEC-015 to 021, 023 to 025, RT-007 | P4 | CORS, Swagger, headers, config/privacy, JWT hardening, polyglots, unthrottled refresh, shared AI history, legacy data, limiter design, log leakage |
+
+**Real infrastructure (aggregate, read-only):** databases `researchmind-ai` (aisessions 43), `researchmind-auth` (users 260, refreshtokens 0), `researchmind-document` (documents 67), `researchmind-task` (tasks 285, taskactivities 371, boards 160), `researchmind-workspace` (workspaces 221). 254 of 260 accounts match test-like patterns. Redis 7.4.9 with empty `requirepass` and protected mode off. Credentials equal compose defaults. No values were printed.
+
+**Disagreements applied:** SEC-003 P2 to P1; SEC-001 confidence raised to High; SEC-002 magnitude restated; SEC-022 zod reachability corrected (section 7.2).
+
+---
+
+## 9. Authentication and authorization assessment
+
+**Authentication**
+
+| Control | Result | Evidence |
+|---|---|---|
+| Register, login, `/me` over HTTP | PASS | Runtime rows 1-8; wrong password and unknown e-mail both 401 "Invalid credentials" |
+| Algorithm pinning and expiry | PASS | Agent 3 probes; rows 10-11, 159-161 (5 s access token expired, 401) |
+| Refresh rotation and reuse detection | PASS | Rows 12-17; Agent 3 six-way race |
+| Logout scoped to caller | PASS | Rows 19-24 (another user's bearer cannot revoke a token) |
+| Access token after logout/revocation | Valid until expiry | Row 18; SEC-007 |
+| Brute-force and registration limits | PASS on canonical paths; **bypassed with `//`** | Rows 27-29; SEC-003; refresh/me/logout unthrottled (SEC-021) |
+| Account enumeration | Present | SEC-009 (409 on register; 24 ms vs 1,077 ms login timing) |
+| Password storage | bcrypt cost 10 | 0 of 260 real hashes non-bcrypt; ISS-050 |
+| Token storage in the client | `localStorage`, no CSP | SEC-008 / REQ-004 NOT IMPLEMENTED |
+| Client refresh coordinator and cross-tab sync | Module tests PASS; browser NOT VERIFIED | `client-auth-refresh.test.ts` |
+
+**Authorization**
+
+| Control | Result | Evidence |
+|---|---|---|
+| Membership check (document, task, ai) | PASS: 400 malformed, 403 non-member, 503 when unavailable (fail closed) | Rows 92, 99-103, 111-112, 165-167; `workspace-membership.test.ts` |
+| Workspace endpoints for non-members | PASS: 404 | Rows 40-41 |
+| Cross-workspace task/board ids | PASS: 400/404 | Rows 52, 62-65 |
+| Assignee must be a member | PASS | Rows 50-51, 71 |
+| Roles, removal, invite rotation | ABSENT | SEC-010 (any member deletes any document or board) |
+| Token without `userId` | Accepted (no data returned) | SEC-019 / ISS-049 |
+| Member e-mails visible to all members | By design | SEC-018 |
+| AI history visible to all members | By design | SEC-023 |
+
+---
+
+## 10. Data integrity assessment
+
+Gate 3 (Data integrity) is **CONDITIONAL PASS**.
+
+**Verified mechanisms**
+- Document deletion: soft delete, vector delete, Cloudinary destroy, hard delete, with rollback (503) when vector cleanup fails (runtime rows 137-139; Agent 3 with a cleanup stub: 3 calls, correct internal token).
+- Embedding jobs: atomic claim with fencing (`claimSequence`), at most 3 attempts, 15-minute stale-claim window, 5-minute sweep; forged cross-workspace jobs refused; manual reindex resets attempts (rows 126-136, 184).
+- Bulk import: all-or-nothing with compensation; unique `(workspaceId, importKey, importIndex)`; three concurrent imports with one key produced exactly 2 tasks (rows 66-69).
+- Join: atomic, case-insensitive, 409 for existing members including concurrent attempts (rows 33-35).
+- Subtask cycles rejected (rows 57-58); parent delete removes subtasks (rows 75-76).
+
+**Real data (aggregate):** 67 of 67 documents `indexed`; 0 with `deletedAt`, 0 stuck in `indexing`, 0 exhausted, 0 empty text; 0 shared `cloudinaryPublicId`; 0 orphan documents or tasks; 0 duplicate e-mails (case-insensitive); 0 duplicate member ids; 0 workspaces whose owner is not a member; 0 non-hex assignee ids; 1 of 19 distinct document ids cited by AI sessions no longer exists; Redis AOF off (queue loss on restart is recovered by the sweep after 10 minutes while retries remain).
+
+**Open items:** RT-004 (silent replay of a different payload), SEC-006 (trusted queue text), SEC-012 (deleted-document retrieval window, orphaned vectors, stale citation), SEC-013 (Cloudinary compensation), ARC-001 (phantom documents), SEC-024 (legacy invite codes, unused collections), ISS-001 not verified on a live Pinecone index.
+
+---
+
+## 11. Document processing and RAG assessment
+
+**Ingestion (runtime with dummy Cloudinary/Voyage/Pinecone):** every rejection path returned the documented status: 415 type, 415 MIME-only, 415 spoofed PDF, 422 spoofed DOCX, 422 empty, 422 corrupt PDF, 413 oversize, 400 field/file/workspace errors, 403 non-member. Valid PDF and DOCX uploads reached storage and returned 502 "File storage is temporarily unavailable" with no record created and no temp file left (rows 79-94). A Cloudinary 401 took 10.2 s on the first call.
+
+**Parser robustness:** SEC-002 (P1). DOCX expansion is unbounded and in-process; crafted PDFs untested. SEC-020 polyglots (P4).
+
+**Embedding pipeline (runtime):** worker claimed and failed an empty-text document truthfully; a job with a dummy Voyage key failed with the provider reason (RT-007: raw reason shown to members); retry limit enforced; sweep re-queued a failed document; the worker resumed BLPOP after Redis recovery within about 1 s. Two concurrent reindex requests both returned 200 and caused two processing runs (INFO; harmless given claims). Not verified: chunking quality, Voyage batching and retries against the real API, Pinecone upsert and delete-by-metadata. Open: ISS-037 (no provider timeout, P2), SEC-006 (text in queue, P2), ARC-001.
+
+**RAG:** namespace = `workspaceId`, validated as 24-hex and used only after the membership check; vector delete scoped by namespace plus `documentId` filter. No relevance threshold (ISS-028), model not compared at query time (ISS-027), weak provenance (ISS-029), prompt injection (SEC-011), deleted-document window (SEC-012). The chunker, citation validator and the SSE success path have no tests (REQ-057, REQ-065).
+
+**Live provider status:** Voyage, Pinecone and Cloudinary NOT VERIFIED. The happy path (upload, indexed, cited answer, session saved) is BLOCKED without real providers.
+
+---
+
+## 12. AI research assessment
+
+| Capability | State | Evidence |
+|---|---|---|
+| Q&A request validation | PASS (runtime) | Rows 105-110 (whitespace, 2001 chars, malformed id, topK 11, string topK, missing body all 400 JSON before any stream) |
+| SSE error path | PASS (runtime) | Row 104: `start` then `error` with a truthful message and `partial:false`; no fabricated tokens; no session persisted (row 117) |
+| SSE truncation at the gateway | PASS (runtime) | Row 157: gateway ended the client response 1.5 s after upstream death, no terminal event |
+| SSE success path (sources, tokens, done, session) | NOT VERIFIED | No live or fake LLM run |
+| Client stream parsing and truncation detection | Module tests PASS; browser NOT VERIFIED | `client-ai-stream.test.ts` |
+| Client disconnect | Generation not aborted | ISS-015 |
+| Answer rendering | Raw Markdown/LaTeX shown | ARC-002 |
+| Citations | Range-checked only; not semantically verified | SEC-011, ISS-029 |
+| Session history | Workspace-wide, last 20, no pagination | SEC-023, ISS-043 |
+| `/api/ai/search` | Generic 500 on provider failure (unused by the frontend) | RT-011 |
+| Workspace deep link | Ignores `:id` | REQ-128 |
+| Runtime validator | zod 3 in the built ai-service | RT-005 |
+| Cost controls | 30/h query and search, 20/h summarize per user; bypassable | SEC-003 |
+| Meeting summarizer | 502 with dummy LLM in 358 ms; 400 for short notes; 413 above 100 KB | Rows 120-125; ISS-030; REQ-082 |
+| AI agent, literature review, report drafter, onboarding brief | NOT IMPLEMENTED | Product scope S1 to S3 |
+
+---
+
+## 13. Meeting and task workflow assessment
+
+**Tasks and boards (runtime, rows 45-78):** board create/list, member access, non-member 403; task create with trimmed title, member assignee only (non-member and display-name assignees rejected), cross-workspace board rejected, invalid status rejected, status updates, unassign, subtasks with cycle and self-parent protection, top-level listing hides subtasks, activity log records created/assigned/status_changed/unassigned, non-empty board delete without cascade gives 409, cascade delete and parent-with-subtask delete work. Bulk import: idempotent replay, concurrent safety, 50-item cap, invalid key characters rejected, one bad assignee rejects the whole batch.
+
+**Defects:** RT-004 (replay compares count only; misleading 409 message), ARC-003 (due date off by one west of UTC), ISS-043 (no pagination).
+
+**Meeting workflow:** paste notes, structured JSON via LLM (live provider NOT VERIFIED), select action items, bulk-create tasks with `importKey`. Tasks arrive unassigned (REQ-079 not implemented); summaries are not persisted (REQ-085, ISS-030); multi-byte notes within the documented limit can get 413 (REQ-082).
+
+**UI:** Kanban drag-and-drop, task modals and the meeting page are implemented but never exercised in a browser. Activity entries are displayed as raw JSON payloads (REQ-104). No `review` column or `urgent` priority (REQ-097, REQ-098); boards cannot be renamed or deleted from the UI (REQ-094).
+
+---
+
+## 14. Frontend assessment
+
+| Area | Result |
+|---|---|
+| Typecheck and build | `tsc -b && vite build` exit 0 (68 s and 136 s in two runs) |
+| Bundle | One 1.56 MB chunk (459.65 kB gzip); Vite warning (ARC-011) |
+| Lint | 42 problems (38 errors, 4 warnings), not gated (ISS-051) |
+| Preview | `vite preview` served `/` and deep links (200 index fallback); bundle contains the `/api` default `http://localhost:5000/api` because `frontend/.env` is absent (rows 186-188) |
+| Routing | Core pages real; 5 placeholders; REQ-128 deep link broken |
+| Auth/session | Tokens in `localStorage` (SEC-008); single-flight refresh with Web Locks and cross-tab sync (module tests) |
+| Rendering | Plain-text AI answers (ARC-002); no XSS sink found |
+| Dates | Off-by-one west of UTC (ARC-003) |
+| Dead code | Wizard, mock cards, `MathMarkdown`, assets (ARC-009) |
+| Client/server validation | Drift on register (ISS-039) |
+| Tests | 0 component or browser tests; plain-module tests only. All browser journeys NOT VERIFIED (row 189) |
+| External loads | pdf.js worker from unpkg (ISS-050) |
+| Default API URL | Points at port 5000, which on this host belongs to another process; combined with RT-002 the gateway could appear to start while another program answers |
+
+---
+
+## 15. Backend assessment
+
+| Area | Result |
+|---|---|
+| Typecheck | 6 services `tsc --noEmit` exit 0 |
+| Start path | All six services built to `dist/` and started from `dist/services/<svc>/src/server.js` (ISS-017 fixed) |
+| Error mapping | Documented statuses at runtime (400, 401, 403, 404, 409, 413, 415, 422, 502, 503); `/api/ai/search` 500 (RT-011) |
+| Startup fail-closed | Weak secret exit 1 naming the variable; missing Voyage key exit 1; MongoDB unreachable exit 1 after about 30 s server selection; Redis unreachable: document and ai start with `/health` 503 |
+| Startup defects | False success on EADDRINUSE (RT-002); invalid Pinecone key reported as unreachable while healthy (RT-006) |
+| Shutdown | SIGTERM/SIGINT graceful in 1.5 to 3.2 s for all services, including ai-service with Redis down; second signal forces exit 1 |
+| Resilience | Killed task-service gives fast gateway 503; workspace-service down gives fail-closed 503 in dependent services |
+| Gateway | No upstream timeout (RT-003); slow fail-open (RT-001); static health (ISS-044); `//` bypass (SEC-003) |
+| Packaging | Shared code not packaged; undeclared dependencies (ISS-032); zod split (RT-005) |
+| Exposure | 0.0.0.0 binding, permissive CORS, public Swagger (SEC-004, SEC-015, SEC-016) |
+| Hygiene | Duplicate verifiers (ISS-047), unused auth Redis (RT-009), deprecated Mongoose option (ARC-010), phantom metadata endpoint (ARC-001) |
+
+---
+
+## 16. Database, Redis, Pinecone and external integration assessment
+
+| Integration | Verification in this audit | Findings |
+|---|---|---|
+| MongoDB (disposable) | Verified: all services, 239 tests, runtime journeys | No retry on initial connect (exit 1 by design); MongoDB runtime outage and reconnection NOT VERIFIED (shared disposable instance) |
+| MongoDB (user's) | Read-only aggregate checks | SEC-001, SEC-014, SEC-024; refresh-token indexes correct (ISS-045 not reproducible) |
+| Redis (disposable) | Verified: limiter, queue, outage and recovery | RT-001; reconnect and BLPOP resume work; health reports Redis correctly in document/ai |
+| Redis (user's) | Read-only configuration and counts | SEC-001 (no auth, LAN-reachable), AOF off, 1 stray key |
+| Pinecone | NOT VERIFIED (dummy key rejected) | Startup check continues on auth failure (RT-006); delete-by-metadata on the live index unverified (ISS-001); orphan reconciliation absent (SEC-012) |
+| Voyage | NOT VERIFIED (dummy key, 401) | No timeout (ISS-037); retries only on 429 (REQ-058) |
+| Groq / xAI | NOT VERIFIED (dummy key) | Error dumps include provider headers (RT-007); timeouts not exercised against a slow provider |
+| Cloudinary | NOT VERIFIED (dummy credentials, 401) | Public delivery (SEC-005), no compensation (SEC-013), key identifier echoed on rejection (RT-007); credentials not validated at startup |
+| GitHub Actions | Read-only history | One run ever, failed; never run on current code (ARC-005) |
+
+---
+
+## 17. Build, test and CI assessment
+
+**Commands executed on `e6d68ad`** (`git status --porcelain` empty before and after)
+
+| # | Command | Exit | Result |
+|---|---|---|---|
+| 1-6 | `./node_modules/.bin/tsc --noEmit -p services/<svc>` for api-gateway, auth, workspace, document, task, ai | 0 each | No diagnostics |
+| 7 | `npm run build -w frontend` | 0 | Built; 1.56 MB chunk warning |
+| 8 | `npm run lint -w frontend` | 1 | 42 problems: no-explicit-any 25, set-state-in-effect 6, incompatible-library 2, exhaustive-deps 2, preserve-caught-error 2, only-export-components 1, immutability 1, no-misleading-character-class 1, no-empty 1, no-unused-vars 1 |
+| 9 | `npm test` (no `TEST_MONGO_URI`) | 0 | 50 suites, 170 pass, 0 fail; 11 suites skipped silently (`# skipped 0`), 156 s |
+| 10 | `TEST_MONGO_URI=mongodb://127.0.0.1:27094 npm test` | 0 | 50 suites, **239 pass, 0 fail, 0 skip**; 323 s (Agent 1), 202 s (Agent 2), about 346 s (Agent 4); warnings: Mongoose `new` deprecated x5, DEP0060 x1 |
+| 11 | `npm run build -w <svc>` for six services, then `node dist/services/<svc>/src/server.js` | 0 / ran | All started; used for runtime tests |
+| 12 | `npm audit --omit=dev --json` | 1 | 30 advisories (2 critical, 14 high, 9 moderate, 5 low) |
+| 13 | Security-relevant subset without MongoDB (Agent 3) | 0 | 78 pass, 0 fail |
+| 14 | `gh run list`, `gh run view --log-failed`, `gh pr list --state all` | 0 | 1 run ever (failed); no PRs |
+
+**Coverage of the 239 tests:** JWT pinning and expiry, refresh rotation and reuse with real MongoDB, logout; membership 400/403/503 and isolation; error mapping; upload validation and extraction errors; deletion ordering and rollback; claim, fencing and sweep; bulk import and subtask cycles; SSE pass-through and truncation; client refresh coordinator, SSE parser and helpers.
+
+**Not covered:** any React component, page, route or guard; gateway rate limiting (Redis pointed at a dead port); the chunker; the citation validator; the SSE success path; AI-session persistence; member hydration; live providers; resource limits (SEC-002); port conflicts (RT-002); built-artefact behaviour (RT-005). No coverage measurement.
+
+**CI history and configuration:** `.github/workflows/ci.yml` triggers on push and PR to `develop` and `main`; steps are `npm ci`, typecheck of 6 services, frontend build, `npm test` with a `mongo:7` service. Exactly one run exists (2026-11-11, branch `phase-4-meeting-summarizer-task-creatio`), which failed at "Typecheck & Build Frontend" (TS2345 in `JoinWorkspaceModal.tsx`, TS6133 errors), and at that commit the triggers differed. No fix-wave commit has a CI run. Missing: lint, coverage, audit, Redis service, E2E, a guard against silent skips (ARC-005, ARC-006).
+
+---
+
+## 18. Dependency security assessment
+
+`npm audit --omit=dev`: **30 advisories** (critical 2, high 14, moderate 9, low 5), unchanged from the wave-3 baseline and down from 47 in the 2026-11-10 audit. Parser packages (multer, mammoth, pdf-parse, xmldom) no longer appear. Fixes exist for all; shadcn and zod need major-version changes.
+
+| Package (severity) | Pulled in by | Reachability |
+|---|---|---|
+| proxy-addr (critical) | express | Not reachable: needs `trust proxy`, which is unset. Upgrade before enabling it (RT-008) |
+| handlebars (critical) | @langchain/classic via @langchain/community | No template compilation in the code |
+| axios (high, frontend) | frontend | Low: prototype-pollution gadgets, no pollution source found |
+| react-router (high, frontend) | frontend | Low: navigation targets are internal paths |
+| follow-redirects (high) | axios, http-proxy | Gateway proxy does not follow redirects |
+| ip-address (high) | express-rate-limit | IPv6 subnet keying of the socket IP only |
+| zod (high) | shadcn CLI; ai-service nested copy | **On ai-service's runtime validation path** (Agent 5 correction of Agent 3); not practically exploitable (no constrained arrays in user-input schemas; 100 KB body cap). Fix with RT-005 |
+| fast-uri, js-yaml, brace-expansion, nanoid, postcss, source-map-js, browserslist (high) | ajv, langchain, build tooling | No untrusted input path found |
+| @modelcontextprotocol/sdk, shadcn (high) | shadcn CLI | Not runtime |
+
+No critical or high advisory is a blocker by reachability; batch upgrades with tests (SEC-022).
+
+---
+
+## 19. README requirements traceability matrix
+
+Source: `ResearchMind_readme.md` at `e6d68ad` (sections 1 to 23 and the Master Checklist) and, where wave 4 rewrote a requirement into "as implemented" text, the original specification at commit `31ef58d`. The README's own status section was not accepted as evidence. Agent 5 corrections applied: **REQ-023 and REQ-134 changed from COMPLETE to PARTIAL**; annotations added for REQ-015, REQ-001/002/006/029/147 ("backend runtime-verified"), REQ-064 and REQ-039.
+
+**Status totals (157):** COMPLETE **15** · NOT VERIFIED **44** · PARTIAL **26** · BROKEN **1** · NOT IMPLEMENTED **71**. No user-facing journey is COMPLETE, because there is no browser E2E and no live-provider execution.
+
+### 19.1 Authentication and session
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-001 | Register account and sign in | NOT VERIFIED | Backend runtime-verified (rows 1-3); no UI journey run |
+| REQ-002 | Login: bcrypt, access 15 min + refresh 7 d | NOT VERIFIED | Backend runtime-verified (rows 4-6); no UI journey run |
+| REQ-003 | Refresh rotation; reuse revokes all sessions | COMPLETE | 8 integration tests with real MongoDB; runtime rows 12-17 |
+| REQ-004 | Refresh token in httpOnly, Secure, SameSite=Strict cookie | NOT IMPLEMENTED | Tokens in JSON body and `localStorage` (SEC-008) |
+| REQ-005 | Logout invalidates refresh token | COMPLETE | Integration test; runtime rows 19-24 |
+| REQ-006 | `GET /auth/me` | NOT VERIFIED | Backend runtime-verified (row 7); no test file |
+| REQ-007 | Update profile (`PUT /auth/me`) | NOT IMPLEMENTED | No route |
+| REQ-008 | Forgot / reset password | NOT IMPLEMENTED | "coming soon" link |
+| REQ-009 | Google sign-in | NOT IMPLEMENTED | Disabled button |
+| REQ-010 | Protected routes and auto-refresh interceptor | NOT VERIFIED | Interceptor module tests; `ProtectedRoute` untested |
+| REQ-011 | Account settings page | NOT IMPLEMENTED | No route |
+
+### 19.2 Gateway, security and non-functional
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-012 | Gateway is the only entry point | PARTIAL | Services reachable directly (SEC-004) |
+| REQ-013 | JWT verified at gateway and in each service, HS256 | COMPLETE | Tests and Agent 3 probes |
+| REQ-014 | Membership enforced (400/403/503) | COMPLETE | Tests; runtime rows 92-112, 165-167 |
+| REQ-015 | Redis rate limits per route | PARTIAL | 429s observed at runtime on canonical paths, but no regression test; bypassable (SEC-003); slow fail-open (RT-001); refresh/me/logout unthrottled |
+| REQ-016 | Sliding-window algorithm | PARTIAL | Fixed windows used |
+| REQ-017 | Request-ID tracing | NOT IMPLEMENTED | ISS-044 |
+| REQ-018 | Gateway injects user/role headers | NOT IMPLEMENTED | Replaced by per-service JWT verification; no roles |
+| REQ-019 | CORS, Helmet, Morgan; structured logging | PARTIAL | Wildcard CORS, CSP off, Winston only in document-service |
+| REQ-020 | Envelope with `meta` and error codes | PARTIAL | `{success,data}` / `{success:false,message}`; no codes or pagination |
+| REQ-021 | HTTP error mapping | COMPLETE | `error-middleware.test.ts` and runtime |
+| REQ-022 | Strong secrets; internal service token | COMPLETE | Tests; runtime row 171 |
+| REQ-023 | Health, graceful shutdown, resilient connections | **PARTIAL** (corrected) | Shutdown and reconnect verified; gateway health static, Redis brown-out (RT-001), listen errors swallowed (RT-002) |
+| REQ-024 | Redis pub/sub event bus | NOT IMPLEMENTED | HTTP only |
+| REQ-025 | Caching layer | NOT IMPLEMENTED | — |
+
+### 19.3 Workspaces, roles and permissions
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-026 | Create workspace | NOT VERIFIED | Backend runtime-verified (rows 30-32); UI not run |
+| REQ-027 | List workspaces; switcher | NOT VERIFIED | Backend runtime-verified (row 38); UI not run |
+| REQ-028 | Join by invite code | NOT VERIFIED | Backend fully covered (7 integration tests; rows 33-37); UI not run |
+| REQ-029 | Workspace detail and member names | NOT VERIFIED | Backend runtime-verified (row 39 with token configured); UI not run |
+| REQ-030 | E-mail invites with expiring tokens | NOT IMPLEMENTED | Wizard step is dead code |
+| REQ-031 | Roles lead/member/advisor | NOT IMPLEMENTED | Plain id array (SEC-010) |
+| REQ-032 | Read-only advisor | NOT IMPLEMENTED | No permission model |
+| REQ-033 | Remove member | NOT IMPLEMENTED | No route |
+| REQ-034 | Workspace settings, rename, delete with namespace purge | NOT IMPLEMENTED | Placeholder (ISS-046) |
+| REQ-035 | Workspace domain and slug | NOT IMPLEMENTED | Unused wizard steps |
+| REQ-036 | Tenant isolation at the API | COMPLETE | Tests; 21 runtime probes |
+
+### 19.4 Documents and ingestion
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-037 | Upload PDF/DOCX up to 10 MB, status `pending` | NOT VERIFIED | Route tested with stubbed Cloudinary; live and UI not run |
+| REQ-038 | Upload validation (415/422/413) | COMPLETE | Tests; runtime rows 81-91 |
+| REQ-039 | Text extraction (pdf-parse, mammoth) | COMPLETE | Real route tests; robustness defect SEC-002 linked |
+| REQ-040 | Markdown and TXT ingestion | NOT IMPLEMENTED | 415 |
+| REQ-041 | Original stored on Cloudinary | NOT VERIFIED | Stubbed in every test |
+| REQ-042 | Library with status, search, filters | NOT VERIFIED | Client-side search/filter; no UI test |
+| REQ-043 | Drag-and-drop upload | NOT VERIFIED | Native DnD; no UI test |
+| REQ-044 | In-app PDF viewer | NOT VERIFIED | Needs browser and Cloudinary |
+| REQ-045 | View documents in-app, DOCX included | PARTIAL | DOCX opens the raw file in a new tab |
+| REQ-046 | Live embedding status badge | NOT VERIFIED | Helpers unit-tested |
+| REQ-047 | Delete: vectors first, 503 on failure | NOT VERIFIED | Orchestration tested and runtime rollback (rows 137-139); live Pinecone not exercised |
+| REQ-048 | Manual reindex | NOT VERIFIED | Backend tests and runtime rows 126-133; UI not run |
+| REQ-049 | Get document metadata and content | NOT VERIFIED | Negative paths tested; happy path not asserted |
+| REQ-050 | Metadata create with server-owned fields | COMPLETE | Tests; runtime row 95 (see ARC-001) |
+| REQ-051 | Content, file-stream and status endpoints | NOT IMPLEMENTED | Original only via public URL |
+| REQ-052 | Re-upload with incremental vector update | NOT IMPLEMENTED | — |
+| REQ-053 | Rich document metadata and generated types | NOT IMPLEMENTED | — |
+| REQ-054 | "Ask about this" on a document card | NOT IMPLEMENTED | — |
+
+### 19.5 RAG, embeddings and semantic search
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-055 | Background embedding pipeline | NOT VERIFIED | Fakes in tests; runtime worker with dummy providers; live chain not run |
+| REQ-056 | Job reliability (claim, fencing, 3 attempts, sweep) | COMPLETE | Integration tests; runtime rows 126-136, 184 |
+| REQ-057 | Chunking (about 400 tokens, 60 overlap) | NOT VERIFIED | Chunker stubbed in every test |
+| REQ-058 | Voyage voyage-3 1024-d, batched, retried | PARTIAL | Retries only on 429; batch 20 not 8; dimension check complete |
+| REQ-059 | Pinecone upsert with namespace and metadata | NOT VERIFIED | Stubbed |
+| REQ-060 | Namespace isolation per workspace | NOT VERIFIED | Namespace asserted with stub |
+| REQ-061 | Query: embed, topK, namespace-scoped | NOT VERIFIED | Validation complete; retrieval never live |
+| REQ-062 | Query validation | COMPLETE | Tests; runtime rows 105-110 |
+| REQ-063 | Filter search by document type | PARTIAL | Client-side filter after topK |
+| REQ-064 | Streamed answer via SSE | NOT VERIFIED | SSE error path runtime-verified (row 104); success path not run |
+| REQ-065 | Grounded answer with citations; unverified flagged | NOT VERIFIED | Validator untested |
+| REQ-066 | Source chips with name and link | NOT VERIFIED | No UI test |
+| REQ-067 | Page-level citations | NOT IMPLEMENTED | No page metadata |
+| REQ-068 | Q&A sessions logged and listed | NOT VERIFIED | No persistence test |
+| REQ-069 | `POST /api/ai/search` | NOT VERIFIED | Validation only; RT-011 |
+| REQ-070 | Context-aware prompting | NOT IMPLEMENTED | Chunks and question only |
+| REQ-071 | Answers only from workspace documents | NOT VERIFIED | Prompt rules; no evaluation set |
+| REQ-072 | Scales to hundreds of documents | NOT VERIFIED | No load test |
+
+### 19.6 AI agent
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-073 | `/ai/agent` ReAct loop with function calling | NOT IMPLEMENTED | — |
+| REQ-074 | 8 agent tools | NOT IMPLEMENTED | — |
+| REQ-075 | Agent step streaming | NOT IMPLEMENTED | — |
+| REQ-076 | Agent page and route | NOT IMPLEMENTED | — |
+| REQ-077 | Agent session logging | NOT IMPLEMENTED | — |
+| REQ-078 | Agent system prompt with project context | NOT IMPLEMENTED | — |
+| REQ-079 | AI creates and assigns tasks | NOT IMPLEMENTED | Meeting import sends no assignee |
+| REQ-080 | Overdue reports, channel posts, agent limit | NOT IMPLEMENTED | — |
+
+### 19.7 Meeting summarizer, literature review, report drafter, onboarding
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-081 | Meeting notes to structured JSON | NOT VERIFIED | Fixture tests; live LLM and UI not run |
+| REQ-082 | Notes accepted at 10 to 50,000 characters | PARTIAL | Multi-byte text over 100 KB gets 413 (finding REQ-082) |
+| REQ-083 | Structured output validated by zod | COMPLETE | Tests |
+| REQ-084 | Summarize from a workspace document | NOT IMPLEMENTED | Paste only |
+| REQ-085 | Save summary as a document | NOT IMPLEMENTED | Not persisted |
+| REQ-086 | Create tasks from action items (bulk, idempotent) | NOT VERIFIED | Backend complete (9 tests; runtime rows 66-73); UI not run |
+| REQ-087 | Literature review generator | NOT IMPLEMENTED | Placeholder |
+| REQ-088 | Literature review page | NOT IMPLEMENTED | — |
+| REQ-089 | References from paper metadata | NOT IMPLEMENTED | — |
+| REQ-090 | Report section drafter | NOT IMPLEMENTED | Placeholder |
+| REQ-091 | New-member onboarding brief | NOT IMPLEMENTED | — |
+| REQ-092 | explain-document, suggest-tasks, embed endpoints | NOT IMPLEMENTED | — |
+| REQ-093 | SSE on all writing AI endpoints | PARTIAL | Only Q&A streams |
+
+### 19.8 Tasks and Kanban
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-094 | Board CRUD | PARTIAL | Backend full; UI list/create only |
+| REQ-095 | Task CRUD | NOT VERIFIED | Backend runtime rows 49-64, 75-77; UI not run |
+| REQ-096 | Kanban drag-and-drop status | NOT VERIFIED | No browser test |
+| REQ-097 | Columns including `review` | PARTIAL | No `review` |
+| REQ-098 | Priority including `urgent` | PARTIAL | No `urgent` |
+| REQ-099 | Reorder within a column | NOT IMPLEMENTED | No position field |
+| REQ-100 | estimatedHours, linkedDocId, tags | NOT IMPLEMENTED | — |
+| REQ-101 | Assignee is a member's user id, shown by name | COMPLETE | Tests; runtime rows 49-51 |
+| REQ-102 | Due dates | NOT VERIFIED | No test; ARC-003 |
+| REQ-103 | Subtasks with cycle protection | NOT VERIFIED | Cycle protection complete (rows 56-58); UI not run |
+| REQ-104 | Task activity log | NOT VERIFIED | Runtime row 60; shown as raw JSON |
+| REQ-105 | Task comments | NOT IMPLEMENTED | Enum value only |
+| REQ-106 | Task stats and overdue endpoints | NOT IMPLEMENTED | — |
+| REQ-107 | Lead sees meeting-generated tasks assigned | PARTIAL | Unassigned; no provenance |
+
+### 19.9 Real-time collaboration and chat
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-108 | Chat channel CRUD | NOT IMPLEMENTED | No chat service |
+| REQ-109 | Socket.io messaging | NOT IMPLEMENTED | — |
+| REQ-110 | Cursor-paginated history | NOT IMPLEMENTED | — |
+| REQ-111 | Typing indicators | NOT IMPLEMENTED | — |
+| REQ-112 | Reactions; message soft delete | NOT IMPLEMENTED | — |
+| REQ-113 | Threads and attachments | NOT IMPLEMENTED | — |
+| REQ-114 | @mention notifications | NOT IMPLEMENTED | — |
+| REQ-115 | Online presence | NOT IMPLEMENTED | — |
+| REQ-116 | Socket.io Redis adapter | NOT IMPLEMENTED | — |
+
+### 19.10 Notifications
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-117 | Notification service on events | NOT IMPLEMENTED | Empty files |
+| REQ-118 | Bell, unread count, mark read | NOT IMPLEMENTED | Disabled bell |
+| REQ-119 | WebSocket push | NOT IMPLEMENTED | — |
+| REQ-120 | E-mail notifications and digest | NOT IMPLEMENTED | — |
+| REQ-121 | Notification preferences | NOT IMPLEMENTED | — |
+| REQ-122 | AI-filtered notifications | NOT IMPLEMENTED | — |
+
+### 19.11 Dashboard, analytics, sources
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-123 | Progress dashboard with charts and activity | NOT IMPLEMENTED | 3 counts; mock cards unused |
+| REQ-124 | Analytics page | NOT IMPLEMENTED | Placeholder |
+| REQ-125 | Sources page | NOT IMPLEMENTED | Placeholder; undefined in spec |
+| REQ-126 | AI progress and risk monitoring | NOT IMPLEMENTED | — |
+| REQ-127 | Workspace overview | NOT VERIFIED | Helper tested; member count can be stale |
+
+### 19.12 Frontend structure and UX
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-128 | Workspace-scoped URLs; `/app/workspace/:id/search` alias | BROKEN | Ignores `:id` (finding REQ-128) |
+| REQ-129 | Dark mode toggle | NOT VERIFIED | No browser test |
+| REQ-130 | Loading, error and empty states | PARTIAL | 5 of 13 navigation entries are placeholders |
+| REQ-131 | Mobile-responsive layout | PARTIAL | Never tested on devices |
+| REQ-132 | Rich-text editor | NOT IMPLEMENTED | — |
+| REQ-133 | Socket.io client | NOT IMPLEMENTED | — |
+
+### 19.13 DevOps, testing and delivery
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-134 | Docker Compose local infrastructure | **PARTIAL** (corrected) | Works, but 0.0.0.0 bindings and default credentials (SEC-001) |
+| REQ-135 | Dockerfile per service, full-stack compose | NOT IMPLEMENTED | — |
+| REQ-136 | Independently deployable microservices | PARTIAL | 5 services and gateway; not containerised |
+| REQ-137 | Production deployment and public URL | NOT IMPLEMENTED | — |
+| REQ-138 | GitHub Actions CI | NOT VERIFIED | Workflow exists; only run failed; never run on current code |
+| REQ-139 | CI lint, matrix, Redis | NOT IMPLEMENTED | — |
+| REQ-140 | Unit tests for chunker, tokens, limiter, agent, validators | PARTIAL | Tokens and validators only |
+| REQ-141 | Integration tests against a real DB | COMPLETE | 11 MongoDB suites, 239/239 |
+| REQ-142 | Rate-limit demo test | NOT IMPLEMENTED | — |
+| REQ-143 | k6 load test | NOT IMPLEMENTED | — |
+| REQ-144 | Local setup from README | NOT VERIFIED | Dev scripts not executed |
+| REQ-145 | Pinecone index setup | PARTIAL | Manual |
+| REQ-146 | Demo seed data | NOT IMPLEMENTED | — |
+| REQ-147 | Swagger UI at `/api-docs` | NOT VERIFIED | Backend runtime-verified (200, public; SEC-016) |
+| REQ-148 | Architecture diagram image; demo video | NOT IMPLEMENTED | ASCII target design only |
+| REQ-149 | PM2 in production | NOT IMPLEMENTED | — |
+
+### 19.14 User stories and solution levels
+
+| ID | Requirement | Status | Evidence / gap |
+|---|---|---|---|
+| REQ-150 | All project artefacts in one knowledge base | PARTIAL | PDF/DOCX only |
+| REQ-151 | Upload a paper and ask about its methodology | NOT VERIFIED | Needs live providers end to end |
+| REQ-152 | Cross-paper question with citations | NOT VERIFIED | Same |
+| REQ-153 | Meeting notes to summary with action items | NOT VERIFIED | Live LLM |
+| REQ-154 | Ask the agent to create tasks from a meeting | PARTIAL | Button-driven import only |
+| REQ-155 | Lead/advisor asks about project state | PARTIAL | Documents only |
+| REQ-156 | Advisor views knowledge base and progress | PARTIAL | Only as a full write-capable member |
+| REQ-157 | New member asks what the team has done | PARTIAL | Documents only |
+
+**COMPLETE (15):** REQ-003, 005, 013, 014, 021, 022, 036, 038, 039, 050, 056, 062, 083, 101, 141.
+
+---
+
+## 20. Feature completeness matrix
+
+| Module | Implemented in code | Backend verified (executed) | Full journey verified | Assessment |
 |---|---|---|---|---|
-| `services/api-gateway` | Single entry, JWT, rate limits, proxy | Works by static reading; typechecks | HS256 pinned; per-route limiters; proxy 503 envelope; no body parsing (correct) | Open CORS, CSP off; no request-id/404/proxy timeout; fail-open limiters; no `trust proxy`; stale `dist/server.js` (ISS-017/024/044) |
-| `services/auth-service` | Users, tokens | Functional core | Hashed refresh tokens + TTL; reuse revocation; fail-closed secrets | Non-atomic rotation, no `jti` (ISS-005); unused Redis (ISS-047); missing `INTERNAL_SERVICE_TOKEN` (ISS-033); uncommitted `token→tokenHash` migration (ISS-045) |
-| `services/workspace-service` | Workspaces, membership | Functional core | Crypto invite codes with collision retry | No roles/removal (ISS-009); non-atomic join (ISS-042); no cors/helmet/morgan; member hydration disabled (ISS-033) |
-| `services/document-service` | Upload, extraction, storage, queue producer | Functional with defects | Membership on every route; temp-file cleanup; enqueue-failure → `failed` | No vector delete (ISS-001); client-controlled fields (ISS-002); OR upload filter, 500s (ISS-010/011); Redis gives up (ISS-014); duplicate resync (ISS-006); public Cloudinary (ISS-023) |
-| `services/task-service` | Boards, tasks, subtasks, activity | Most complete service | Workspace-scoped queries everywhere; cycle detection; cascade with 409 guard | Silent DB fallback (ISS-013); non-atomic bulk (ISS-018); assignee unvalidated (ISS-004); no transactions possible (standalone Mongo) |
-| `services/ai-service` | RAG, meeting summarizer, embedding worker | Functional with defects | No fabricated answers; timeouts + idle watchdog; citation audit; namespace isolation after membership | Queue loss (ISS-006); no disconnect abort (ISS-015); no threshold (ISS-028); prompt-injection exposure (ISS-022); boots without Mongo, exits without Redis (ISS-013/014); model drift (ISS-027) |
-| `services/notification-service` | Notifications | **Empty** (0-byte files) | — | ISS-048 |
-| `packages/shared` | Auth middleware, secrets, errors, health | Good primitives; not a real package | `secrets.ts`, timing-safe internal token | Error middleware → 500s (ISS-010); `healthCheck.ts` unused; untracked `auth/` and `health/` (ISS-008) |
-| `packages/validation` | zod schemas + `validate()` | Good coverage | strips unknown keys (no mass assignment) | Missing `.max()` limits; document schema exposes server fields (ISS-002); null-intolerant meeting schema (ISS-030) |
-| `frontend` | SPA | Most pages functional | React Query docs layer; SSE parser robust to fragmentation; guarded onboarding | ISS-003/004/016/019/020/034/035/038; tokens in localStorage (ISS-021); 44 ESLint errors (ISS-051) |
-| Root / infra | Workspaces, compose, CI, docs | Partial | One DB per service; fail-closed secrets | Untracked critical files (ISS-008); CI inactive (ISS-007); docs not bootable/ignored (ISS-031); no Dockerfiles (ISS-048) |
+| Auth | Register, login, rotation with reuse detection, logout, me | Yes (integration and runtime) | No (UI) | About 55%: core works; profile, reset, Google, cookie transport missing |
+| Workspaces | Create, list, detail, members, invite-code join | Yes | No | About 40%: no lifecycle management |
+| Roles / permissions | None (flat membership) | Membership gate only | — | About 10% |
+| Documents | PDF/DOCX upload, validation, extraction, library, PDF viewer, live status, delete, reindex | Yes (providers stubbed or dummy) | No (Cloudinary, UI) | About 65% |
+| RAG / search | Full pipeline code, SSE, chunk-level citations, history | Job reliability, validation, SSE error path | No (Voyage, Pinecone, LLM never live) | About 60% in code, 0% live-verified |
+| AI researcher page | Yes | Client helpers only | No | Implemented, unverified |
+| AI agent | Nothing | — | — | 0% |
+| Literature review | Placeholder | — | — | 0% |
+| Report drafter | Placeholder | — | — | 0% |
+| Onboarding brief | Nothing | — | — | 0% |
+| Meeting notes | Paste to JSON; bulk task import (unassigned) | Normaliser, bulk import | No | About 55% |
+| Tasks / Kanban | Boards (UI create/list), tasks CRUD, 3 columns, DnD, subtasks, activity, bulk import | Yes | No | About 55% |
+| Chat | Nothing | — | — | 0% |
+| Notifications | Empty service; disabled bell | — | — | 0% |
+| Analytics / dashboard | 3-count overview; placeholders | — | — | About 10% |
+| Sources | Placeholder | — | — | 0%, scope undefined |
+| Settings | Placeholder / none | — | — | 0% |
+| Integrations | Cloudinary, Voyage, Pinecone, Groq/xAI clients | All stubbed or dummy | No live call | 4 of 10 coded, 0 verified |
+| Cross-cutting infrastructure | Gateway (PARTIAL per Agent 5), JWT, Redis limits, queue | JWT, membership, error mapping, lifecycle | — | About 45% |
+| Deployment / operations | Infrastructure compose; CI workflow | Local tests pass; CI never green | — | About 20% |
 
 ---
 
-## 8. Frontend Audit
+## 21. Runtime and E2E test results
 
-**Scope.** All ~10.1k lines of `frontend/src` were read. All 27 frontend API functions were mapped to backend routes.
+All runtime results come from services built and started from the current source (`e6d68ad`) against disposable MongoDB/Redis with dummy provider keys. Static findings are listed separately at the end of this section.
 
-**API contract.** Every frontend path and method matches a gateway prefix and a service route [V]. One response-shape mismatch exists:
+### 21.1 Agent 2 journey results (190 checks)
 
-| Item | Frontend | Backend | Consequence |
-|---|---|---|---|
-| Members response field | `WorkspaceMember{id,…}` (`frontend/src/api/workspace.api.ts:4-8`) | `{userId,…}` (`workspace.service.ts:146-154`) | Root cause of ISS-004 |
+| Journey | PASS | FAIL | INFO | NOT VERIFIED | FAIL rows / notes |
+|---|---|---|---|---|---|
+| Auth (rows 1-29, 159-163) | 34 | 0 | 0 | 0 | Includes rotation, reuse, concurrent refresh, logout, expiry, register limiter |
+| Workspace (30-44) | 15 | 0 | 0 | 0 | Join case-insensitivity, 409, isolation, member names |
+| Tasks (45-78) | 32 | 1 | 1 | 0 | Row 78 FAIL (RT-004); row 70 INFO (misleading 409) |
+| Documents (79-103, 137-139) | 27 | 0 | 1 | 0 | Row 93 INFO (path traversal reduced to basename) |
+| AI (104-125) | 22 | 0 | 0 | 0 | Validation, membership, SSE error path, summarize errors |
+| Embedding worker (126-136, 184) | 9 | 0 | 3 | 0 | Rows 134-136 INFO (concurrent reindex, queue length) |
+| Redis outage and reconnect (140-151) | 9 | 3 | 0 | 0 | Rows 143, 144, 147 FAIL (RT-001) |
+| Redis outage latency (152-156) | 0 | 0 | 5 | 0 | Measurements for RT-001 |
+| Streaming interruption (157-158) | 1 | 1 | 0 | 0 | Row 158 FAIL (RT-003) |
+| Resilience (164-168) | 5 | 0 | 0 | 0 | Fast 503s; fail-closed membership |
+| Startup (169-175) | 5 | 2 | 0 | 0 | Row 174 FAIL (RT-006), row 175 FAIL (RT-002) |
+| Shutdown (176-183) | 7 | 0 | 1 | 0 | Row 182 INFO (Windows `taskkill` without `/F`) |
+| Frontend (185-189) | 4 | 0 | 0 | 1 | Row 189 NOT VERIFIED (no browser automation) |
+| Tests (190) | 1 | 0 | 0 | 0 | 239/239 |
+| **Total** | **171** | **7** | **11** | **1** | |
 
-Three API functions are never called: `searchWorkspaceVectors`, `authApi.getProfile`, `authApi.refreshToken`.
+### 21.2 Agent 3 dynamic security tests
 
-**Routes.** All 10 sidebar links resolve, but 5 go to a `PlaceholderPage`:
-- Sources;
-- Analytics;
-- Literature Review;
-- Report Drafter;
-- Settings.
-
-There is no `/` route. The catch-all `*` → `/login` applies even when the user is authenticated (`AppRouter.tsx:174`).
-
-**Non-functional elements that look functional** (requested explicitly):
-
-| Element | Location | Behaviour |
-|---|---|---|
-| Sidebar "Join Workspace" | `JoinWorkspaceModal.tsx:59` | Always 400 (ISS-003) |
-| "Open in Kanban" after task creation | `MeetingSummarizerPage.tsx:647` | Goes to `/kanban` → `/login` (ISS-019) |
-| DOCX document card | `DocumentCard.tsx:22-29` | Click does nothing (ISS-020) |
-| Right-panel "Ask ResearchMind" | `RightContextPanel.tsx:78` | Navigates, drops the question (ISS-035) |
-| "RAG Engine Status: Operational" | `RightContextPanel.tsx:194-207` | Hard-coded text (ISS-038) |
-| Notification bell + red unread dot | `TopBar.tsx:184-192` | No handler; permanent dot (ISS-038) |
-| Top-bar search + ⌘K badge | `TopBar.tsx:139-154` | No onChange/submit (ISS-038) |
-| "Forgot password?", "Continue with Google" | `LoginForm.tsx:115-119,175-198`; `RegisterForm.tsx:276-299` | No handlers (ISS-038) |
-| Overview "Sources Indexed / All sources indexed" | `OverviewPage.tsx:103-108` | Counts all documents, including failed ones (ISS-038) |
-| Unused dashboard cards with `TODO: Replace with API integration` | `components/dashboard/PriorityTasksCard.tsx:105`, `TeamWorkloadCard.tsx:79` | Dead code |
-
-**State, loading, empty and error states:**
-- Documents have skeleton, empty and error states.
-- Kanban has a "No Boards Found" state.
-- The AI page has a history-empty state.
-- Errors often show raw axios messages.
-- Document Delete/Retry give no error feedback (ISS-052).
-- Document status never refreshes (ISS-034).
-
-**Responsive behaviour [I]:**
-- The mobile drawer does not close on navigation.
-- The Kanban header overflows at about 375px.
-- A resize resets the user's panel toggles.
-
-**Auth/session [V code, I runtime]:**
-- Two independent refresh paths (axios interceptor and SSE `ensureFreshToken`) share no lock, and there is no cross-tab sync, so concurrent refreshes trigger server-side reuse revocation (ISS-005).
-- Tokens are persisted in localStorage (ISS-021).
-
-**Static gates (executed):**
-- `tsc` on `frontend/tsconfig.app.json`: 1 error (TS2345).
-- `tsconfig.node.json`: 3 errors.
-- ESLint: 48 problems (44 errors, 4 warnings) in 30 files.
-
-See §14.
-
-**Frontend Phase 1 tasks:** P1-A02, A07, A12, A16, A17, A18, A19, A20, A21, A22, A25. **Phase 2:** P2-04, 05, 06, 07, 08, 09, 10, 12, 26.
-
----
-
-## 9. Backend Audit
-
-**Endpoint inventory:** 32 business routes reachable via the gateway, plus 2 internal routes and the health/docs routes.
-
-| Static status | Count | Notes |
-|---|---|---|
-| COMPLETE (static) | 18 | All UNVERIFIED at runtime |
-| PARTIALLY COMPLETE | 12 | |
-| BROKEN | 3 | Members hydration (config), auth `/internal/users/bulk` (token not configured), `POST /api/documents` (security) |
-
-| Gateway path | Methods | Service file | Notes |
-|---|---|---|---|
-| `/api/auth/{register,login,refresh,me,logout}` | POST/GET | `auth-service/src/routes/auth.routes.ts` | `/refresh` has no zod schema and no rate limit |
-| `/api/workspaces`, `/join`, `/:id`, `/:id/members`, `/:id/membership` | POST/GET | `workspace-service/src/routes/workspace.routes.ts:11-48` | membership endpoint is publicly reachable (by design, self only) |
-| `/api/documents` | POST | `document-service/src/routes/document.routes.ts:12-17` | **ISS-002** — remove or lock down |
-| `/api/documents/upload`, `/workspace/:id`, `/:id`, `/:id/reindex` | POST/GET/DELETE | `document.routes.ts:20-53` | delete lacks vector cleanup (ISS-001) |
-| `/api/tasks/workspaces/:wid/boards[/:id]` | POST/GET/PATCH/DELETE | `task-service/src/routes/board.routes.ts` | no zod; bodiless POST → 500 |
-| `/api/tasks/workspaces/:wid/tasks[/bulk, /:id, /:id/activities]` | POST/GET/PATCH/DELETE | `task.routes.ts:25-75` | assignee unvalidated; bulk non-atomic |
-| `/api/ai/search`, `/query` (SSE), `/sessions/workspace/:id`, `/summarize-meeting` | POST/GET | `ai-service/src/routes/ai.routes.ts` | `/query` and `/search` share one 30/h bucket |
-
-**README §8 endpoint gaps (NOT IMPLEMENTED):**
-- `PUT /auth/me`, forgot/reset password;
-- workspace invite, member role and member removal;
-- `GET /docs/:id/content`, `/docs/:id/file`, `/docs/workspace/:wid/status`;
-- task `move`, `summary`, `overdue`;
-- 6 of 9 AI endpoints (`/agent`, `/generate-review`, `/draft-section`, `/explain-document`, `/suggest-tasks`, `/onboard`, `/embed`);
-- all chat and notification endpoints.
-
-**Cross-cutting backend facts [V]:**
-- The gateway preserves the `/api` prefix, and every service mounts at the same prefix, so there is no rewrite mismatch.
-- `/internal/*` routes are not reachable via the gateway.
-- Every service **re-verifies the JWT** (no trust of gateway headers).
-- `JWT_ACCESS_SECRET` is identical in all 6 service `.env` files (verified by fingerprint).
-- Express 5 leaves `req.body` undefined when no parser matched, which produces several 500 paths (ISS-010).
-- The shared `errorMiddleware` handles only `AppError`, `CastError` and `ValidationError`; everything else becomes 500 (ISS-010).
-- The response envelope (`{success,message}`, 400 for validation, 502 for LLM) deviates from README §13 (ISS-041).
-- No pagination on list endpoints (ISS-043).
-- Logging is mixed console/winston, with no request IDs (ISS-044).
-
-**Rejected finding (for transparency).** One specialist claimed `workspace-service/.env` lacks `JWT_ACCESS_SECRET`, so the service would not boot. The Verification Agent **rejected** this: the key is present on the final line, which has no trailing newline, and its fingerprint matches the other 5 services. The surviving part of that finding is the missing `INTERNAL_SERVICE_TOKEN` (ISS-033).
-
----
-
-## 10. Database Audit
-
-**Topology [V].** One MongoDB 7 standalone instance with one database per service:
-- `researchmind-auth`
-- `-workspace`
-- `-document`
-- `-task`
-- `-ai`
-
-There is **no replica set**, so multi-document transactions are unavailable. Code comments reference a `withOptionalTransaction` helper that does not exist.
-
-**Collections:**
-
-| Collection | Model | README §12 match | Indexes present | README indexes missing | Used by live routes | Status |
-|---|---|---|---|---|---|---|
-| users | `auth-service/src/models/User.ts` | `password` vs `passwordHash` | email unique | — | Yes | UNVERIFIED |
-| refreshtokens | `RefreshToken.ts` | not in README (README uses Redis) | userId, tokenHash unique, TTL | n/a | Yes | PARTIALLY COMPLETE (ISS-005, ISS-045) |
-| workspaces | `Workspace.ts` | **major drift**: `members: string[]`, no roles/slug/domain/inviteTokens | inviteCode unique, members multikey | — | Yes | PARTIALLY COMPLETE |
-| documents | `Document.ts` | drift: no title/wordCount/chunkCount/tags/type; `indexing` vs `processing` | workspaceId only | `{workspaceId,createdAt}`, `{workspaceId,type}`, `{embeddingStatus}` | Yes | PARTIALLY COMPLETE |
-| boards | `Board.ts` | no `columns`, no `createdBy` | workspaceId | — | Yes | PARTIALLY COMPLETE |
-| tasks | `Task.ts` | no `review`/`urgent`, `estimatedHours`, `position`, `linkedDocId`, `tags`; subtasks as child tasks | several single + `{workspaceId,boardId}` | `{boardId,status,position}`, `{workspaceId,assigneeId,dueDate}`, `{workspaceId,dueDate,status}` | Yes | PARTIALLY COMPLETE |
-| taskactivities | `TaskActivity.ts` | superset | `{workspaceId,taskId}` | — | Yes | UNVERIFIED (unbounded read) |
-| aisessions | `AISession.ts` | no type/steps/tokensUsed/durationMs | workspaceId, userId | `{workspaceId,type,createdAt}` | Yes (RAG only) | PARTIALLY COMPLETE |
-| channels, messages, notifications | — | — | — | — | No | NOT IMPLEMENTED |
-
-**Cross-service references.** `workspaceId`, `assigneeId`, `uploadedBy` and `members[]` are plain `String`s with no referential validation. `populate()` is never used.
-
-**Redis vs README.** Of 11 README keys/channels, 9 are not implemented. The rate-limit store (fixed window) and the queue (renamed `researchmind:embedding:jobs`, full-text payload) are partial. There is no DLQ, no pub/sub, no caching, no presence and no unread counters.
-
-**Key DB findings (canonical):**
-- ISS-001: no vector delete; retrieval has no existence filter.
-- ISS-005: non-atomic rotation; identical tokens.
-- ISS-006: at-most-once queue; unbounded unindexed resync on every start.
-- ISS-013: task-service fallback DB; ai-service runs without DB; no graceful shutdown in any service.
-- ISS-014: Redis `retryStrategy` returns `null` after 3 attempts.
-- ISS-018: non-atomic multi-writes; bulk N+1.
-- ISS-042: join read-modify-write duplicates members.
-- ISS-043: unbounded lists; missing indexes.
-- ISS-045: uncommitted `token→tokenHash` unique-index change without migration (impact UNVERIFIABLE).
-- ISS-046: no cross-service lifecycle.
-- Low hygiene items:
-  - `syncIndexes()` runs whenever `NODE_ENV` is unset and can drop manually created indexes.
-  - Every member sees all AI sessions.
-  - The queue payload duplicates the full text in Redis.
-
-**Workflow connectivity.** Every implemented model is used by a live route; none is dead code. Meeting summaries are **not** persisted at all.
-
----
-
-## 11. AI and RAG Pipeline Audit
-
-### 11.1 Actual end-to-end pipeline (only stages that exist)
-
-```mermaid
-flowchart LR
-  U[Upload modal] -->|multipart| G[Gateway auth + limiter]
-  G --> M["multer 10 MB, ext OR mime<br/>upload.middleware.ts:14-57<br/>PARTIAL"]
-  M --> MB["membership check (HTTP)<br/>COMPLETE (static)"]
-  MB --> X["extract (sync in request)<br/>pdf-parse / mammoth<br/>no MD/TXT, no OCR<br/>PARTIAL"]
-  X --> C["Cloudinary upload (public)<br/>UNVERIFIED live"]
-  C --> D["Mongo Document pending<br/>+ extractedText"]
-  D --> Q["RPUSH researchmind:embedding:jobs<br/>(full text payload)<br/>PARTIAL"]
-  Q --> W["BLPOP worker in ai-service process<br/>status → indexing<br/>PARTIAL (job loss)"]
-  W --> N["normalize (strip page markers)<br/>+ recursive split 400/60 est. tokens<br/>PARTIAL"]
-  N --> E["Voyage embed (doc), batch 20<br/>429 backoff, no timeout<br/>UNVERIFIED live"]
-  E --> P["Pinecone deleteMany(docId) + upsert<br/>ns=workspaceId, batch 100<br/>meta: docId, ws, uploader, idx, text, fileType<br/>PARTIAL (no title/page)"]
-  P --> S["status → indexed / failed<br/>(no retry, no DLQ)"]
-
-  Qy[Search page / useAiQuery] -->|fetch SSE| G2[Gateway auth + 30/h limiter]
-  G2 --> V["validate ragQuerySchema<br/>(no max, whitespace ok)"]
-  V --> MB2[membership check]
-  MB2 --> QE["Voyage embed (query)"]
-  QE --> R["Pinecone query topK≤10<br/>no threshold, no filter, no existence check"]
-  R --> CX["[Source N] context, IDs not titles<br/>no budget/dedupe"]
-  CX --> PR["system + user prompt<br/>raw chunk text (injection exposure)"]
-  PR --> L["Groq/xAI stream, temp 0.2, max 1500<br/>60 s / 30 s idle watchdog<br/>no client-disconnect abort"]
-  L --> CI["citation audit [Source N]"]
-  CI --> SS["save AISession → done event"]
-```
-
-**Disconnected or absent stages:**
-- vector deletion on document delete (ISS-001);
-- workspace namespace cleanup;
-- DLQ;
-- `verifyPineconeIndex` (exists, never called);
-- `sessionId` follow-up (accepted, ignored);
-- the agent and the other AI endpoints.
-
-### 11.2 The 20 investigation areas
-
-| # | Area | Finding | Status |
-|---|---|---|---|
-| 1 | Document ingestion | Enqueue after Mongo save; enqueue failure → `failed`, upload still 201. Worker runs **in-process** in ai-service via an **uncommitted** `server.ts` change; at HEAD, `npm run dev` started no worker. | PARTIALLY COMPLETE |
-| 2 | File uploads | `uploads/` disk temp, 10 MB, ext **OR** MIME, `.doc` and zip MIME accepted, 0-byte accepted, no magic bytes, no duplicate detection; 7 leftover temp files on disk | PARTIALLY COMPLETE |
-| 3 | Parsing | pdf-parse v2 `getText()`; mammoth `extractRawText`; corrupt files throw (executed) | COMPLETE (module) / error mapping BROKEN |
-| 4 | Text extraction | Synchronous in request; image-only PDF → 12 chars → **0 chunks** (executed) → silent `failed` later | PARTIALLY COMPLETE |
-| 5 | Text cleaning | CRLF/whitespace normalization, page-marker strip (destroys page signal); no header/footer removal or de-hyphenation | PARTIALLY COMPLETE |
-| 6 | Chunking | LangChain recursive splitter, chars/4 estimate; overlap **0** at paragraph boundaries; separators lead chunks; sentence splits; 400-char fallback chunks (executed) | PARTIALLY COMPLETE |
-| 7 | Embedding generation | Voyage via LangChain; `input_type` doc/query correct; count/dimension checked; nested retries; **no fetch timeout** | UNVERIFIED (live) |
-| 8 | Vector DB integration | Pinecone v5; throws at import if unconfigured; dimension check never runs | UNVERIFIED (live) |
-| 9 | Vector storage | ns = workspaceId, deterministic IDs, batch 100; metadata lacks title/page/uploadedAt/model | PARTIALLY COMPLETE |
-| 10 | Similarity search | topK schema 1–20, clamped 1–10 silently; no filter, threshold or existence check | PARTIALLY COMPLETE |
-| 11 | Retrieval quality | Irrelevant queries still yield top-5 "citations"; deleted docs retrievable; duplicates fill slots; no rerank/hybrid | PARTIALLY COMPLETE |
-| 12 | Context construction | `[Source N]` blocks labelled by ObjectId; worst case about 4k tokens (bounded); zero chunks → LLM still called | PARTIALLY COMPLETE |
-| 13 | Prompt construction | "Use only context" rules; `====` delimiters forgeable; no "context is data" rule; no project/team/date context (README §4) | PARTIALLY COMPLETE |
-| 14 | LLM integration | OpenAI SDK → Groq (`gsk_` key) / xAI; default `openai/gpt-oss-120b`; timeouts + idle watchdog; reasoning-token budget risk UNVERIFIED | PARTIALLY COMPLETE |
-| 15 | Response generation | Clean event protocol; **fabricated fallbacks removed** (commit `ede835f` + uncommitted diff) | UNVERIFIED (server) / parser COMPLETE |
-| 16 | Source attribution | From Pinecone metadata only; titles resolved client-side; `fileType` dropped by `AISession` schema | PARTIALLY COMPLETE |
-| 17 | Citation generation | Audit flags out-of-range `[Source N]`; misses `[Sources 1, 2]`, `[1]` (executed); non-blocking | PARTIALLY COMPLETE |
-| 18 | Conversation management | Single-turn; `sessionId` ignored; history = last 20 of all members | NOT IMPLEMENTED (multi-turn) |
-| 19 | AI error handling | Generic `LlmUnavailableError` (502), no provider leakage; plain `Error`s → 500; worker failure drops job | PARTIALLY COMPLETE |
-| 20 | External dependencies | Voyage, Pinecone, Groq/xAI, Cloudinary keys set (values not printed); `XAI_MODEL` unset; ai-service exits without Redis at boot | UNVERIFIED (live) |
-
-**Meeting summarizer.**
-- Non-streaming completion; strips code fences; `JSON.parse`; zod validation.
-- No JSON mode and no `max_tokens`.
-- `null` fields are rejected → 502 (executed schema check).
-- The summary is not persisted.
-- Action items go to bulk task creation with `assigneeId: null`.
-
-**AI features vs README:**
-
-| Feature | Status |
+| Test | Result |
 |---|---|
-| RAG Q&A | PARTIALLY COMPLETE |
-| Meeting summarizer | PARTIALLY COMPLETE |
-| Agent | NOT IMPLEMENTED |
-| generate-review | NOT IMPLEMENTED |
-| draft-section | NOT IMPLEMENTED |
-| explain-document | NOT IMPLEMENTED |
-| suggest-tasks | NOT IMPLEMENTED |
-| onboard | NOT IMPLEMENTED |
-| embed | NOT IMPLEMENTED |
-| SSE on all AI endpoints | PARTIALLY COMPLETE: only `/query` streams |
+| JWT forgery (alg=none, HS512, expired, wrong key, refresh-as-access) on 5 services | PASS (all 401) |
+| 21 cross-tenant probes | PASS |
+| Internal routes with missing/wrong/empty token or user JWT; traversal through gateway | PASS (401 / 404) |
+| Mass assignment on document create; operator injection on login/join | PASS |
+| Refresh race (6 concurrent) | PASS (one success) |
+| Concurrent deletes (4) | PASS (one 200) |
+| Rate-limit variants | FAIL (SEC-003) |
+| DOCX amplification | FAIL (SEC-002) |
+| Enumeration timing | FAIL (SEC-009) |
+| Access token after logout | Observation (SEC-007) |
+| Polyglot PDF | Accepted (SEC-020) |
+| Refresh without limiter (30 attempts) | No 429 (SEC-021) |
+| Security-relevant test subset | 78/78 PASS |
 
----
+### 21.3 Agent 5 independent reproductions
 
-## 12. Security Audit
+| Finding | Result |
+|---|---|
+| SEC-001 | CONFIRMED (LAN-address connects; mongo-express 200 with defaults) |
+| SEC-002 | CONFIRMED (11.7 s, +0.5 GB RSS, heap-limit crash); magnitude of the original claim refuted |
+| SEC-003 | CONFIRMED (login, register, AI) |
+| RT-001 | CONFIRMED with root cause |
+| RT-002 | CONFIRMED |
+| RT-003 | CONFIRMED (no response after 90 s) |
+| RT-007 | CONFIRMED and refined (dummy key identifiers only; user's logs clean) |
+| RT-004 | CONFIRMED (static plus Agent 2 runtime) |
+| SEC-022 | CONFIRMED totals; zod reachability statement refuted |
+| REQ-128, REQ-082, SEC-005/006/010 | CONFIRMED (static or by composition) |
+| Refuted findings | 0 |
 
-**Posture summary:**
+### 21.4 BLOCKED and NOT VERIFIED
 
-| Area | Status | Evidence |
+| Item | Status | Reason |
 |---|---|---|
-| JWT sign/verify | GOOD | HS256 pinned everywhere; fail-closed secrets (`packages/shared/config/secrets.ts:79-118`); access ≠ refresh secret |
-| JWT claims | WEAK (Low) | no iss/aud/typ/jti; token without `userId` accepted (executed, ISS-049) |
-| Refresh tokens | PARTIAL | hashed + TTL + reuse revocation, but race, determinism, body/localStorage (ISS-005, ISS-021) |
-| Passwords | ACCEPTABLE | bcryptjs 10 rounds (README 12); letter + digit policy; no max (bcrypt 72-byte limit) |
-| AuthZ: membership | GOOD | every workspace-scoped route checks membership; by-id routes check stored `workspaceId`; **no IDOR found** |
-| AuthZ: roles | **MISSING (High)** | ISS-009 |
-| Gateway bypass | GOOD (headers) / RISK (network) | services re-verify JWT; but bind 0.0.0.0 and bypass rate limits (ISS-024) |
-| Internal service auth | GOOD | SHA-256 + `timingSafeEqual`, fail-closed |
-| Mass assignment | MOSTLY GOOD | zod strips unknown keys; **`POST /api/documents` deliberately accepts server-owned fields** (ISS-002) |
-| NoSQL injection | GOOD | Express 5 simple query parser; filters pin `workspaceId`; no `$where` / user regex |
-| File upload | WEAK (Medium) | ISS-011; vulnerable multer and xmldom |
-| Cloudinary | WEAK (Medium) | public delivery, guessable `public_id` (ISS-023) |
-| CORS / CSP / helmet | WEAK (Low) | wildcard/reflective CORS; CSP off at gateway, none on SPA; workspace-service no helmet |
-| Error leakage | GOOD | generic 500; Mongoose validation messages echoed (Low) |
-| Logs | GOOD | `document-service/*.log` untracked, no sensitive content found |
-| LLM prompt injection | WEAK (Medium) | ISS-022 |
-| Frontend XSS | **RISK (High)** | react-markdown without rehype-raw (good); **`window.open(doc.cloudinaryUrl)` with attacker-controllable URL** (ISS-002) |
-| Secrets in repo/history | GOOD | no `.env` ever committed; old fallback JWT literals in history are denylisted; README contains human-readable example secrets (Low) |
-| Dev compose | WEAK (Medium) | Mongo, unauthenticated Redis and mongo-express on 0.0.0.0 with weak defaults (ISS-025) |
-| Dependencies | NEEDS WORK | `npm audit --package-lock-only`: **47 advisories** (4 critical, 18 high, 20 moderate, 5 low); runtime-relevant: multer 2.2.0, @xmldom/xmldom 0.8.14 (via mammoth), body-parser 2.3.0, zod 4.4.3, axios, morgan, react-router (ISS-026) |
-| Security tests | INEFFECTIVE | tests re-implement logic (ISS-007) |
+| Upload to indexed to cited answer to saved session | BLOCKED | Needs live Cloudinary, Voyage, Pinecone and LLM |
+| Meeting summary with a real LLM | BLOCKED | Live LLM |
+| Pinecone delete-by-metadata on a live index | BLOCKED | Live Pinecone |
+| Client disconnect mid-generation; idle-timeout `partial:true`; SIGTERM during long stream or job | NOT VERIFIED | No streaming LLM |
+| MongoDB runtime outage and reconnection | NOT VERIFIED | Disposable MongoDB shared by other agents |
+| Exhaustion of ai-query, summarize, general and login limits | NOT VERIFIED | Cost and time (register limiter and headers verified) |
+| All browser journeys (login UI, refresh UX, upload UI, status, SSE rendering, Kanban) | NOT VERIFIED | No browser automation installed |
+| CORS through the gateway in a browser; multi-instance gateway | NOT VERIFIED | Out of scope |
+| SEC-001 from a second host | NOT VERIFIED | No second host |
+| Crafted PDF parser attacks | NOT VERIFIED | Not tested |
+| Application Docker images | NOT APPLICABLE | No Dockerfiles |
 
-**The ISS-002 chain, step by step** (each step verified statically; the browser execution step is [I]):
-1. Any workspace member calls `POST /api/documents`. The schema accepts any string as `cloudinaryUrl` (`packages/validation/schemas/document.schema.ts:25-37`), and the controller spreads `...req.body` (`document.controller.ts:141-144`).
-2. Reindexing that record puts the attacker-controlled `extractedText` into RAG.
-3. When a co-member clicks the source on the search page, `window.open(doc.cloudinaryUrl, "_blank")` runs (`SemanticSearchPage.tsx:91`) with no scheme check and no `noopener`.
-4. A `javascript:` URL can then read both tokens from localStorage.
-5. Separately, deleting the forged record calls `cloudinary.uploader.destroy(<foreign public_id>)`, deleting another tenant's file.
+### 21.5 Static-only findings (no runtime evidence)
 
-**AuthZ matrix (summary).** Every workspace-scoped endpoint checks membership: workspaces, documents (list, get, upload, delete, reindex), boards, tasks, activities, and AI search/query/sessions/summarize. **No endpoint checks a role.** Destructive routes available to any member:
-- document delete;
-- board cascade delete;
-- task delete.
-
-**Latent risk to track.** The markdown-image exfiltration channel in SEC-007 is **not present today**, because RAG answers render as plain text. The planned task to render answers as Markdown (P1-B06) would create it unless images are blocked. P1-B06 is therefore gated on P1-B03.
+ARC-002, ARC-009, ARC-012, ARC-013, ISS-015, ISS-027, ISS-028, ISS-029, ISS-031, ISS-032, ISS-037, ISS-039, ISS-041, ISS-043, ISS-046, ISS-047, ISS-048, ISS-050, SEC-005 (code and stored data; no URL fetched), SEC-006 (cross-workspace refusal runtime-verified; in-workspace injection static), SEC-008, SEC-011, SEC-012, SEC-013, SEC-019 (partly runtime), SEC-023, REQ-128. ARC-003 was verified by a Node date computation, not in a browser.
 
 ---
 
-## 13. Reliability and Error-Handling Audit
+## 22. Performance and reliability assessment
 
-| Scenario | Current behaviour | Evidence | Issue |
+**Measurements (this host, under memory pressure; indicative, not benchmarks)**
+
+| Measurement | Value | Source |
+|---|---|---|
+| Limited request with Redis up | 21 to 258 ms | Agents 2, 5 |
+| Limited request with Redis down | 9.2 to 16.1 s; 5 concurrent about 15 s each | RT-001 |
+| AI query with Redis down (two limiters) | 30.8 to 31.4 s | RT-001 |
+| Unlimited route with Redis down (`/me`) | 27 to 163 ms | Agents 2, 5 |
+| DOCX 19 KB / 180k paragraphs via service | 11.7 s, RSS 504 to 996 MB, 3 health timeouts; not released | SEC-002 |
+| Heap-limited (256 MB) service with the same file | Crash (out of memory) | SEC-002 |
+| Login timing, unknown vs known e-mail | 23.8 ms vs 1,076.6 ms | SEC-009 |
+| Cloudinary 401 | 10.2 s first call, about 2 s afterwards | Agent 2 |
+| Summarize with dummy LLM | 358 ms | Row 121 |
+| Reindex during Redis outage | 503 after 14 s at the service, 29 s via gateway | Row 145 |
+| Health recovery after Redis returns | One probe (about 140 ms) | Row 148 |
+| Cold start | auth/workspace/document/task about 3 min; auth restart 82 s; ai-service 35 s warm to 4 min; gateway about 5 s | Row 169 |
+| Graceful shutdown | 1.5 to 3.2 s per service | Rows 176-181 |
+| Service memory | About 60 to 120 MB working set each | Agent 2 |
+| Frontend build | 68 to 136 s; 1.56 MB JS chunk | ARC-011 |
+| `npm test` with MongoDB | 202 to 346 s | Section 17 |
+
+**Reliability observations**
+- Startup fails closed on bad configuration; MongoDB has a single bounded connect attempt (services started before MongoDB is ready exit; no compose healthcheck for ordering).
+- Redis reconnection works (about every 4.4 to 5 s); auth and ai services log every attempt (RT-009).
+- Gateway: slow fail-open (RT-001), no upstream timeout (RT-003), static health (ISS-044).
+- Worker: single in-process consumer; no provider timeout (ISS-037); claim/fencing makes duplicates safe.
+- Unbounded lists (ISS-043); full text in queue jobs (SEC-006).
+- False success on port conflict (RT-002); invalid provider keys reported healthy (RT-006).
+- Windows: graceful stop only with Ctrl+C in an attached console.
+- Host: disk C: had 0.8 GB free at the end of the audit, and about 2.3 to 3.1 GB of free virtual memory; slow cold starts would trip supervisors with short start timeouts.
+- No load testing exists (REQ-143); scalability is unmeasured.
+
+---
+
+## 23. Known limitations and unverified areas
+
+1. **External providers:** Voyage, Pinecone (including delete-by-metadata on the serverless index), Groq/xAI and Cloudinary were never called with real credentials. Every verification of ISS-001, ISS-006, ISS-015, ISS-028, ISS-037 and of RAG answer quality is static or uses stubs/dummy keys.
+2. **Browser:** no browser automation was available. Every UI journey, including the refresh UX, upload UI, SSE rendering, truncation display, Kanban drag-and-drop, REQ-128, ARC-002 and ARC-003, is verified only by code reading or module tests.
+3. **SEC-001** exploitation from a second host was not executed; evidence is configuration, firewall evaluation and connects through the host's own LAN address.
+4. **MongoDB runtime outage** and reconnection were not tested.
+5. **Rate-limit exhaustion** for ai-query, summarize, general and login limits was not driven to 429 by Agent 2 (Agents 3 and 5 did reach 429 on login, register and ai-query).
+6. **Crafted PDFs** (pdf.js parser) were not tested; the DOCX probe was bounded.
+7. **Real Pinecone contents** (orphaned vectors) and **real Cloudinary URLs** were not inspected.
+8. **CI** was not executed remotely; only history was read.
+9. **Multi-instance behaviour** (several gateways, sweeps, workers in separate processes) beyond claim logic covered by tests.
+10. **Local `.env` validity:** only variable names were inspected.
+11. **Deployment-level controls** (TLS, reverse proxy, CSP at a static host): no deployment configuration exists.
+12. **Run hygiene:** the disposable Redis was recreated during Agent 2's outage tests, so its queue contents are not evidence. Performance figures were measured on a contended, memory-starved host.
+13. **Specification:** the README describes a much larger target system; 71 requirements are not implemented. These are product scope, not defects.
+
+---
+
+## 24. Development readiness gate assessment
+
+| Gate | Result | Evidence |
+|---|---|---|
+| 1. Core stability | **CONDITIONAL PASS** | For: 171 of 190 runtime checks pass across auth, workspace, task, document, AI validation, worker, shutdown and reconnect; 239/239 tests (three runs); typecheck and build clean. Against: RT-001 (9 to 31 s brown-out), SEC-002 (crash by crafted upload), RT-002, RT-003; live-provider happy path NOT VERIFIED. Condition: SEC-002 and RT-001 fixed. |
+| 2. Security | **FAIL** | SEC-001 is a live P0 exposure (default credentials verified through the LAN interface; Public profile with an Allow rule). SEC-003 (P1) bypasses login, register and AI limits. SEC-002 (P1). Application-layer controls hold (JWT pinning, 21 isolation probes, internal routes, atomic rotation, mass-assignment protection). |
+| 3. Data integrity | **CONDITIONAL PASS** | For: deletion ordering and rollback, claim/fencing, atomic join, atomic idempotent bulk import verified by tests and runtime; 0 orphans and 0 duplicates in real data. Open: RT-004, SEC-006, SEC-012 (1 real stale citation), SEC-013, ISS-001 unverified on live Pinecone. |
+| 4. Engineering quality | **CONDITIONAL PASS** | For: strong unit and integration suite; tsc clean. Against: CI never run on current code and its only run failed; lint not gated (42 problems); no coverage; no E2E; silent skips (ARC-006); built-artefact divergence (RT-005). Condition: green CI on a PR into `develop`. |
+| 5. Architecture | **CONDITIONAL PASS** | Coherent gateway-plus-services design: per-service JWT verification, shared fail-closed membership checker, queue with claim/fencing and sweep, docs largely aligned. Debts: `packages/shared` not a package (ISS-032), 4 JWT verifiers (ISS-047), text-carrying jobs (SEC-006), no event bus. None blocks development. |
+| 6. Operational readiness | **FAIL** | No Dockerfiles or deployment artefacts; insecure infrastructure defaults; static gateway health; no gateway timeout; Redis-outage brown-out; false startup success on port conflict; no request IDs or structured logging (except document-service); unbounded parser memory; Windows graceful stop only via Ctrl+C; 0.8 GB free disk on the development host. Blocks any exposure or production release, not local development. |
+
+---
+
+## 25. Prioritized debugging and stabilization roadmap
+
+Roadmap tiers describe **when** work must happen; they can differ from a finding's severity where the lead promoted an item to a prerequisite. Bug fixes and stabilization are listed in 25.1 to 25.5; missing capabilities are listed separately in 25.6 as product scope.
+
+### 25.1 P0: Immediate (this host, before any further work)
+
+| # | Item | Actions | Done when |
 |---|---|---|---|
-| Malformed JSON / body > 100 KB | 500 "Internal Server Error" (**executed**) | `packages/shared/errors/error.middleware.ts:10-38` | ISS-010 |
-| Upload > 10 MB | `MulterError` → 500 (**executed**) | `upload.middleware.ts:54-56` | ISS-010 |
-| Duplicate key (E11000) | 500 (**executed** mapping) | error middleware | ISS-010 |
-| Bodiless POST to summarize-meeting | TypeError → 500 (**executed**) | `ai-service/src/middlewares/workspace.middleware.ts:16` | ISS-010 |
-| workspace-service down | Dependent services return **403 "not a member"** (**executed** ai + task) | `*/utils/workspace-checker.ts` | ISS-012 |
-| workspace-service hangs | Every dependent request hangs (no timeout) [I] | same | ISS-012 |
-| MongoDB down at ai-service boot | Service starts; sessions silently not saved; `/sessions` hangs about 10 s then 500 [I] | `ai-service/src/config/db.ts:23-25` | ISS-013 |
-| Wrong `MONGO_URI` for task-service | Silent fallback to `mongodb://127.0.0.1:27017/researchmind` | `task-service/src/config/db.ts:6-12` | ISS-013 |
-| Redis blip > ~1 s | document-service producer never reconnects; every upload → `failed` until restart [I: ioredis] | `document-service/src/config/redis.ts:7-12` | ISS-014 |
-| Redis down at ai-service boot | Process exits although HTTP routes don't need Redis | `ai-service/src/server.ts:23-37` | ISS-014 |
-| Worker crash / nodemon restart mid-job | Job lost (BLPOP); doc stuck `indexing` forever; UI offers no retry for `indexing` | `embedding.worker.ts:133-136`; `document.service.ts:271` | ISS-006 |
-| document-service restart | Re-enqueues **all** pending/failed docs, unbounded, no dedupe, not awaited | `document.service.ts:268-290`; `server.ts:25` | ISS-006 |
-| Voyage hangs | Single sequential worker blocks indefinitely (no fetch signal) | LangChain `voyage.cjs:104` | ISS-037 |
-| Client cancels SSE | LLM keeps generating; session still saved | `query.controller.ts:73-103` | ISS-015 |
-| Stream dropped without terminal event | UI shows partial answer as complete "AI Grounded Response" (parser **executed**) | `useAiQuery.ts:147-167` | ISS-016 |
-| LLM stall / no first token / empty content | Handled: idle watchdog, timeouts, `error` event, no fabricated answer | `grok.service.ts` | — (good) |
-| Retrieval failure | Handled: `error` event, no LLM call | `rag.service.ts:55-63` | — (good) |
-| Bulk task item N invalid at DB level | Items 1..N-1 committed; 400 returned; retry duplicates [I] | `task.service.ts:279-311` | ISS-018 |
-| Concurrent refresh / two tabs | Possible global logout or 500 [I]; identical tokens **executed** | `auth.service.ts:126-143` | ISS-005 |
-| Process shutdown | No SIGTERM/SIGINT handling anywhere; connections never closed | grep | ISS-013 |
-| Health checks | Static 200s; only ai checks Redis; none check Mongo; shared `healthCheck.ts` unused | `*/health.routes.ts` | ISS-044 |
+| 1 | SEC-001 (host) | Bind MongoDB, Redis and mongo-express to `127.0.0.1` (or remove mongo-express); set non-default MongoDB and mongo-express credentials and fix `MONGO_ROOT_USERNAME` in the root `.env`; rotate credentials; enable Redis `requirepass`/ACL and update every `REDIS_URL`; create least-privilege per-service MongoDB users (SEC-014); switch the network profile to Private or scope the Docker firewall rule | `docker ps` shows `127.0.0.1:` only; LAN connects fail; Redis returns NOAUTH; default credentials fail; each service user is limited to its own database |
+| 2 | Disk space | Free space on C: (0.8 GB at the end of the audit) | Enough headroom for builds, Docker volumes and logs |
 
----
+### 25.2 P1: Required before development (prerequisites 2 and 3)
 
-## 14. Existing Test Suite Analysis
-
-**Inventory.** Exactly **two** test files exist, both **untracked**: `tests/auth-flow.test.ts` (2 tests) and `tests/workspace-isolation.test.ts` (3 tests). Neither imports any application module:
-- `auth-flow.test.ts` tests Node's `crypto` and an inline `Map`-based model of reuse detection (`:6-34`).
-- `workspace-isolation.test.ts` tests an inline membership array and an inline re-implementation of the cycle check (`:10-47`).
-
-They would stay green if every real check were deleted. **Effective application test coverage: 0%.**
-
-**Missing infrastructure:**
-- Jest/Vitest config;
-- Supertest;
-- mongodb-memory-server;
-- Redis mock;
-- msw/nock;
-- frontend test tooling;
-- coverage tooling;
-- k6 (README §21 references `k6/search-load.js`; there is no `k6/` directory).
-
-**`npm test` cannot run offline.** It invokes `npx tsx`, and `tsx` is neither declared nor installed (verified in all `node_modules` and in the lockfile).
-
-**Testability blockers:** module-load side effects.
-- `requireSecret()` throws at import.
-- The gateway opens Redis at import.
-- multer runs `mkdirSync` at import.
-- Cloudinary, Pinecone and OpenAI clients are configured at import.
-
-Each service does export `app` separately from `server.ts`, which suits Supertest.
-
-**CI** (`.github/workflows/ci.yml`, untracked, never run):
-- Triggers on `main`, which does not exist (the integration branch is `develop`), and on the feature branch.
-- Runs `npm ci`, `tsc --noEmit` for 6 services, the frontend build, then `npm test`.
-- The frontend build would fail; `npm test` needs a download.
-- No lint, no DB service containers, no notification-service.
-
-**Commands executed during this audit** (all with local binaries; nothing downloaded):
-
-| # | Command | Exit | Result | Run by |
+| # | Item | Severity | Actions | Done when |
 |---|---|---|---|---|
-| 1 | `npm test` | — | **Not executed**: `tsx` not installed; `npx` would download | QA |
-| 2 | `node --experimental-strip-types --test tests/*.test.ts` | 0 | 5 pass / 0 fail (meaningless; see above) | QA, Verifier |
-| 3–8 | `tsc --noEmit -p services/{api-gateway,auth-service,workspace-service,task-service,document-service,ai-service}` | 0 ×6 | **0 TS errors** in each service | QA (workspace + document re-run by Verifier) |
-| 9 | `tsc --noEmit -p frontend/tsconfig.app.json` | 2 | 1 error: `JoinWorkspaceModal.tsx(59,27) TS2345` | QA, Verifier |
-| 10 | `tsc --noEmit -p frontend/tsconfig.node.json` | 2 | 3 errors: TS2345 above + TS6133 `ai.api.ts:2`, `CreateTaskModal.tsx:4` → CI `tsc -b` would fail | QA |
-| 11 | `eslint .` (frontend, no `--fix`/`--cache`) | 1 | **48 problems (44 errors, 4 warnings) in 30 files**: no-explicit-any 26, set-state-in-effect 7, no-unused-vars 4, preserve-caught-error 3, exhaustive-deps 2, incompatible-library 2, immutability 1, only-export-components 1, no-misleading-character-class 1, no-empty 1 | QA, Verifier |
-| 12 | `vite build --configLoader runner --outDir <scratch>` | 1 | **Inconclusive**: config load failed (`__dirname` in ESM config with the non-writing loader); production bundle **not assessed** | QA |
-| 13 | Real-module harness via `ts-node --transpile-only` (scratch cwd, ephemeral localhost ports, no DB/Redis/network) | 2* | 51 checks recorded (*exit 2 from a final ESM import, re-run as #14) | QA |
-| 14 | `node --experimental-strip-types sse_check.mjs` (real `frontend/src/utils/sse.ts`) | 0 | 3 checks | QA |
-| 15 | Offline RAG scripts (chunking, extractors, citation audit, schemas, SSE parser copy) | 0 | about 25 observations (see §15 TC-123…130) | AI/RAG |
-| 16 | `npm audit --json --package-lock-only` | — | 47 advisories (4/18/20/5) | Security |
-| 17 | sha1 of all 306 non-dependency files + `git status --porcelain` diff vs baseline | — | **Identical** (run 3 times) | Orchestrator, QA, Verifier |
-
----
-
-## 15. Edge-Case Testing Matrix
-
-**Legend:**
-- **Executed** = Yes only where real application code was actually run (module in isolation; **not** end to end). "No" rows are proposals.
-- **Result** is one of Pass, Fail, Partial or Not Tested.
-- A "Predicted defect" means code reading shows the expected behaviour would not happen. Such rows stay **Not Tested** until a runtime test confirms them.
-
-**Totals:**
-
-| Measure | Count |
-|---|---|
-| Rows | 149 |
-| Executed | 58 (29 pass, 28 fail, 1 partial) |
-| Not tested | 91 (about 40 carry a predicted defect) |
-
-### 15.1 Authentication & authorization
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-001 | Login, wrong password | `POST /api/auth/login` | 401 "Invalid credentials" | No | — | Not Tested | — |
-| TC-002 | Login, unknown email | same | 401, same message and timing | No | — | Not Tested | Predicted timing oracle (`auth.service.ts:80-82`) |
-| TC-003 | Login, missing password | `loginSchema` | 400 | Yes | Rejected (generic message) | Pass | ISS-041 |
-| TC-004 | Login, body `{}` | `validate()` | 400 | Yes | 400 | Pass | — |
-| TC-005 | Login, malformed JSON | `express.json` + `errorMiddleware` | 400 | Yes | **500** | Fail | ISS-010 |
-| TC-006 | Register, empty body | `registerSchema` | 400 | Yes | Rejected, 3 issues | Pass | — |
-| TC-007 | Register, password without digit | `registerSchema` | 400 | Yes | Rejected | Pass | — |
-| TC-008 | Register, wrong types | `registerSchema` | 400 | Yes | Rejected | Pass | — |
-| TC-009 | Register existing email (sequential) | `POST /api/auth/register` | 409 | No | — | Not Tested | — |
-| TC-010 | Register same email ×2 concurrently | same | one 201, one 409 | No | (E11000 → 500 mapping executed) | Not Tested | Predicted 500 — ISS-010 |
-| TC-011 | Protected route, no Authorization | `packages/shared/auth/authenticate.ts` | 401 | Yes | 401 | Pass | — |
-| TC-012 | `Authorization: Basic …` | same | 401 | Yes | 401 | Pass | — |
-| TC-013 | Garbage bearer token | same | 401 | Yes | 401 | Pass | — |
-| TC-014 | Expired access token | same | 401 | Yes | 401 | Pass | — |
-| TC-015 | Token signed with another secret | same | 401 | Yes | 401 | Pass | — |
-| TC-016 | `alg:none` token | same | 401 | Yes | 401 | Pass | — |
-| TC-017 | Refresh token used as access token | same | 401 | Yes | 401 | Pass | — |
-| TC-018 | Valid signature, no `userId` claim | same | 401 | Yes | **200, `req.user = {}`** | Fail | ISS-049 |
-| TC-019 | `/auth/refresh` with no token | `auth.routes.ts:24` | 400/401 | No | — | Not Tested | Predicted 500 for bodiless request (ISS-010) |
-| TC-020 | Refresh with rotated (old) token | `refreshAccessToken` | 401 + revoke all sessions | No | — | Not Tested | — |
-| TC-021 | Two concurrent refreshes, same token | same | exactly one succeeds | No | — | Not Tested | Predicted both succeed — ISS-005 |
-| TC-022 | Two tabs refresh after expiry | `frontend/src/api/axios.ts` | both stay signed in | No | — | Not Tested | Predicted global logout — ISS-005 |
-| TC-023 | Same user logs in twice within 1 s | `POST /api/auth/login` | both 200 | No | (identical refresh tokens **executed**) | Not Tested | Predicted 500 — ISS-005 |
-| TC-024 | Logout without refreshToken | `logoutSchema` | 400 | Yes | 400 | Pass | — |
-| TC-025 | Logout with another user's refresh token | `logoutUser` | 200, nothing revoked | No | — | Not Tested | — |
-| TC-026 | 6th failed login in 15 min | gateway `loginRateLimiter` | 429 | No | — | Not Tested | Fails open if Redis down |
-| TC-027 | Flood `/auth/refresh` | gateway | rate limited | No | — | Not Tested | Predicted unthrottled — ISS-024 |
-| TC-028 | Non-lead changes roles / removes member | README §8.2 | 403 | No | — | Not Tested | Not implemented — ISS-009 |
-| TC-029 | Non-owner cascade-deletes board | `DELETE …/boards/:id?cascade=true` | 403 for non-lead | No | — | Not Tested | Predicted allowed — ISS-009 |
-| TC-030 | User A lists User B's workspace tasks | `GET …/tasks` | 403 | No | — | Not Tested | — |
-| TC-031 | User A reads User B's document by id | `GET /api/documents/:id` | 403 | No | — | Not Tested | — |
-| TC-032 | Boot with missing / "changeme" / short / placeholder secret | `secrets.ts` | refuse | Yes | All 4 rejected; 40-char accepted | Pass | — |
-
-### 15.2 API input handling
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-033 | JSON body > 100 KB | any `express.json()` | 413 | Yes | **500** | Fail | ISS-010 |
-| TC-034 | POST without Content-Type on validated route | `validate()` | 400 | Yes | 400 | Pass | — |
-| TC-035 | summarize-meeting with no body | ai `workspace.middleware.ts:16` | 400 | Yes | **500** | Fail | ISS-010 |
-| TC-036 | Workspace name "   " | `createWorkspaceSchema` | 400 | Yes (schema) | zod accepts; relies on Mongoose | Fail | — |
-| TC-037 | Workspace name 100,000 chars | schema + model | 400 | Yes (schema) | Accepted; no model maxlength | Fail | ISS-050 |
-| TC-038 | Join with unknown invite code | `POST /api/workspaces/join` | 404 | No | — | Not Tested | — |
-| TC-039 | Join when already a member | same | 409 (README) / 400 (code) | No | — | Not Tested | ISS-042 |
-| TC-040 | Join from sidebar modal | `JoinWorkspaceModal.tsx:59` | joins | Yes (tsc) | TS2345 → nested payload | Fail | ISS-003 |
-| TC-041 | Invalid ObjectId in `/api/workspaces/:id` | CastError mapping | 400 | Yes | 400 | Pass | — |
-| TC-042 | Invalid ObjectId in `/api/documents/:id` | `document.service.ts:187` | 404 | No | — | Not Tested | — |
-| TC-043 | Task title 201 chars | `createTaskSchema` / `Task.ts` | 400 clean | Yes (schema) | zod accepts; DB rejects raw | Fail | ISS-018 |
-| TC-044 | Task status "blocked" | `createTaskSchema` | 400 | Yes | Rejected | Pass | — |
-| TC-045 | dueDate "tomorrow" | same | 400 | Yes | Rejected | Pass | — |
-| TC-046 | Bulk create 0 tasks | `bulkCreateTasksSchema` | 400 | Yes | Rejected | Pass | — |
-| TC-047 | Bulk create 51 tasks | same | 400 | Yes | Rejected | Pass | — |
-| TC-048 | Bulk create, item #5 invalid at DB level | `task.service.ts:279-311` | nothing written | No | — | Not Tested | Predicted partial write — ISS-018 |
-| TC-049 | Task with boardId from another workspace | `task.service.ts:155-163` | 400 | No | — | Not Tested | — |
-| TC-050 | Task with arbitrary `assigneeId` | `task.schema.ts:15` | 400 | No | — | Not Tested | Predicted accepted — ISS-004 |
-| TC-051 | PATCH task parent = itself | `task.service.ts:401-406` | 400 | No | — | Not Tested | — |
-| TC-052 | PATCH creating cycle A↔B | `assertParentChainIsSafe` | 400 | No | — | Not Tested | Only inline-copy test exists |
-| TC-053 | Delete board with tasks, no cascade | `deleteBoard` | 409 | No | — | Not Tested | — |
-| TC-054 | Board name 101 chars / non-string | `board.controller.ts` | 400 | No | — | Not Tested | No zod on board routes |
-| TC-055 | `topK: 20` on `/api/ai/query` | `ai.schema.ts`, `query.service.ts` | honoured or rejected | Yes (schema) | Accepted, silently capped to 10 | Fail | ISS-028 |
-| TC-056 | `topK: "5"` | `ai.schema.ts` | 400 | Yes | Rejected | Pass | — |
-| TC-057 | Client-supplied `cloudinaryUrl`/`extractedText` on `POST /api/documents` | `document.controller.ts:141-144` | rejected | No | — | Not Tested | Predicted accepted — ISS-002 |
-| TC-058 | Error envelope vs README §13 | all services | 422 + `{error:{code}}` | Yes | 400/500 + `{success,message}` | Fail | ISS-041 |
-
-### 15.3 Database
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-059 | New user lists workspaces (empty) | `GET /api/workspaces` | 200 `[]` | No | — | Not Tested | — |
-| TC-060 | Workspace with no boards/tasks | `GET …/boards`, `…/tasks` | 200 `[]` | No | — | Not Tested | — |
-| TC-061 | Duplicate-key error mapping | `error.middleware.ts` | 409 | Yes | **500** | Fail | ISS-010 |
-| TC-062 | GET task with valid non-existent id | `GET …/tasks/:id` | 404 | No | — | Not Tested | — |
-| TC-063 | Deleted document still in vector DB | `document.service.ts:193-226` | vectors removed | No | — | Not Tested | Predicted remain — ISS-001 |
-| TC-064 | Mongo down at ai-service boot | `ai-service/src/config/db.ts` | refuse / 503 | No | — | Not Tested | Predicted starts anyway — ISS-013 |
-| TC-065 | task-service `MONGO_URI` wrong | `task-service/src/config/db.ts` | fail fast | No | — | Not Tested | Predicted silent fallback — ISS-013 |
-| TC-066 | Redis down for gateway limiter | `rate-limit.middleware.ts:88` | documented fail-open | No | — | Not Tested | — |
-| TC-067 | Concurrent PATCH on same task | `task.service.ts:377-448` | consistent activity log | No | — | Not Tested | Predicted stale diffs |
-| TC-068 | Concurrent join by same user | `workspace.service.ts:60-69` | single membership | No | — | Not Tested | Predicted duplicate — ISS-042 |
-| TC-069 | parentTaskId from another workspace | `task.service.ts:165-174` | 400 | No | — | Not Tested | — |
-| TC-070 | workspace-service down → task-service | `task-service/src/utils/workspace-checker.ts` | 503 | Yes | **403** | Fail | ISS-012 |
-| TC-071 | workspace-service down → ai-service | ai `workspace.middleware.ts` | 503 | Yes | **403** | Fail | ISS-012 |
-| TC-072 | workspace-service down → document-service | `document-service/src/utils/workspace-checker.ts` | 503 | No | — | Not Tested | Predicted 403 — ISS-012 |
-| TC-073 | AI session save fails after streaming | `rag.service.ts:120-127` | error event, no `done` | No | — | Not Tested | — |
-
-### 15.4 Document processing
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-074 | 0-byte PDF | `upload.middleware.ts` | 400/422 | Yes (middleware) | Accepted | Fail | ISS-011 |
-| TC-075 | `.mp4` upload | same | 422 (README) | Yes | 400 "Only PDF and DOCX…" | Pass (status ≠ spec) | ISS-041 |
-| TC-076 | `.exe` sent as `application/zip` | `upload.middleware.ts:43` | reject | Yes | **Accepted** | Fail | ISS-011 |
-| TC-077 | Legacy `.doc` | middleware + `document.service.ts:107-111` | 415/422 | Yes (middleware) | Accepted (service → 500 predicted) | Fail | ISS-011 |
-| TC-078 | 11 MB PDF | `upload.middleware.ts:54-56` | 413 | Yes | **500** | Fail | ISS-010 |
-| TC-079 | Request without file part | `document.service.ts:48-53` | 400 | Yes (middleware) | Middleware passes; service not run | Partial | — |
-| TC-080 | Corrupted PDF via upload | `pdf-extractor.ts` | 422 + temp removed | No | — | Not Tested | Predicted 500 (see TC-124) |
-| TC-081 | Scanned PDF (no text layer) via upload | worker | user told "no text" | No | — | Not Tested | Predicted silent `failed` (see TC-123) |
-| TC-082 | Same file uploaded twice | `document.service.ts` | dedupe or warning | No | — | Not Tested | Predicted duplicate vectors |
-| TC-083 | Upload by non-member | `document.service.ts:76-89` | 403, temp deleted | No | — | Not Tested | — |
-| TC-084 | Delete document then query RAG | delete + `/api/ai/query` | never cited | No | — | Not Tested | Predicted cited — ISS-001 |
-| TC-085 | Cloudinary upload failure | `uploadToCloudinary` | 502/503, temp cleaned | No | — | Not Tested | Predicted 500 |
-| TC-086 | Redis enqueue failure | `document.service.ts:145-153` | saved, `failed` | No | — | Not Tested | — |
-| TC-087 | Reindex document of another workspace | `POST /api/documents/:id/reindex` | 403 | No | — | Not Tested | — |
-| TC-088 | Client-side >10 MB / wrong type | `UploadDocumentModal.tsx` | blocked | No | — | Not Tested | — |
-
-### 15.5 RAG pipeline
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-089 | Whitespace-only query | `ragQuerySchema` | 400 | Yes (schema) | Accepted (SSE error at 200 predicted) | Fail | ISS-028 |
-| TC-090 | Empty query `""` | `ragQuerySchema` | 400 | No | — | Not Tested | — |
-| TC-091 | Very short query ("a") | `/api/ai/query` | answer or "insufficient" | No | — | Not Tested | — |
-| TC-092 | 200,000-char query | `ragQuerySchema` | 400 | Yes (schema) | **Accepted** | Fail | ISS-028 |
-| TC-093 | Irrelevant query | `retrieval.service.ts` | no citations | No | — | Not Tested | Predicted top-K irrelevant — ISS-028 |
-| TC-094 | Workspace with no indexed docs | `buildRagContext` | empty sources, refusal | Yes (helper) | "No relevant document chunks…"; LLM still called | Pass (helper) | ISS-028 |
-| TC-095 | Answer cites `[Source 4]` with 3 sources | `citation-validator.service.ts` | flagged | Yes | `unverified:[4]` | Pass | — |
-| TC-096 | Cites a source with 0 retrieved | same | flagged | Yes | `unverified:[1]` | Pass | — |
-| TC-097 | `[Source 0]` / lowercase `[source 2]` | same | 0 flagged, case-insensitive | Yes | correct | Pass | — |
-| TC-098 | Voyage 5xx during query | `rag.service.ts:49-64` | SSE error, no LLM | No | — | Not Tested | — |
-| TC-099 | Voyage 429 during query | `query-embedding.service.ts` | bounded latency | No | — | Not Tested | Predicted ~45 s+ — ISS-037 |
-| TC-100 | Pinecone unavailable | `retrieval.service.ts` | SSE error | No | — | Not Tested | — |
-| TC-101 | LLM no first token before timeout | `grok.service.ts` | error `partial:false` | No | — | Not Tested | — |
-| TC-102 | LLM stalls mid-stream | idle watchdog | error `partial:true` | No | — | Not Tested | — |
-| TC-103 | LLM returns empty content | `grok.service.ts:157-160` | error, no session | No | — | Not Tested | — |
-| TC-104 | Meeting LLM returns non-JSON / invalid | `meeting-summarizer.service.ts` | 502/503 generic | No | — | Not Tested | — |
-| TC-105 | Client aborts mid-stream | `query.controller.ts` | LLM cancelled | No | — | Not Tested | Predicted continues — ISS-015 |
-| TC-106 | Prompt injection inside document text | `rag.prompt.ts` | instructions ignored | No | — | Not Tested | Exposure — ISS-022 |
-
-### 15.6 Frontend
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-107 | SSE event split across reads (incl. 7-byte fragments) + malformed event | `frontend/src/utils/sse.ts` | reassemble; skip bad | Yes | Correct | Pass | — |
-| TC-108 | SSE CRLF framing | same | parsed | Yes | Parsed | Pass | — |
-| TC-109 | Stream ends without done/error | `sse.ts` + `useAiQuery.ts:147-167` | shown incomplete | Yes (parser) | Hook marks complete | Fail | ISS-016 |
-| TC-110 | Backend down on Documents page | `DocumentsPage.tsx` | error state + retry | No | — | Not Tested | — |
-| TC-111 | Network drop during AI stream | `useAiQuery.ts` | error message | No | — | Not Tested | — |
-| TC-112 | Access token expired | `axios.ts:46-121` | silent refresh + retry once | No | — | Not Tested | — |
-| TC-113 | Refresh token expired | `axios.ts` | session cleared → /login | No | — | Not Tested | — |
-| TC-114 | Sign-out while refresh in flight | `axios.ts`, `lib/session.ts` | no resurrection | No | — | Not Tested | — |
-| TC-115 | Assign task to a member | `TaskDetailModal.tsx:560` | assigneeId = userId | No | — | Not Tested | Predicted name stored — ISS-004 |
-| TC-116 | Double-click "Create task" | `CreateTaskModal.tsx` | one task | No | — | Not Tested | Guarded |
-| TC-117 | Click "Create tasks from action items" twice | `MeetingSummarizerPage.tsx:664-670` | no duplicates | No | — | Not Tested | Predicted duplicates — ISS-018 |
-| TC-118 | Empty and loading states | `DocumentEmptyState.tsx`, `DocumentSkeleton.tsx`, `KanbanPage.tsx` | rendered | No | — | Not Tested | — |
-| TC-119 | Register form invalid password | `RegisterForm.tsx` | inline errors mirror backend | No | — | Not Tested | Predicted late server error — ISS-039 |
-| TC-120 | 429 on AI query | `ai.api.ts:67-68` | friendly message | No | — | Not Tested | — |
-| TC-121 | API returns `data: undefined` | `workspace.api.ts`, `ai.api.ts` | no crash | No | — | Not Tested | — |
-| TC-122 | Frontend production typecheck | `tsc -b` | 0 errors | Yes | 3 errors | Fail | ISS-003 |
-
-### 15.7 Additional document-processing / RAG / UI scenarios
-
-| ID | Scenario | Target | Expected | Executed | Actual | Result | Issue |
-|---|---|---|---|---|---|---|---|
-| TC-123 | Image-only PDF (`test_sample.pdf`) through extractor + chunker | `pdf-extractor.ts`, `chunking.service.ts` | rejected at upload with reason | Yes (modules) | 12 chars → **0 chunks**; upload would accept, worker would fail silently | Fail | ISS-034, ISS-011 |
-| TC-124 | Corrupt PDF extraction | `pdf-extractor.ts` | graceful 422 | Yes (module) | Throws `InvalidPDFException` (HTTP mapping → 500 predicted) | Fail | ISS-010 |
-| TC-125 | Corrupt DOCX extraction | `docx-extractor.ts` | graceful 422 | Yes (module) | Throws "Corrupted zip" (→ 500 predicted) | Fail | ISS-010 |
-| TC-126 | Empty / whitespace text chunking | `chunking.service.ts` | 0 chunks | Yes | 0 / 0 | Pass | — |
-| TC-127 | Overlap across paragraph boundaries | `chunking.service.ts` | ~60 est. tokens each boundary | Yes | `[195,0,195,0,…]` chars | Fail | ISS-029 |
-| TC-128 | 10k chars without separators | `chunking.service.ts` | ~400-token chunks | Yes | 400-char (~100-token) chunks | Fail | ISS-029 |
-| TC-129 | Citation audit alternate formats `[Sources 1, 2]`, `Source 2`, `[1]` | `citation-validator.service.ts` | detected | Yes | `cited:[]` | Fail | ISS-029 |
-| TC-130 | Meeting summary with `null` fields | `meetingSummarySchema` | normalized | Yes | **Rejected** (→ 502) | Fail | ISS-030 |
-| TC-131 | Kill worker mid-job | `embedding.worker.ts` | job resumes after restart | No | — | Not Tested | Predicted lost; stuck `indexing` — ISS-006 |
-| TC-132 | Restart document-service 5× with pending docs | `syncPendingDocuments` | no duplicate jobs | No | — | Not Tested | Predicted duplicates — ISS-006 |
-| TC-133 | Redis down during upload, then back | doc-service Redis | enqueue after recovery | No | — | Not Tested | Predicted permanent failure — ISS-014 |
-| TC-134 | document-service down during worker status PATCH | `document-status.service.ts` | retry | No | — | Not Tested | Predicted job dropped — ISS-006 |
-| TC-135 | Reindex while `indexing` | `reindexDocument` | rejected / idempotent | No | — | Not Tested | Predicted duplicate job — ISS-006 |
-| TC-136 | Delete document during indexing | delete + worker | no orphan vectors | No | — | Not Tested | Predicted orphan vectors — ISS-001 |
-| TC-137 | 10 MB text-heavy PDF (~600+ chunks) | worker + Voyage | completes within rate budget | No | — | Not Tested | Predicted many 429 cycles [I] |
-| TC-138 | Query while docs still `pending` | `/api/ai/query` | tells user indexing in progress | No | — | Not Tested | No status awareness |
-| TC-139 | Meeting LLM output truncated (long notes) | `meeting-summarizer.service.ts` | clear error | No | — | Not Tested | Predicted 502 (no `max_tokens` / JSON mode) — ISS-030 |
-| TC-140 | Invalid LLM key | `config/grok.ts` | error event, no `done` | No | — | Not Tested | — |
-| TC-141 | Voyage call hangs in worker | `embedding.service.ts` | timeout + retry | No | — | Not Tested | Predicted worker blocked — ISS-037 |
-| TC-142 | Workspace switch mid-stream / with task modal open | `useAiQuery.ts`, `TaskDetailModal.tsx` | stream aborted, state reset | No | — | Not Tested | Stream race (FE-025) |
-| TC-143 | Lowercase invite code on onboarding page | `CreateWorkspacePage.tsx:63` | joins | No | — | Not Tested | Predicted "Invalid invite code" — ISS-036 |
-| TC-144 | Click "Open in Kanban" after task creation | `MeetingSummarizerPage.tsx:647` | board shown | No | — | Not Tested | Predicted /login — ISS-019 |
-| TC-145 | Type in right-panel "Ask ResearchMind" | `RightContextPanel.tsx:78` | prefilled/submitted | No | — | Not Tested | Predicted dropped — ISS-035 |
-| TC-146 | Double-click Retry/Delete on a document | `DocumentsPage.tsx:105-106` | one request, feedback | No | — | Not Tested | Predicted repeated requests — ISS-052 |
-| TC-147 | Click DOCX card | `DocumentCard.tsx` | opens file | No | — | Not Tested | Predicted no-op — ISS-020 |
-| TC-148 | Viewport 375 / 768 / 1024 / 1440 on Kanban, Documents, AI page | layouts | no overflow | No | — | Not Tested | Predicted Kanban overflow [I] |
-| TC-149 | Light theme on every page incl. PDF viewer | theme | readable contrast | No | — | Not Tested | Hard-coded hex — ISS-050 |
-
----
-
-## 16. Bugs and Identified Issues
-
-These are 52 canonical issues, deduplicated across the eight specialist reports and verified by the Verification Agent. "Sources" lists the merged specialist IDs:
-
-| Prefix | Specialist |
-|---|---|
-| FE | Frontend |
-| BE | Backend |
-| DB | Database |
-| RAG | AI/RAG |
-| SEC | Security |
-| QA | Testing/QA |
-| ARC | Architecture |
-| REQ / DOC | Requirements and documentation |
-
-| ID | Severity | Issue | Evidence (primary) | Impact | Recommended action | Sources | Verdict |
-|---|---|---|---|---|---|---|---|
-| ISS-001 | **Critical** | Deleting a document never deletes its Pinecone vectors; retrieval has no existence filter; README ticks it as done | `document-service/src/services/document.service.ts:193-226`; only callers of `deleteDocumentEmbeddings`: `embedding.worker.ts:76`, a script; `retrieval.service.ts:10-30`; README:1660 | Deleted (possibly sensitive) content keeps reaching AI answers and citations; storage leak | P1-A06 | DB-001, RAG-001, BE-001, QA-013, REQ-041 | CONFIRMED |
-| ISS-002 | High | `POST /api/documents` accepts client `cloudinaryUrl`/`cloudinaryPublicId`/`extractedText` → foreign asset deletion, stored `javascript:` URL via `window.open`, RAG poisoning | `document.schema.ts:25-37`; `document.controller.ts:141-144`; `SemanticSearchPage.tsx:91` | Token theft and account takeover of co-members [I chain]; cross-tenant file deletion | P1-A07 | BE-002, SEC-001, DB-019, SEC-007/020 (part) | CONFIRMED |
-| ISS-003 | High | Sidebar Join modal sends `{inviteCode:{inviteCode}}` → 400; frontend `tsc -b` fails | `JoinWorkspaceModal.tsx:59`; `workspace.store.ts:34,131` | Join from app impossible; CI build red | P1-A02 | FE-001, QA-005 | CONFIRMED (executed) |
-| ISS-004 | High | Assignee dropdown saves display name as `assigneeId`; server accepts any string | `TaskDetailModal.tsx:560`; `workspace.api.ts:4-8`; `task.schema.ts:15` | Silent data corruption | P1-A16 | FE-003/015/022, QA-015, BE-013, SEC-019 | CONFIRMED |
-| ISS-005 | High | Refresh rotation: no `jti` (same-second tokens identical → E11000/500), non-atomic find→delete, two unshared client refresh paths + no cross-tab sync → global logout | `jwt.ts:54-60`; `auth.service.ts:126-143`; `axios.ts:29,67` vs `:131-163` | Random logouts and 500s; reuse detection bypassable | P1-A11, P1-A12 | DB-004, BE-006, SEC-004, FE-006, QA-010/021 | CONFIRMED (identical tokens executed) |
-| ISS-006 | High | At-most-once embedding queue; `indexing` never recovered; unbounded duplicate resync; no DLQ/attempt cap; Retry on `pending` duplicates | `embedding.worker.ts:47-51,133-136`; `document.service.ts:268-290`; `server.ts:25` | Documents permanently unsearchable; duplicate paid embeddings | P1-A08 | DB-002/003, RAG-002/008, BE-011, ARC-010, FE-013 | CONFIRMED |
-| ISS-007 | High | No effective tests/CI; untracked; CI triggers `main` (missing); `tsx` not installed | `tests/*.test.ts`; `.github/workflows/ci.yml:3-8`; root `package.json:15` | No regression safety; "VERIFIED" claims unsupported | P1-A04 | QA-001..004, ARC-006, RAG-015, SEC-021 | CONFIRMED |
-| ISS-008 | High | Working tree imports untracked files; HEAD has 7 cross-service source imports; `docs/` git-ignored | `git status`: `?? packages/shared/auth/`, `?? services/auth-service/src/routes/internal.routes.ts`, `?? frontend/src/components/workspace/JoinWorkspaceModal.tsx`, `?? .github/`, `?? tests/`; `.gitignore` `docs` | Clone/partial commit won't compile; fixes exist on one disk only | P1-A01 | ARC-001, REQ-P1-10, DOC-036 | CONFIRMED (Critical→High) |
-| ISS-009 | High | No roles, no member removal, permanent invite codes | `Workspace.ts:35-39`; `workspace.routes.ts` | Any member can destroy all data; access irrevocable | P1-B01 | SEC-002, BE-032, QA-023 | CONFIRMED |
-| ISS-010 | Medium | Client errors → 500 (bad JSON, >100 KB, Multer size, E11000, undefined body, `.doc`, corrupt files) | `error.middleware.ts:10-38`; ai `workspace.middleware.ts:14-16` | Wrong codes, noisy logs | P1-A05 | BE-004/005, QA-007/008/012, DB-014 | CONFIRMED (executed) |
-| ISS-011 | Medium | Upload filter ext OR MIME; `.doc`/zip accepted; no magic bytes; 0-byte accepted; vulnerable parsers | `upload.middleware.ts:33-43` | DoS/junk ingestion | P1-A10 | SEC-006, BE-015, QA-009 | CONFIRMED (executed) |
-| ISS-012 | Medium | Membership check: no timeout/cache, errors → 403, unvalidated `workspaceId` in URL | `*/utils/workspace-checker.ts` | Outage masquerades as access denied; hangs | P1-A13 | BE-008, QA-011, ARC-011, SEC-016 | CONFIRMED (executed) |
-| ISS-013 | Medium | task-service DB fallback; ai-service runs without Mongo; no graceful shutdown | `task-service/src/config/db.ts:6-12`; `ai-service/src/config/db.ts:23-25` | Split data / silently lost sessions | P1-A14 | DB-005/010, BE-009/018, ARC-012, QA-019 | CONFIRMED |
-| ISS-014 | Medium | Redis producer stops reconnecting after 3 tries; ai-service exits without Redis | `document-service/src/config/redis.ts:7-12` | Ingestion broken until restart | P1-A14 | DB-006, BE-010, RAG-011 | CONFIRMED |
-| ISS-015 | Medium | SSE generation not aborted on client disconnect | `query.controller.ts:73-103` | Wasted cost/rate budget | P2-16 | BE-014, RAG-007, ARC-014 | CONFIRMED |
-| ISS-016 | Medium | Truncated SSE stream shown as complete answer | `useAiQuery.ts:147-167` | Misleading answers | P1-A21 | FE-008, RAG-014, QA-017 | CONFIRMED (parser executed) |
-| ISS-017 | Medium | `npm start` paths wrong for gateway/auth/workspace/ai (+worker); stale `dist/server.js` | `services/*/package.json`; tsconfig `rootDir: "../.."` | No production start path | P1-A15 | BE-017, ARC-002 | CONFIRMED |
-| ISS-018 | Medium | Bulk tasks non-atomic; zod/model limit mismatch; no idempotency; button re-clickable | `task.service.ts:279-311`; `task.schema.ts:31-40`; `MeetingSummarizerPage.tsx:664-670` | Partial/duplicate imports | P1-A17 | BE-012, DB-007, QA-014, FE-014 | CONFIRMED |
-| ISS-019 | Medium | "Open in Kanban" → `/kanban` → catch-all `/login` | `MeetingSummarizerPage.tsx:647`; `AppRouter.tsx:174` | Flow dead-ends | P1-A19 | FE-002, REQ-108 | CONFIRMED (line corrected) |
-| ISS-020 | Medium | DOCX card click does nothing (uncommitted regression) | `DocumentCard.tsx:22-29,46-47` | DOCX unopenable | P1-A20 | FE-004 | CONFIRMED |
-| ISS-021 | Medium | Access + refresh tokens in localStorage; no httpOnly cookie | `frontend/src/store/auth.store.ts:85-95` | XSS → persistent takeover | P1-B02 | SEC-003, DOC-013 | CONFIRMED |
-| ISS-022 | Medium | Prompt-injection exposure (raw chunks, forgeable delimiters) | `ai-service/src/prompts/rag.prompt.ts:1-39` | Poisoned docs steer answers | P1-B03 | RAG-006, SEC-007 | CONFIRMED (exfil channel not present today) |
-| ISS-023 | Medium | Public Cloudinary delivery, guessable `public_id` | `document.service.ts:15-36` | Ex-members retain file access | P2-23 | SEC-005 | CONFIRMED |
-| ISS-024 | Medium | Services bind 0.0.0.0; no auth-service limiter; no `trust proxy`; refresh unthrottled; fail-open; wildcard CORS | `services/*/src/server.ts`; `api-gateway/src/app.ts:20,52-64` | Rate-limit bypass (deployment-dependent) | P2-22 (+ P1-C06 network binding) | SEC-008/011/012, BE-007, ARC-013/022 | CONFIRMED |
-| ISS-025 | Medium | Compose exposes Mongo, unauth Redis, mongo-express on 0.0.0.0 with weak defaults; root `.env` uses `MONGO_ROOT_USER` vs compose `MONGO_ROOT_USERNAME` | `docker-compose.yml` | DB takeover on shared networks | P1-A03 (name), P2-24 | SEC-009, ARC-019 | CONFIRMED |
-| ISS-026 | Medium | 47 dependency advisories; runtime: multer, xmldom, body-parser, zod, axios, morgan, react-router | `npm audit` output | DoS on upload/body paths | P1-A10 | SEC-010 | CONFIRMED |
-| ISS-027 | Medium | Embedding model drift (voyage-2/3/4); model not recorded with vectors | `ai-service/src/config/voyage.ts` (diff); `.env.example`; README:597,1658 | Silent retrieval degradation on deploy [I] | P1-A09 | RAG-003, BE-031, DOC-008 | CONFIRMED (High→Medium) |
-| ISS-028 | Medium | No relevance threshold; whitespace/huge queries accepted; topK silently capped | `retrieval.service.ts:18-30`; `ai.schema.ts` | Irrelevant "citations"; cost | P1-A24, P2-17 | RAG-005/024, QA-016 | CONFIRMED (schema executed) |
-| ISS-029 | Medium | Weak citation provenance: no title/page/uploadedAt; page markers stripped; ObjectId labels; overlap lost | `chunking.service.ts:13`; `vector-service.ts:57-64` | README "source + page" unmet | P1-B04, P2-19 | RAG-010/017, BE-028 | CONFIRMED (executed) |
-| ISS-030 | Medium | Meeting summarizer brittle (nulls → 502, no JSON mode / max_tokens, not persisted, free-text dates) | `ai.schema.ts:25-39`; `meeting-summarizer.service.ts:136`; `MeetingSummarizerPage.tsx:193-198` | 502s; lost summaries; wrong due dates | P1-A23, P1-B07 | RAG-012, FE-018 | CONFIRMED (executed) |
-| ISS-031 | Medium | Documentation untruthful / not bootable (LLM, ports, Joi, `apps/`, phase claims, onboarding env names, ADR test claim, stale service READMEs) | `docs/onboarding.md:63-80`; README:317,845,1066,1949; ADR-0004:50 | Misleads newcomers/graders; can't boot from docs | P1-A03, P1-A26 | ARC-008, RAG-016, DOC-001…036 | CONFIRMED |
-| ISS-032 | Medium | Shared code not real packages (deep relative imports); undeclared deps (auth: express/cors/helmet/morgan/dotenv; workspace: express/mongoose/dotenv; gateway: jsonwebtoken); version drift | service `package.json`s; `packages/shared` has no `package.json` | Breaks isolated installs / Docker builds | P1-C06 | ARC-004/005 | CONFIRMED (High→Medium) |
-| ISS-033 | Medium | `INTERNAL_SERVICE_TOKEN` absent in auth + workspace env/example → members shown as "Researcher" | `workspace.service.ts:113,122,146-153` | Unusable member display / assignee picker | P1-A03 | BE-003, ARC-003 (surviving part) | CONFIRMED-WITH-CORRECTION |
-| ISS-034 | Medium | Document status never updates live; no failure reason | `hooks/useDocuments.ts:14`; `lib/queryClient.ts:13` | Users can't tell when searchable | P1-A22 | FE-011, RAG-025 | CONFIRMED |
-| ISS-035 | Medium | Right-panel "Ask ResearchMind" drops the question | `RightContextPanel.tsx:78` | Prominent input does nothing | P1-A19 | FE-005, REQ-093 | CONFIRMED |
-| ISS-036 | Medium | Onboarding invite input shows uppercase but sends raw case | `CreateWorkspacePage.tsx:63,244` | Users blocked from joining | P1-A18 | FE-009 | CONFIRMED |
-| ISS-037 | Medium | Voyage: no request timeout, nested retries, no SSE heartbeat | LangChain `voyage.cjs:104`; `embedding.service.ts:29` | Worker stalls; SSE silent >45 s | P1-A08 | RAG-013 | CONFIRMED |
-| ISS-038 | Low | Fake status, dead controls, wrong "Sources Indexed" metric | `RightContextPanel.tsx:194-207`; `TopBar.tsx:139-192`; `OverviewPage.tsx:103-108` | Misleading UI | P1-A25 | FE-010/016/017 | CONFIRMED |
-| ISS-039 | Low | Register client validation weaker than server | `frontend/src/lib/validations/auth.schema.ts` | Late errors | P2-06 | FE-012 | CONFIRMED |
-| ISS-040 | Low | Logout after expiry retries with stale token; nothing revoked server-side | `auth.api.ts:22-27`; `axios.ts:46-110` | Orphaned (client-wiped) refresh token | P1-A12 | FE-007 | CONFIRMED-WITH-CORRECTION |
-| ISS-041 | Low | Envelope/status codes deviate from README §13 | `validation.ts:15-19`; `llm.error.ts:43` | Contract drift | P2-01 | BE-016, QA-020 | CONFIRMED |
-| ISS-042 | Low | Concurrent join can duplicate member; "already member" = 400 | `workspace.service.ts:45-72` | Duplicate members | P1-A18 | DB-008, BE-020 | CONFIRMED (race [I]) |
-| ISS-043 | Low | Unbounded lists, missing indexes, no pagination | `document.service.ts:170-181`; models | Scale | P2-13 | DB-009, BE-023 | CONFIRMED |
-| ISS-044 | Low | No request IDs, static health checks, raw job/error logging | grep; `*/health.routes.ts` | Ops visibility | P2-21 | ARC-009, BE-021/026/029 | CONFIRMED |
-| ISS-045 | Low | RefreshToken `token→tokenHash` unique change uncommitted, no migration | `git diff services/auth-service/src/models/RefreshToken.ts` | Possible index-build failure on legacy rows | P1-A11 | DB-013 | UNVERIFIABLE (impact) |
-| ISS-046 | Low | No cross-service lifecycle (workspace/user delete, namespace cleanup) | `workspace.routes.ts` | Future orphans | P1-B01, P2-15 | DB-012, RAG-027 | CONFIRMED |
-| ISS-047 | Low | Layering/duplication: 5 JWT verifiers, 2 internal guards, unused auth Redis, empty stubs | `auth-service/src/config/redis.ts` etc. | Maintainability | P2-02, P2-07 | ARC-015/016, BE-019/030, DB-016 | CONFIRMED |
-| ISS-048 | Low (tracking) | Roadmap features not built (agent, 6 AI endpoints, chat, notifications, analytics, deployment) | `ai.routes.ts`; no Dockerfiles | Scope gap vs README | P1-C01…C07 | RAG-004, ARC-007/021, BE-025 | CONFIRMED-WITH-CORRECTION |
-| ISS-049 | Low | Signed token without `userId` accepted | `packages/shared/auth/authenticate.ts:40-45` | Requires secret | P2-25 | QA-018 | CONFIRMED (executed) |
-| ISS-050 | Low | Misc hygiene: no iss/aud/jti claims, bcrypt 10, enumeration timing, public stale Swagger, CDN pdf.js worker, hard-coded hex colours, missing typography plugin, AI history shared, README example secrets, toolchain drift | various (§12, §22) | Individually minor | P2-25, P2-26, P2-09, Tech debt | SEC-013..023, FE-019/021/024, BE-022, ARC-017/018/020, DB-015/017/018 | Mixed |
-| ISS-051 | Low | ESLint 44 errors / 4 warnings unenforced; `tsconfig.node.json` duplicate check; notification-service & packages not typechecked | `qa_eslint` re-run | Quality gate | P1-A02 (TS6133), P2-05 | QA-006/022 | CONFIRMED (executed) |
-| ISS-052 | Low | Document Delete/Retry fail silently; repeat clicks fire repeat requests | `DocumentsPage.tsx:105-106` | UX feedback gap | P1-A22 | FE-013 | CONFIRMED |
-
-**Rejected finding:** ARC-003's claim that workspace-service cannot boot because `JWT_ACCESS_SECRET` is missing. It was rejected with evidence; see §9.
-
----
-
-## 17. Phase 1 — Application Completion Roadmap
-
-**Scope of Phase 1.** Phase 1 completes the *intended* application. It contains:
-- fixes for missing, incomplete and broken functionality;
-- disconnected integrations;
-- missing validations;
-- error-handling and critical reliability gaps;
-- the features the README specifies.
-
-To keep it executable, it is split into three tiers in implementation order:
-
-| Tier | Tasks | Content | Note |
-|---|---|---|---|
-| **1A** Stabilize and fix the built MVP | A01–A26 | Mostly hours to a couple of days each | Must be done first |
-| **1B** Complete MVP-adjacent README requirements | B01–B10 | Days each | Several need a product decision |
-| **1C** Unbuilt README subsystems (README Phases 5–9) | C01–C07 | Multi-week each | Each needs its own design doc. **Owner decision required:** build them, or re-label them as "Roadmap" in the README (P1-A26). |
-
-**Conventions:** all tasks are **unchecked**. "Files" lists the starting points; paths are relative to the repo root.
-
-### Tier 1A — Stabilize and fix the built MVP
-
-- [ ] **P1-A01 — Commit a self-consistent working tree and track audit-critical files**
-  - **Module:** Repo / DevOps.
-  - **Files:**
-    - untracked: `packages/shared/auth/`, `packages/shared/health/`, `services/auth-service/src/routes/internal.routes.ts`, `frontend/src/components/workspace/JoinWorkspaceModal.tsx`, `.github/`, `tests/`, `frontend/.env.example`;
-    - staged: `packages/shared/config/secrets.ts`;
-    - `.gitignore` (`docs` entry).
-  - **Current issue:** modified, tracked files import untracked files. The staged index of `document-service/src/routes/document.routes.ts` still imports `../../../auth-service/src/middlewares/auth.middleware`. `docs/` (ADRs, index) is ignored (ISS-008).
-  - **Expected outcome:** the owner reviews and commits the full dependency closure together. `docs` is removed from `.gitignore`, and the docs/ADRs are committed.
-  - **Dependencies:** none. This is an owner action.
-  - **Priority:** High.
-  - **Acceptance criteria:** a fresh `git worktree` checkout of the branch passes `tsc --noEmit -p services/<each>` and the frontend typecheck (after P1-A02). `git status` shows no untracked source files that are imported by tracked code.
-  - **Verification tests:** clean-checkout typecheck script, run in CI (P1-A04).
-
-- [ ] **P1-A02 — Restore a green frontend build (fix the in-app Join)**
-  - **Module:** Frontend.
-  - **Files:** `frontend/src/components/workspace/JoinWorkspaceModal.tsx:59-67`, `frontend/src/store/workspace.store.ts:34,128-150`, `frontend/src/api/ai.api.ts:2`, `frontend/src/components/kanban/CreateTaskModal.tsx:4`.
-  - **Current issue:** `joinWorkspace({ inviteCode: code })` is called against a `(inviteCode: string)` signature, so every join returns 400. The modal reads `response.data.message`, but the store throws `Error`, so the user always sees a generic message. Two TS6133 unused imports. (ISS-003, ISS-051 part)
-  - **Expected outcome:** `joinWorkspace(code)`; the server message is shown via `err.message`; unused imports removed.
-  - **Dependencies:** none.
-  - **Priority:** High.
-  - **Acceptance criteria:** `npm run build --workspace=frontend` exits 0. A valid code joins from the sidebar. An invalid code shows "Invalid invite code". "Already a member" is shown.
-  - **Verification tests:**
-    - `tsc --noEmit -p frontend/tsconfig.app.json` and `-p frontend/tsconfig.node.json` both report 0 errors.
-    - A component test asserts that the request body is `{"inviteCode":"ABC23456"}`.
-    - Manual join with valid, invalid and already-member codes.
-
-- [ ] **P1-A03 — Configuration completeness and bootable onboarding**
-  - **Module:** Config / Docs.
-  - **Files:**
-    - `services/auth-service/.env.example`, `services/workspace-service/.env.example` (add `INTERNAL_SERVICE_TOKEN`; add `AUTH_SERVICE_URL` for workspace);
-    - `services/auth-service/src/server.ts`, `services/workspace-service/src/server.ts` (assert `INTERNAL_SERVICE_TOKEN`);
-    - root `.env` (`MONGO_ROOT_USER` → `MONGO_ROOT_USERNAME`);
-    - `docs/onboarding.md`, `frontend/README.md`, `services/*/README.md` (env sections only).
-  - **Current issue:**
-    - Member hydration is silently skipped, so every member shows as "Researcher" with an empty email (ISS-033).
-    - The onboarding doc uses `MONGODB_URI`/`REDIS_URL` for auth/workspace, omits `INTERNAL_SERVICE_TOKEN` and task-service, and has the wrong `VITE_API_URL` (ISS-031, DOC-021/022).
-    - The compose credential variable name is mismatched (ISS-025).
-  - **Expected outcome:** every required variable is listed in each `.env.example`. Services refuse to boot without the internal token where it is needed. Following the docs verbatim boots all 6 services.
-  - **Dependencies:** none.
-  - **Priority:** High.
-  - **Acceptance criteria:** a fresh clone plus the docs gives all `/health` endpoints 200. `GET /api/workspaces/:id/members` returns real names and emails. A missing token makes the service exit with the variable name only (no value).
-  - **Verification tests:** scripted smoke check hitting each `/health` and the members endpoint; boot test with the variable removed.
-
-- [ ] **P1-A04 — Test and CI foundation**
-  - **Module:** QA / DevOps.
-  - **Files:** root `package.json` (pinned devDeps: `tsx` or `vitest`, `supertest`, `@types/supertest`, `mongodb-memory-server`, `ioredis-mock`), new `tests/setup/env.ts`, `.github/workflows/ci.yml`, `tests/*.test.ts`.
-  - **Current issue:** the tests import no app code. `tsx` is not installed. CI is untracked and targets a non-existent `main`. There is no lint step (ISS-007).
-  - **Expected outcome:**
-    - `npm ci && npm test` runs offline.
-    - CI triggers on push and PR to `develop` (and `main` if it is created).
-    - CI steps: typecheck services, frontend `tsc -b` + build, frontend lint (initially non-blocking until P2-05), tests, with Mongo and Redis service containers.
-    - The tautological tests are replaced by real-module unit tests: secrets, jwt, `authenticate`, schemas, error middleware.
-  - **Dependencies:** P1-A01.
-  - **Priority:** High.
-  - **Acceptance criteria:**
-    - A PR to `develop` shows the workflow, and branch protection requires it.
-    - Deleting the reuse-detection branch in `auth.service.ts:128-134`, or HS256 pinning, makes a test fail (manual mutation check).
-  - **Verification tests:** the CI run itself; mutation spot-checks.
-
-- [ ] **P1-A05 — Correct error-to-status mapping and request-body guards**
-  - **Module:** Backend (shared).
-  - **Files:** `packages/shared/errors/error.middleware.ts`, `services/ai-service/src/middlewares/workspace.middleware.ts:14-16`, `services/ai-service/src/routes/ai.routes.ts:43-49`, `services/task-service/src/controllers/board.controller.ts:38,90`, `services/auth-service/src/controllers/auth.controller.ts:35`, `services/auth-service/src/routes/internal.routes.ts:14`, `services/document-service/src/controllers/document.controller.ts:158`, `packages/validation/schemas/*` (refresh and board schemas).
-  - **Current issue:** these cases return 500 (ISS-010):
-    - malformed JSON;
-    - a body over 100 KB;
-    - `MulterError`;
-    - E11000;
-    - an undefined `req.body` (Express 5).
-  - **Expected outcome:**
-    - Honour `err.status`/`err.statusCode` when below 500 (`entity.parse.failed`→400, `entity.too.large`→413).
-    - Map `MulterError` (`LIMIT_FILE_SIZE`→413, others→400) and 11000→409 with the field name.
-    - Use `req.body ?? {}`.
-    - On summarize-meeting, run `validate` before membership.
-    - Add zod schemas for refresh and boards.
-  - **Dependencies:** P1-A04 (tests).
-  - **Priority:** Medium.
-  - **Acceptance criteria:** no TypeError path remains. Each listed case returns its 4xx code.
-  - **Verification tests:** TC-005, TC-033, TC-035, TC-061, TC-078 turn to Pass. Bodiless POST on boards, refresh, internal and summarize routes returns 400 or 401.
-
-- [ ] **P1-A06 — Delete vectors when a document is deleted; prevent orphans**
-  - **Module:** Documents + AI.
-  - **Files:** `services/document-service/src/services/document.service.ts:193-226`, new `services/ai-service/src/routes/internal.routes.ts` (token-guarded `DELETE /internal/vectors/documents/:id?workspaceId=`) mounted in `services/ai-service/src/app.ts`, `services/ai-service/src/services/vector-service.ts:107-134`, `services/ai-service/src/workers/embedding.worker.ts`.
-  - **Current issue:** vectors survive deletion and are retrieved and cited. A document deleted mid-indexing gets vectors written after the delete (ISS-001).
-  - **Expected outcome:**
-    - Delete calls vector deletion (or enqueues a durable delete job) before removing the Mongo row.
-    - A failure is surfaced and retried.
-    - The worker re-checks that the document exists before upsert and cleans up if it is gone.
-    - A one-off orphan sweep (Pinecone docIds not present in Mongo) is provided.
-  - **Dependencies:** the internal-token pattern (exists) and P1-A03.
-  - **Priority:** **Critical**.
-  - **Acceptance criteria:** after DELETE, Pinecone queries in the namespace return 0 matches with that `documentId`. `/api/ai/search` and `/api/ai/query` never return it.
-  - **Verification tests:**
-    - Integration test with mocked Pinecone asserting `deleteMany({documentId})`.
-    - Worker unit test for the deleted-during-indexing case (TC-136).
-    - Live check with `services/ai-service/src/scripts/verify-document-vectors.ts` (TC-063/084).
-
-- [ ] **P1-A07 — Close client-controlled document fields; open document URLs safely**
-  - **Module:** Documents / Security / Frontend.
-  - **Files:** `services/document-service/src/routes/document.routes.ts:12-17`, `packages/validation/schemas/document.schema.ts:24-37`, `services/document-service/src/controllers/document.controller.ts:141-144`, `frontend/src/pages/SemanticSearchPage.tsx:85-94`, `frontend/src/components/documents/PdfViewerModal.tsx`.
-  - **Current issue:** clients can set `cloudinaryUrl`, `cloudinaryPublicId` and `extractedText` (ISS-002).
-  - **Expected outcome:**
-    - Remove `POST /api/documents`, or make it internal-only, or strip the server-owned fields from the public schema.
-    - The frontend opens only `https:` URLs on the Cloudinary host, with `noopener,noreferrer`.
-  - **Dependencies:** none.
-  - **Priority:** High.
-  - **Acceptance criteria:** a POST with `cloudinaryPublicId` returns 404, or the field is ignored. A `javascript:` URL is never passed to `window.open` or react-pdf. Deleting a document never destroys a foreign `public_id`.
-  - **Verification tests:** TC-057 (Supertest); a frontend unit test for the URL guard; a security regression test.
-
-- [ ] **P1-A08 — Reliable embedding pipeline**
-  - **Module:** Documents + AI worker.
-  - **Files:** `services/document-service/src/queues/embedding.queue.ts`, `services/document-service/src/services/document.service.ts:228-290`, `services/document-service/src/server.ts:25`, `services/document-service/src/models/Document.ts` (`attempts`, `lastError`, `indexingStartedAt`), `services/ai-service/src/workers/embedding.worker.ts`, `services/ai-service/src/services/embedding.service.ts`, `services/ai-service/src/config/voyage.ts`.
-  - **Current issue (ISS-006, ISS-037):**
-    - Destructive BLPOP loses jobs, and `indexing` is never recovered.
-    - Startup resync duplicates jobs and retries poison documents forever.
-    - There is no DLQ.
-    - Voyage calls have no timeout, and retries are nested.
-    - Retry is allowed on `pending`.
-  - **Expected outcome:**
-    - At-least-once delivery (`BLMOVE` processing list + `LREM`, or BullMQ with attempts/backoff).
-    - A DLQ and an attempt cap with `lastError`.
-    - A stale-`indexing` sweeper.
-    - Dedupe by `documentId`.
-    - Startup resync paged and awaited.
-    - A Voyage request timeout (AbortSignal), with a single retry layer.
-    - Optionally, a payload of `{documentId, workspaceId}` only.
-  - **Dependencies:** P1-A14 (Redis policy).
-  - **Priority:** High.
-  - **Acceptance criteria:**
-    - Killing the worker mid-job leads to the document being reprocessed after restart.
-    - 5 document-service restarts create no duplicate jobs.
-    - A poison document stops after N attempts with `lastError` set and is not retried on restart.
-    - A hung Voyage call times out.
-  - **Verification tests:** TC-131, TC-132, TC-134, TC-135, TC-141 using fake Redis and mocked Voyage.
-
-- [ ] **P1-A09 — Pin and record the embedding model**
-  - **Module:** AI.
-  - **Files:** `services/ai-service/src/config/voyage.ts`, `services/ai-service/.env.example`, `services/ai-service/src/services/vector-service.ts` (metadata), `services/document-service/src/models/Document.ts` (`embeddingModel`).
-  - **Current issue:** README says voyage-2, the ADR and `.env.example` say voyage-4, and the code and `.env` say voyage-3. The model is not stored with the vectors (ISS-027).
-  - **Expected outcome:** one documented model constant. The model and dimension are stored per vector and per document. The query path flags or refuses namespaces indexed with a different model, and a mismatch triggers re-index.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** `.env.example`, the code default and the docs agree. Vector metadata includes the model.
-  - **Verification tests:** unit test for the metadata builder; config test asserting the env model equals the documented model.
-
-- [ ] **P1-A10 — Strict upload validation and patched runtime parsers**
-  - **Module:** Documents / Security.
-  - **Files:** `services/document-service/src/middlewares/upload.middleware.ts:33-57`, `services/document-service/src/services/document.service.ts:92-111`, `services/document-service/package.json`, root `package-lock.json` (upgrades: multer ≥2.5.0, mammoth/@xmldom/xmldom >0.8.14, zod ≥4.6.6, body-parser per advisory).
-  - **Current issue (ISS-011, ISS-026):** the filter accepts extension OR MIME, including `.doc`, zip MIME and 0-byte files. There is no magic-byte check. Parsers have High DoS advisories.
-  - **Expected outcome:**
-    - Require extension AND MIME AND magic bytes (`%PDF-`; ZIP containing `word/document.xml`).
-    - Reject size 0.
-    - Reject empty extracted text at upload with 422 "no extractable text".
-    - Unsupported types return 415 via `AppError`.
-    - Dependencies upgraded.
-  - **Dependencies:** P1-A05.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** TC-074, TC-076, TC-077, TC-080 and TC-123 return documented 4xx codes. `npm audit --omit=dev` shows no High advisories for multer, xmldom or zod.
-  - **Verification tests:** Supertest with fixtures `empty.pdf`, `corrupted.pdf`, `scanned.pdf`, `fake.exe`, `legacy.doc`; `npm audit`.
-
-- [ ] **P1-A11 — Atomic, unique refresh-token rotation (with migration)**
-  - **Module:** Auth.
-  - **Files:** `services/auth-service/src/utils/jwt.ts:45-60`, `services/auth-service/src/services/auth.service.ts:116-150`, `services/auth-service/src/models/RefreshToken.ts`, new `services/auth-service/src/scripts/migrate-refresh-tokens.ts`, `services/auth-service/src/server.ts`.
-  - **Current issue:** no `jti` (identical tokens issued in the same second), and find→delete is non-atomic (ISS-005). The uncommitted `tokenHash` unique index has no migration (ISS-045).
-  - **Expected outcome:**
-    - `jwtid: crypto.randomUUID()` on refresh (and access) tokens.
-    - `findOneAndDelete({tokenHash})` as the consume step, with a null result treated as reuse.
-    - `expiresAt` derived from the token's `exp`.
-    - The migration deletes legacy rows that lack `tokenHash`.
-    - `RefreshToken.createIndexes()` runs at boot and fails on error.
-  - **Dependencies:** P1-A05 (409 mapping).
-  - **Priority:** High.
-  - **Acceptance criteria:** two parallel `/refresh` calls with the same token give exactly one 200 and one 401. Two logins in the same second both return 200 with different tokens. After migration, `tokenHash_1` is unique.
-  - **Verification tests:** TC-020, TC-021, TC-023 (Jest/Vitest + mongodb-memory-server, `Promise.all`).
-
-- [ ] **P1-A12 — Client single-flight, cross-tab-safe refresh; reliable logout**
-  - **Module:** Frontend auth.
-  - **Files:** `frontend/src/api/axios.ts:29-163`, `frontend/src/api/ai.api.ts:26,41`, `frontend/src/store/auth.store.ts`, `frontend/src/api/auth.api.ts:22-27`, `frontend/src/lib/session.ts:56-80`.
-  - **Current issue:** the axios and SSE refresh paths do not share a lock, and there is no cross-tab sync, so global logout happens (ISS-005c). Logout retries with a stale token after expiry (ISS-040).
-  - **Expected outcome:**
-    - One shared refresh promise for axios and SSE.
-    - Adopt tokens rotated by another tab (`storage` event or BroadcastChannel).
-    - Logout skips the refresh interceptor, or rebuilds its body from the store.
-  - **Dependencies:** P1-A11.
-  - **Priority:** High.
-  - **Acceptance criteria:** with two tabs idle past expiry, both act and neither is logged out. Signing out after expiry makes both old and new refresh tokens fail at `/auth/refresh`.
-  - **Verification tests:** TC-022, TC-112..114; a Vitest + msw interceptor test; a two-tab manual test with a short `ACCESS_TOKEN_EXPIRES`.
-
-- [ ] **P1-A13 — Harden the workspace membership check**
-  - **Module:** Backend (doc/task/ai).
-  - **Files:** `services/document-service/src/utils/workspace-checker.ts`, `services/task-service/src/utils/workspace-checker.ts`, `services/ai-service/src/utils/workspace-checker.ts`, `services/ai-service/src/middlewares/workspace.middleware.ts`, `services/task-service/src/middlewares/workspace.middleware.ts`.
-  - **Current issue:** no timeout, any error becomes `false` (403), and `workspaceId` is interpolated without validation (ISS-012).
-  - **Expected outcome:**
-    - `isValidObjectId` check, giving 400.
-    - `encodeURIComponent`.
-    - `AbortSignal.timeout(~3000)`.
-    - Distinguish "not a member" (403) from "check failed" (503).
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** with workspace-service stopped, task, document and AI routes return 503, not 403. A `workspaceId` of "abc" returns 400.
-  - **Verification tests:** TC-070, TC-071, TC-072.
-
-- [ ] **P1-A14 — Fail-fast and resilient connections**
-  - **Module:** Backend infra.
-  - **Files:** `services/task-service/src/config/db.ts:6-12`, `services/ai-service/src/config/db.ts:23-25`, `services/document-service/src/config/redis.ts:7-12`, `services/ai-service/src/config/redis.ts`, `services/ai-service/src/server.ts:23-37`, all `server.ts` (shutdown).
-  - **Current issue (ISS-013, ISS-014):**
-    - task-service silently falls back to another database.
-    - ai-service runs without Mongo.
-    - The Redis producer gives up after 3 attempts.
-    - ai-service exits without Redis even though its HTTP routes do not need it.
-    - No graceful shutdown.
-  - **Expected outcome:**
-    - Remove the fallback and exit with the variable name only.
-    - ai-service fails fast on Mongo, or reports degraded health.
-    - Unbounded capped-backoff reconnect, with a finite `maxRetriesPerRequest`.
-    - SIGTERM/SIGINT close HTTP, Mongo and Redis, and stop the worker after the current job.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** an invalid `MONGO_URI` exits with code 1. After stopping and starting Redis, the next upload enqueues without a service restart.
-  - **Verification tests:** TC-064, TC-065, TC-133 (manual or chaos script).
-
-- [ ] **P1-A15 — Working production start scripts**
-  - **Module:** Build.
-  - **Files:** `services/{api-gateway,auth-service,workspace-service,ai-service}/package.json` (`start`, `start:worker`), each service `tsconfig.json`, stale `services/api-gateway/dist/`, `services/workspace-service/dist/`, root `package.json` (build/start scripts).
-  - **Current issue:** `rootDir: "../.."` emits `dist/services/<svc>/src/server.js`, but 4 services start `dist/server.js`. Stale builds exist (ISS-017).
-  - **Expected outcome:** correct paths, a clean step before build, and root `build`/`start` scripts.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** `npm run build && npm start` works for all 6 services plus the worker, and `/health` returns 200.
-  - **Verification tests:** CI build-and-start smoke job.
-
-- [ ] **P1-A16 — Correct assignee handling end to end**
-  - **Module:** Tasks / Frontend.
-  - **Files:** `frontend/src/api/workspace.api.ts:4-8`, `frontend/src/types/workspace.types.ts:1-5`, `frontend/src/components/kanban/TaskDetailModal.tsx:559-561`, `frontend/src/components/kanban/CreateTaskModal.tsx:103-105`, `frontend/src/pages/KanbanPage.tsx:175-180,689`, `services/task-service/src/services/task.service.ts:143-206,359-461`, `packages/validation/schemas/task.schema.ts:15`.
-  - **Current issue:** the display name is saved as `assigneeId`. The modals show raw IDs. The server does not validate the assignee (ISS-004).
-  - **Expected outcome:**
-    - A single `WorkspaceMember{userId,name,email,avatar}` type.
-    - Options keyed and valued by `userId`.
-    - Names shown on cards and in activity.
-    - The server validates that the assignee is a member and returns 400 otherwise.
-  - **Dependencies:** P1-A03 (member hydration), P1-A13.
-  - **Priority:** High.
-  - **Acceptance criteria:** assigning member B persists `assigneeId === B.userId`. After reload, B is preselected and the card shows B's name. A random ID returns 400.
-  - **Verification tests:** TC-050, TC-115; a component test of the submitted value; a PATCH round-trip API test.
-
-- [ ] **P1-A17 — Atomic, idempotent bulk task creation**
-  - **Module:** Tasks / Meeting.
-  - **Files:** `services/task-service/src/services/task.service.ts:209-314`, `packages/validation/schemas/task.schema.ts:31-40`, `services/task-service/src/models/Task.ts`, `frontend/src/pages/MeetingSummarizerPage.tsx:172-237,663-686`.
-  - **Current issue:** the zod limits are looser than the model, inserts are sequential and non-transactional, there is no idempotency key, and the button can be re-clicked after success (ISS-018).
-  - **Expected outcome:**
-    - zod `title.max(200)` and `description.max(5000)`.
-    - Full pre-validation, then `insertMany` for tasks and activities, with a compensating delete on failure (transactions need P2-15).
-    - An optional `idempotencyKey` (unique sparse index).
-    - The UI disables the button after success and caps at 50.
-  - **Dependencies:** P1-A05.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** a batch with one invalid item creates 0 tasks. Retrying the same request creates no duplicates. A second click after success is impossible.
-  - **Verification tests:** TC-043, TC-048, TC-117.
-
-- [ ] **P1-A18 — Robust workspace join**
-  - **Module:** Workspace.
-  - **Files:** `frontend/src/pages/CreateWorkspacePage.tsx:63`, `services/workspace-service/src/services/workspace.service.ts:45-72`.
-  - **Current issue:** lowercase codes fail (ISS-036). Concurrent joins can duplicate a member. "Already a member" returns 400 (ISS-042).
-  - **Expected outcome:**
-    - `.trim().toUpperCase()` on the client and on the server.
-    - `findOneAndUpdate({inviteCode, members:{$ne:userId}}, {$addToSet:{members:userId}})`.
-    - "Already a member" returns 409.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** a lowercase code joins from both entry points. 10 parallel joins leave exactly one entry.
-  - **Verification tests:** TC-038, TC-039, TC-068, TC-143.
-
-- [ ] **P1-A19 — Fix broken navigation hand-offs**
-  - **Module:** Frontend.
-  - **Files:** `frontend/src/pages/MeetingSummarizerPage.tsx:647`, `frontend/src/routes/AppRouter.tsx:126-174`, `frontend/src/pages/LoginPage.tsx`, `frontend/src/pages/RegisterPage.tsx`, `frontend/src/components/layout/RightContextPanel.tsx:78`, `frontend/src/pages/SemanticSearchPage.tsx`.
-  - **Current issue:** `/kanban` lands on `/login` (ISS-019). `initialQuery` is ignored (ISS-035). There is no `/` route, and the catch-all goes to `/login` even when authenticated.
-  - **Expected outcome:**
-    - Link to `/dashboard/tasks`.
-    - Add `/` → `/dashboard`.
-    - Authenticated users are redirected away from `/login` and `/register`.
-    - The search page reads `location.state.initialQuery` and submits once.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** "Open in Kanban" shows the new tasks. A question typed in the right panel streams an answer.
-  - **Verification tests:** TC-144, TC-145; router tests.
-
-- [ ] **P1-A20 — Restore opening DOCX documents safely**
-  - **Module:** Frontend.
-  - **Files:** `frontend/src/components/documents/DocumentCard.tsx:22-29,46-56`.
-  - **Current issue:** an uncommitted change replaced the `<a href>` with a `<div>`, so clicking a DOCX card does nothing (ISS-020).
-  - **Expected outcome:** non-PDF files open in a new tab, only via the URL guard from P1-A07.
-  - **Dependencies:** P1-A07.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** a DOCX click opens the file. A PDF click still opens the in-app viewer.
-  - **Verification tests:** TC-147.
-
-- [ ] **P1-A21 — Detect truncated AI streams**
-  - **Module:** Frontend AI.
-  - **Files:** `frontend/src/hooks/useAiQuery.ts:121-177`, `frontend/src/pages/SemanticSearchPage.tsx:249-254`.
-  - **Current issue:** a stream that ends without a `done` or `error` event is shown as a complete grounded answer (ISS-016). There is also a stale-controller race (FE-025).
-  - **Expected outcome:**
-    - Track whether a terminal event arrived. If none did, show "Connection lost — answer incomplete" and `answerIsPartial=true`.
-    - Clear the controller only if it is still the current one.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** killing ai-service mid-stream shows the incomplete state.
-  - **Verification tests:** TC-109, TC-142; a hook test with a mocked `ReadableStream`.
-
-- [ ] **P1-A22 — Live document status and action feedback**
-  - **Module:** Frontend Documents.
-  - **Files:** `frontend/src/hooks/useDocuments.ts:7-16`, `frontend/src/lib/queryClient.ts`, `frontend/src/components/documents/DocumentCard.tsx:72-83`, `frontend/src/pages/DocumentsPage.tsx:105-106`, `frontend/src/components/documents/DocumentStatusBadge.tsx`.
-  - **Current issue:** status never refreshes (ISS-034). Delete and Retry fail silently, and Retry appears on `pending` (ISS-052).
-  - **Expected outcome:**
-    - `refetchInterval` while any document is `pending` or `indexing`.
-    - Retry only for `failed` (and for stale `indexing` after P1-A08).
-    - Disabled while the request is pending.
-    - Error toast on failure.
-    - Show `lastError` as the failure reason.
-  - **Dependencies:** P1-A08 (`lastError`).
-  - **Priority:** Medium.
-  - **Acceptance criteria:** the badge moves Pending → Indexing → Indexed without a reload. A double-click fires one request. A 403 or 500 is shown to the user.
-  - **Verification tests:** TC-118, TC-146; a manual upload watch.
-
-- [ ] **P1-A23 — Meeting summarizer robustness**
-  - **Module:** AI / Frontend.
-  - **Files:** `services/ai-service/src/services/meeting-summarizer.service.ts:104-190`, `packages/validation/schemas/ai.schema.ts:25-39`, `frontend/src/pages/MeetingSummarizerPage.tsx:193-198`.
-  - **Current issue:** `null` fields produce a 502. There is no JSON mode and no `max_tokens`. Due dates are parsed with free-text `new Date()` (ISS-030).
-  - **Expected outcome:**
-    - A null-tolerant, normalizing schema.
-    - `response_format` JSON (if the provider supports it) and an explicit `max_tokens`.
-    - Accept only ISO `YYYY-MM-DD` due dates, with an editable picker before tasks are created.
-  - **Dependencies:** none.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** fixture outputs (fenced, null, extra fields, truncated) give a normalized 200 or a clear error. No wrong dates are saved.
-  - **Verification tests:** TC-104, TC-130, TC-139; unit tests with fixture LLM outputs.
-
-- [ ] **P1-A24 — Server-side AI input validation**
-  - **Module:** AI.
-  - **Files:** `packages/validation/schemas/ai.schema.ts:3-13`, `services/ai-service/src/services/query.service.ts:5-24`.
-  - **Current issue:** whitespace and 200k-character queries are accepted. `topK` 20 is accepted but silently capped. A whitespace query on `/search` returns 500 (ISS-028, part).
-  - **Expected outcome:** `query.trim().min(1).max(2000)`; a `topK` maximum that matches the service clamp.
-  - **Dependencies:** none.
-  - **Priority:** Low.
-  - **Acceptance criteria:** these cases return 400.
-  - **Verification tests:** TC-055, TC-089, TC-092.
-
-- [ ] **P1-A25 — Remove or honestly mark non-functional UI**
-  - **Module:** Frontend.
-  - **Files:** `frontend/src/components/layout/RightContextPanel.tsx:194-207`, `frontend/src/components/layout/TopBar.tsx:139-154,184-192`, `frontend/src/components/auth/LoginForm.tsx:115-119,175-198`, `frontend/src/components/auth/RegisterForm.tsx:276-299`, `frontend/src/pages/OverviewPage.tsx:52-54,101-110`.
-  - **Current issue:** fake "Operational" status, a permanent unread dot, dead search, password-reset and Google buttons, and a wrong "Sources Indexed" metric (ISS-038).
-  - **Expected outcome:** each control is wired, hidden, or disabled with "coming soon". Status comes from `/health`, or is removed. The metric shows indexed / total and the failed count.
-  - **Dependencies:** none.
-  - **Priority:** Low.
-  - **Acceptance criteria:** a UI walkthrough finds no clickable element without behaviour and no hard-coded health claim.
-  - **Verification tests:** manual UI checklist.
-
-- [ ] **P1-A26 — Make the README and docs truthful**
-  - **Module:** Docs.
-  - **Files:** `ResearchMind_readme.md` (§6–§8, §9.1, §12–§13, §15–§20, Master Checklist), `docs/README.md`, `docs/00-START-HERE.md`, `docs/adr/0001…0004`, `docs/architecture/*`, `docs/deployment/*`, `services/*/README.md`, `BUGFIXING.md`.
-  - **Current issue:** DOC-001…036 (ISS-031): Claude vs Groq, Joi vs zod, ports, `apps/`, false or unsupported phase claims, the ADR "33-phase suite", stale service READMEs.
-  - **Expected outcome:**
-    - Split the README into "Implemented (current)" and "Roadmap".
-    - Re-tick §16 per §6.3 of this report.
-    - Remove "VERIFIED" claims until tests exist.
-    - Document `/api/ai/query`, `/sessions` and the SSE protocol, the real env names, Groq/xAI config, zod, and the real routes and ports.
-  - **Dependencies:** P1-A01…A25 (document the fixed state), plus the owner's scope decision for 1B/1C.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** every endpoint listed under "Implemented" exists in a router and in the gateway. No status claim lacks evidence.
-  - **Verification tests:** doc review checklist; optional route-diff script.
-
-### Tier 1B — Complete MVP-adjacent README requirements
-
-- [ ] **P1-B01 — Workspace roles, member management and invite control**
-  - **Module:** Workspace / AuthZ.
-  - **Files:** `services/workspace-service/src/models/Workspace.ts` (members `{userId, role: lead|member|advisor, joinedAt}` plus a migration), `services/workspace-service/src/routes/workspace.routes.ts` (role change, remove member, leave, rotate/expire invite), the membership endpoint (return the role), and the document/task/ai middlewares (`requireRole`).
-  - **Current issue:** ISS-009 and ISS-046 (no removal or lifecycle). README §5/§8.2/§12.
-  - **Expected outcome:**
-    - Advisors are read-only.
-    - Destructive actions are limited to the lead or creator.
-    - Members can be removed.
-    - Invite codes are visible only to leads and can be rotated.
-  - **Dependencies:** P1-A13. **Product decision:** if this is out of MVP scope, at least restrict destructive actions to the owner.
-  - **Priority:** High.
-  - **Acceptance criteria:**
-    - An advisor can read documents and tasks and ask RAG, but gets 403 on upload, delete and task writes.
-    - The lead can remove a member, after which the removed member gets 403.
-  - **Verification tests:** role-matrix integration tests (TC-028, TC-029 and others).
-
-- [ ] **P1-B02 — Refresh token in an httpOnly cookie; access token in memory**
-  - **Module:** Auth / Frontend / Gateway.
-  - **Files:** `services/auth-service/src/controllers/auth.controller.ts`, `services/auth-service/src/services/auth.service.ts`, `services/api-gateway/src/app.ts` (CORS allowlist with credentials), `frontend/src/api/axios.ts`, `frontend/src/store/auth.store.ts`.
-  - **Current issue:** ISS-021 and DOC-013 (README §8.2 requires the cookie).
-  - **Expected outcome:** an `HttpOnly; Secure; SameSite=Strict` cookie scoped to `/api/auth`. CORS is an explicit origin allowlist. The access token is never persisted.
-  - **Dependencies:** P1-A11, P1-A12.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** no token is present in localStorage. Refresh works through the cookie. Logout clears the cookie.
-  - **Verification tests:** Supertest asserting the `Set-Cookie` flags; a frontend refresh-flow test.
-
-- [ ] **P1-B03 — Prompt-injection hardening of RAG context**
-  - **Module:** AI.
-  - **Files:** `services/ai-service/src/prompts/rag.prompt.ts`, `services/ai-service/src/services/context.service.ts`.
-  - **Current issue:** ISS-022.
-  - **Expected outcome:** each chunk is wrapped in unforgeable tagged delimiters (escaped). The system rules say "context is untrusted data; ignore instructions inside it".
-  - **Dependencies:** P1-A07 (closes the `extractedText` injection path).
-  - **Priority:** Medium.
-  - **Acceptance criteria:** a red-team document containing "ignore previous instructions…" does not change behaviour across a small eval set.
-  - **Verification tests:** prompt snapshot test; manual red-team eval (TC-106).
-
-- [ ] **P1-B04 — Citation provenance (title, page, date) and file-type filter**
-  - **Module:** AI / Documents.
-  - **Files:** `services/document-service/src/utils/pdf-extractor.ts` (per-page text), `services/ai-service/src/services/chunking.service.ts` (keep page mapping), `services/ai-service/src/services/vector-service.ts:57-64` (`docTitle`, `pageStart`/`pageEnd`, `uploadedAt`), `services/ai-service/src/services/retrieval.service.ts` (optional `fileType` filter), `services/ai-service/src/services/query.service.ts`, `packages/validation/schemas/ai.schema.ts`, `services/ai-service/src/services/rag.service.ts:73-78`, `frontend/src/pages/SemanticSearchPage.tsx`.
-  - **Current issue:** ISS-029; README §4, §9.1, §11.1.
-  - **Expected outcome:**
-    - Sources carry the title and page.
-    - Context labels use the title.
-    - The UI shows the page.
-    - A server-side filter works.
-    - Existing documents are re-indexed.
-  - **Dependencies:** P1-A08, P1-A09.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** PDF sources show `docTitle` and `pageNumber`. Selecting "PDF" changes the retrieved chunks.
-  - **Verification tests:** metadata builder unit test; integration test with mocked Pinecone verifying `filter:{fileType}`.
-
-- [ ] **P1-B05 — Markdown and plain-text ingestion**
-  - **Module:** Documents / AI.
-  - **Files:** `services/document-service/src/middlewares/upload.middleware.ts`, `services/document-service/src/services/document.service.ts:99-111`, new `utils/md-extractor.ts` and `txt-extractor.ts`, `services/document-service/src/models/Document.ts` (enum), `services/ai-service/src/workers/embedding.worker.ts:27`, `frontend/src/components/documents/UploadDocumentModal.tsx`, `frontend/src/types/document.types.ts`.
-  - **Current issue:** README §3 and §8.3 promise `.md` and `.txt` (DOC-029).
-  - **Expected outcome:** `.md` (stripped to text) and UTF-8 `.txt` are accepted, indexed and cited.
-  - **Dependencies:** P1-A10.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** each type reaches `indexed`, and RAG cites it.
-  - **Verification tests:** extractor unit tests; an upload integration test per type.
-
-- [ ] **P1-B06 — Render RAG answers as Markdown/LaTeX, with images blocked**
-  - **Module:** Frontend.
-  - **Files:** `frontend/src/pages/SemanticSearchPage.tsx:264`, `frontend/src/components/ui/MathMarkdown.tsx` (add `img` → null, or a host allowlist).
-  - **Current issue:** answers render as plain text although the prompt asks for Markdown (RAG-021). Rendering Markdown without image blocking would create an exfiltration channel (§12).
-  - **Expected outcome:** formatted answers, streaming still incremental, no remote images, and `[Source N]` linked to its source chip.
-  - **Dependencies:** **P1-B03** (and P1-A07).
-  - **Priority:** Low.
-  - **Acceptance criteria:** headings, tables and `$$…$$` render. A `![](https://x/?q=…)` in an answer issues no request.
-  - **Verification tests:** render snapshot test; network-assertion test.
-
-- [ ] **P1-B07 — Persist meeting summaries and link tasks to them**
-  - **Module:** AI / Documents / Tasks.
-  - **Files:** `services/ai-service/src/controllers/meeting.controller.ts`, `services/ai-service/src/services/meeting-summarizer.service.ts`, `services/ai-service/src/models/AISession.ts` (add `type`), the document-service model (allow `meeting_summary` documents) or a new `MeetingSummary` model, `services/task-service/src/models/Task.ts` (`linkedDocId`), `frontend/src/pages/MeetingSummarizerPage.tsx`.
-  - **Current issue:** summaries are lost after navigation. README §11.2 says they are "saved as new document" (ISS-030 part).
-  - **Expected outcome:** the summary is persisted, listed and optionally indexed for RAG. Tasks created from it carry `linkedDocId`.
-  - **Dependencies:** P1-A23, P1-B08.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** the summary can be retrieved after a reload, and its tasks link back to it.
-  - **Verification tests:** create→list API test; frontend reload test.
-
-- [ ] **P1-B08 — Task model parity with the README**
-  - **Module:** Tasks / Frontend.
-  - **Files:** `services/task-service/src/models/Task.ts`, `packages/validation/schemas/task.schema.ts`, `frontend/src/pages/KanbanPage.tsx`, the task modals.
-  - **Current issue:** no `review` status, no `urgent` priority, and no `position`, `linkedDocId`, `tags` or `estimatedHours`. The order within a column is not persisted (DB-011).
-  - **Expected outcome:** 4 columns, persisted in-column ordering (fractional `position`), and the README fields.
-  - **Dependencies:** P1-A16.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** reordering persists across a reload, and the `review` column works.
-  - **Verification tests:** schema tests; a drag-reorder E2E test.
-
-- [ ] **P1-B09 — Dashboard data APIs and overview wiring**
-  - **Module:** Tasks / Frontend.
-  - **Files:**
-    - task-service: new `GET /api/tasks/workspaces/:id/summary` and `/overdue` (plus the `{workspaceId,dueDate,status}` index);
-    - `frontend/src/pages/OverviewPage.tsx`;
-    - `frontend/src/components/dashboard/*` (wire up or delete the unused cards).
-  - **Current issue:** README §8.5 endpoints are missing, and the overview lacks the task data.
-  - **Expected outcome:** the overview shows open vs done counts by week, the overdue count and the team workload.
-  - **Dependencies:** P1-B08.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** the numbers match the Kanban data.
-  - **Verification tests:** aggregation unit tests.
-
-- [ ] **P1-B10 — Remaining README §8.2/§8.3 endpoints**
-  - **Module:** Auth / Documents.
-  - **Files:** `services/auth-service/src/routes/auth.routes.ts` (`PUT /me`; forgot/reset password, which needs an email provider and a reset-token store), `services/document-service/src/routes/document.routes.ts` (`/:id/content`, `/:id/file` authorized stream, `/workspace/:id/status`).
-  - **Current issue:** these README endpoints are NOT IMPLEMENTED.
-  - **Expected outcome:** each endpoint is implemented, or explicitly descoped in the README.
-  - **Dependencies:** P1-A26 (scope decision). The file stream pairs with P2-23.
-  - **Priority:** Low.
-  - **Acceptance criteria:** each endpoint is covered by an integration test.
-  - **Verification tests:** Supertest per endpoint.
-
-### Tier 1C — Unbuilt README subsystems (Phases 5–9; owner scope decision)
-
-> Each of these is a multi-week project. Write a short design doc before starting. If they are not going to be built, P1-A26 must label them "Planned" in the README.
-
-- [ ] **P1-C01 — AI Agent (ReAct, tool calling)**
-  - **Module:** AI.
-  - **Files:** new `services/ai-service/src/agent/{tools,executor,loop}.ts`, new route `POST /api/ai/agent` (SSE steps), a gateway 10/h limiter, a new frontend Agent page.
-  - **Current issue:** README §10 is not built.
-  - **Expected outcome:**
-    - A tool-calling loop on the configured LLM client.
-    - Start with read-only tools (`search_knowledge_base`, `list_documents`, `read_document`, `list_tasks`, `get_team_members`).
-    - Then add write tools (`create_task`, `create_document`) behind user confirmation.
-    - Steps streamed to the UI, and the session logged.
-  - **Dependencies:** P1-B03 (injection now has tool impact), P1-B07, P1-B08, P1-B01 (role checks for write tools).
-  - **Priority:** Medium.
-  - **Acceptance criteria:** "Find all tasks due this week and summarize them" completes using real tools. Every tool call is visible in the step feed.
-  - **Verification tests:** tool-routing unit tests with a mocked LLM; E2E on a seeded workspace.
-
-- [ ] **P1-C02 — Literature review generator**
-  - **Module:** AI.
-  - **Files:** new `POST /api/ai/generate-review`, a frontend Literature Review page (replace the placeholder).
-  - **Current issue:** README §11.3 is not built.
-  - **Expected outcome:** paper selection, then a multi-pass process (per-paper extraction → themes → sections), inline citations, a streamed preview, save as a document, and PDF export.
-  - **Dependencies:** P1-B04, P1-B07.
-  - **Priority:** Medium.
-  - **Acceptance criteria:** 5 selected papers produce a structured review with citations that resolve to sources.
-  - **Verification tests:** mocked-LLM pipeline test; manual quality review.
-
-- [ ] **P1-C03 — Report drafter, explain-document, suggest-tasks, onboarding brief, internal embed**
-  - **Module:** AI.
-  - **Files:** new ai-service routes per README §8.6; the frontend Report Drafter page.
-  - **Current issue:** these README §11.4–11.5 endpoints are not built.
-  - **Expected outcome:** each endpoint is grounded in RAG and streamed.
-  - **Dependencies:** P1-B03, P1-B04; project context injection (README §4) for prompts.
-  - **Priority:** Low.
-  - **Acceptance criteria:** each endpoint returns grounded output with citations.
-  - **Verification tests:** mocked-LLM tests per endpoint.
-
-- [ ] **P1-C04 — Notification service and event bus**
-  - **Module:** Notifications / Infra.
-  - **Files:** `services/notification-service/**` (currently 0 bytes), publishers in the task and document services (`workspace:events`), a new `notifications` model, `/api/notif/*` gateway routes, and the frontend bell (`TopBar.tsx`).
-  - **Current issue:** README §8.7 and §14.4 are not built.
-  - **Expected outcome:**
-    - A Redis subscriber.
-    - Notifications for `task:assigned` and `doc:indexed`.
-    - Unread count, mark-read and mark-all.
-    - Email delivery is optional.
-  - **Dependencies:** P1-A08 (`doc:indexed`), P1-A16.
-  - **Priority:** Low.
-  - **Acceptance criteria:** assigning a task creates a notification for the assignee, and the bell shows the real unread count.
-  - **Verification tests:** pub/sub integration test; UI test.
-
-- [ ] **P1-C05 — Real-time chat service**
-  - **Module:** Chat.
-  - **Files:** new `services/chat-service` (Express + Socket.io + Redis adapter), `channels`/`messages` models, gateway `/api/chat` routes, a frontend chat UI.
-  - **Current issue:** README §8.4 is not built.
-  - **Expected outcome:**
-    - Channels and cursor-paginated messages.
-    - Typing indicators, reactions and presence.
-    - @mentions published as notification events.
-  - **Dependencies:** P1-C04.
-  - **Priority:** Low.
-  - **Acceptance criteria:** two clients exchange messages in real time, and an @mention notifies the mentioned user.
-  - **Verification tests:** socket integration tests.
-
-- [ ] **P1-C06 — Deployment readiness**
-  - **Module:** DevOps.
-  - **Files:**
-    - new `services/*/Dockerfile` and a frontend Dockerfile;
-    - `docker-compose.yml` (service containers; publish only the gateway; bind internal ports privately);
-    - `packages/shared/package.json` and `packages/validation/package.json` (real workspace packages) instead of deep relative imports;
-    - service `package.json` files (declare every directly imported dependency);
-    - Railway/Vercel config;
-    - a seed/demo script.
-  - **Current issue:** no deployment artifacts. Shared code is not packaged and dependencies are undeclared (ISS-032). Services bind on all interfaces (ISS-024). README §20/§22.
-  - **Expected outcome:**
-    - `docker compose up --build` runs the full stack.
-    - Each service installs and builds in isolation.
-    - Only the gateway is exposed.
-    - A demo workspace is seeded.
-  - **Dependencies:** P1-A15, P1-A04, P1-A14.
-  - **Priority:** Medium (when Phase 9 starts).
-  - **Acceptance criteria:** the full stack runs from compose on a clean machine. The deployed URL works with the demo credentials.
-  - **Verification tests:** CI image build; compose smoke test hitting every `/health`; E2E against the composed stack.
-
-- [ ] **P1-C07 — Analytics / progress dashboard page**
-  - **Module:** Frontend / Tasks / AI.
-  - **Files:** the frontend Analytics page (replace the placeholder; Recharts is already a dependency), plus AI usage stats from `aisessions` (needs `tokensUsed` and `durationMs`; see P2-31).
-  - **Current issue:** README §15 and §16 Phase 8 are not built.
-  - **Expected outcome:** a tasks-completed chart, documents indexed, AI usage and an overdue alert.
-  - **Dependencies:** P1-B09.
-  - **Priority:** Low.
-  - **Acceptance criteria:** the charts reflect the data.
-  - **Verification tests:** component tests with fixture data.
-
----
-
-## 18. Phase 1 — Task Dependencies and Execution Order
-
-```mermaid
-flowchart TD
-  A01[A01 commit tree] --> A04[A04 tests + CI]
-  A02[A02 green FE build] --> A04
-  A03[A03 config + onboarding] --> A06[A06 vector delete]
-  A03 --> A16[A16 assignee]
-  A04 --> A05[A05 error mapping]
-  A05 --> A10[A10 upload validation + deps]
-  A05 --> A11[A11 atomic rotation]
-  A05 --> A17[A17 bulk tasks]
-  A11 --> A12[A12 client refresh]
-  A14[A14 connections] --> A08[A08 reliable pipeline]
-  A08 --> A22[A22 live status]
-  A07[A07 doc fields + safe URLs] --> A20[A20 DOCX open]
-  A13[A13 membership check] --> A16
-  A08 & A09[A09 model pin] --> B04[B04 citation provenance]
-  A10 --> B05[B05 MD/TXT]
-  A11 & A12 --> B02[B02 cookie refresh]
-  A07 --> B03[B03 injection hardening]
-  B03 --> B06[B06 markdown answers]
-  A16 --> B08[B08 task parity]
-  A23[A23 meeting robustness] --> B07[B07 persist summaries]
-  B08 --> B07
-  B08 --> B09[B09 dashboard APIs]
-  A13 --> B01[B01 roles]
-  B03 & B07 & B08 & B01 --> C01[C01 agent]
-  B04 & B07 --> C02[C02 lit review]
-  B03 & B04 --> C03[C03 drafter etc.]
-  A08 & A16 --> C04[C04 notifications]
-  C04 --> C05[C05 chat]
-  A15[A15 start scripts] & A04 & A14 --> C06[C06 deployment]
-  B09 --> C07[C07 analytics]
-  A01 & A25[A25 honest UI] --> A26[A26 truthful docs]
-```
-
-**Recommended execution order.** Tasks within a wave are independent and can run in parallel.
-
-| Wave | Tasks | Rationale |
+| 3 | SEC-003 | P1 | Reject or normalise repeated slashes and dot segments before routing, or mount limiters by prefix on the normalised path; per-account login throttle in auth-service | Regression tests with real Redis: all path variants return 429/400 at the limit |
+| 4 | SEC-002 | P1 | Zip central-directory pre-check (uncompressed size, entries, ratio); extraction in a worker/child process with memory and time limits; cap extracted text; temp-file cleanup on failure | Regression test with the 19 KB / 180k-paragraph DOCX: 413/422 in under 1 s, `/health` responsive |
+| 5 | RT-001 | P2, promoted | Bypass the store when the limiter client is not ready; `commandTimeout` 250 to 500 ms | Outage-latency test: limited routes under 1 s with Redis down |
+| 6 | SEC-001 (repository part) | P1 config defect | `docker-compose.yml`: `127.0.0.1` bindings, no weak fallback credentials (require them from `.env`), Redis password | Compose review; fresh `docker compose up` exposes nothing on 0.0.0.0 |
+| 7 | CI green (ARC-005, ARC-006, ISS-051) | P3, gate condition | Open a PR from `fix/wave-4` (or the stabilization branch) into `develop`; add a guard that fails when `TEST_MONGO_URI` is missing in CI; add a lint step with a baseline or ratchet | A green GitHub Actions run on the PR including the new regression tests |
+
+### 25.3 P2: Before work on upload, gateway or queue internals, and before any exposure beyond localhost
+
+| Item | Area | Action |
 |---|---|---|
-| 0 — Baseline | A01, A02, A03 | Reproducible tree, green build, bootable configuration |
-| 1 — Safety net | A04, A05, A14, A15 | Tests/CI before deeper changes; correct errors; reliable connections; startable builds |
-| 2 — Data integrity & security | **A06 (Critical)**, A07, A08, A09, A10, A11, A13 | Close data-leak, injection and job-loss paths |
-| 3 — Core flow fixes | A12, A16, A17, A18, A19, A20, A21, A22, A23, A24, A25 | User-visible defects in the built flows |
-| 4 — Documentation | A26 | Document the fixed state; record the 1B/1C scope decision |
-| 5 — MVP completion | B01, B03, B08, then B02, B04, B05, B06, B07, B09, B10 | README requirements adjacent to the MVP |
-| 6 — Subsystems | C01, C02, C03, C04 → C05, C07, C06 | Only if in scope |
+| SEC-005 | Upload/storage | Authenticated Cloudinary delivery, signed short-lived URLs, random ids, migrate assets |
+| SEC-006 (with ARC-007) | Queue | Pointer-only jobs; text fetched via internal API after claim |
+| ISS-037 | Queue/worker | Timeouts around provider calls; worker watchdog; SSE heartbeat |
+| SEC-010 | Authorization (also product scope S7) | Product decision on roles; at minimum owner-only destructive actions and member removal before any multi-user release |
+
+**Recommended in the same stabilization PR (low cost, P3 severity):** RT-002 (exit on listen error), RT-003 (proxy timeout), RT-005 (declare zod 4 in ai-service), RT-004 (payload hash for import keys).
+
+### 25.4 P3: Scheduled stabilization
+
+| Area | Items |
+|---|---|
+| Gateway and operations | SEC-004 (bind internal services to localhost), RT-006 (provider readiness), RT-008 (`trust proxy` after the proxy-addr upgrade), ISS-044 (gateway readiness, request IDs) |
+| Authentication | SEC-007 (access-token revocation), SEC-008 (cookie transport and CSP; requires a deployment decision), SEC-009 (enumeration) |
+| RAG | SEC-011 (prompt isolation), SEC-012 (deleted-document filter and reconciliation), ISS-015 (abort on disconnect), ISS-027 (model check), ISS-028 (relevance threshold), ISS-029 (provenance), ISS-030 (JSON mode) |
+| Data and storage | SEC-013 (Cloudinary compensation), SEC-014 (completed with P0 item 1), ARC-001 (remove phantom endpoint), ISS-043 (pagination) |
+| Frontend | ARC-002 (render Markdown safely), ARC-003 (UTC date display), REQ-128 (deep link) |
+| Engineering | ARC-004 (hydration timeout), ARC-005 (coverage, audit, Redis service, Playwright smoke), ARC-006, ISS-032 (packaging), ISS-051 (lint, tsconfig), SEC-022 (dependency upgrades) |
+
+### 25.5 P4: Hygiene
+
+ARC-008 (ai-service liveness), ARC-009 (dead code), ARC-010 (deprecated Mongoose option), ARC-011 (code splitting), ARC-012 and ISS-031 (documentation), ARC-013 (timeout parsing), RT-007 (log redaction, user-safe `embeddingError`), RT-009 (remove unused auth Redis), RT-010 (skip cleanup for never-claimed documents), RT-011 (search error mapping), SEC-015 (CORS allow-list), SEC-016 (Swagger), SEC-017 (headers), SEC-018 (internal token configuration, e-mail visibility), SEC-019 (JWT hardening), SEC-020 (strict signatures), SEC-021 (auth route limiter), SEC-023 (AI history visibility), SEC-024 (legacy data), SEC-025 (account-keyed limiter), REQ-082 (body limit), ISS-008 (`.gitignore`), ISS-039 (client validation), ISS-041 (error codes), ISS-047 (consolidate verifiers), ISS-050 (bcrypt cost, self-hosted pdf.js worker, name length).
+
+### 25.6 Product development scope (missing capabilities, not bugs)
+
+| # | Capability | Size | Requirements | Depends on |
+|---|---|---|---|---|
+| S1 | AI agent platform (ReAct loop, 8 tools, step streaming, UI, logging) | XL | REQ-073 to 080 | Tool layer with user identity; S7; generated documents (S11); task extensions (S13); chat for channel posts; verified LLM function calling |
+| S2 | Literature review generator | L | REQ-087 to 089 | S11; server-side metadata filters; page citations; bibliographic metadata |
+| S3 | Report section drafter and onboarding brief | M each | REQ-090, 091, 092 | S11; persisted summaries (REQ-085); context-aware prompting (REQ-070) |
+| S4 | Real-time collaboration (chat, presence, typing, reactions, mentions, threads) | XL | REQ-108 to 116, 133 | WebSocket infrastructure with Redis adapter; event bus (REQ-024) |
+| S5 | Notifications (service, bell, push, e-mail, digests, preferences) | L | REQ-117 to 122 | Event bus; e-mail provider; WebSocket infrastructure |
+| S6 | Progress dashboard and analytics | M | REQ-123, 124, 126 | Task data (completedAt), AI usage capture |
+| S7 | Roles and permissions | M | REQ-031 to 033 (SEC-010) | — |
+| S8 | Workspace lifecycle and settings | M | REQ-030, 034, 035 (ISS-046) | S7; e-mail provider for invites |
+| S9 | Account management (profile, reset, Google, settings) | M | REQ-007 to 009, 011 | E-mail provider |
+| S10 | Session hardening with cookie transport | S to M | REQ-004 (SEC-008) | Deployment topology decision (CSRF, CORS credentials) |
+| S11 | Knowledge-base breadth (MD/TXT, generated documents, edit/re-upload, metadata) | M | REQ-040, 051 to 054, 084, 085, 150 | SEC-002 fixed first (upload path) |
+| S12 | Retrieval quality (server-side filters, page citations, context-aware prompts, caching, evaluation set) | M | REQ-025, 063, 067, 070, 071 | — |
+| S13 | Task-model completeness (review column, urgent, ordering, estimates, links, tags, comments, stats, board UI) | M | REQ-094, 097 to 100, 105, 106 | — |
+| S14 | Sources and Analytics pages | ? | REQ-124, 125 | Product definition (the spec does not define "Sources") |
+| S15 | Delivery (Dockerfiles, full compose, cloud deployment, seed/demo data, CI matrix, load and limiter tests, browser E2E) | L | REQ-135 to 139, 142, 143, 146, 148, 149 | Gate 6 items |
+
+Foundations to build first when product work starts: event bus (REQ-024), role model (S7), generated-document support (S11), task-model extensions (S13), e-mail provider, WebSocket infrastructure, and a browser E2E harness with provider sandbox or contract tests (needed to move any journey from NOT VERIFIED to COMPLETE).
 
 ---
 
-## 19. Phase 1 — Acceptance Criteria and Completion Checklist
+## 26. Development entry conditions
 
-All items are unchecked by design. Each line restates the decisive acceptance test of its task in §17.
+**Prerequisites (all must be COMPLETED before any new feature development begins)**
 
-**Tier 1A**
-- [ ] P1-A01: a clean checkout typechecks every service and the frontend; no imported file is untracked.
-- [ ] P1-A02: `npm run build --workspace=frontend` exits 0; the sidebar join works.
-- [ ] P1-A03: following the docs boots all 6 services; members show real names.
-- [ ] P1-A04: CI runs on PRs to `develop`; `npm test` runs offline and exercises real modules; a mutation makes a test fail.
-- [ ] P1-A05: no client error returns 500 (TC-005/033/035/061/078 pass).
-- [ ] P1-A06: a deleted document has 0 vectors and is never cited (TC-063/084/136 pass).
-- [ ] P1-A07: server-owned document fields cannot be set by clients; no unsafe URL is opened (TC-057 passes).
-- [ ] P1-A08: no job loss, no stuck `indexing`, no duplicate jobs, poison documents capped, Voyage timeout (TC-131/132/134/135/141 pass).
-- [ ] P1-A09: one documented embedding model, recorded with the vectors.
-- [ ] P1-A10: bad uploads return 4xx; no High advisories on the upload/body paths (TC-074/076/077/080/123 pass).
-- [ ] P1-A11: concurrent refresh has exactly one winner; same-second logins succeed; migration applied (TC-021/023 pass).
-- [ ] P1-A12: a two-tab session survives expiry; logout revokes server-side (TC-022 passes).
-- [ ] P1-A13: a workspace-service outage gives 503, not 403; an invalid `workspaceId` gives 400 (TC-070/071/072 pass).
-- [ ] P1-A14: bad DB config exits; Redis recovers without restart; graceful shutdown (TC-064/065/133 pass).
-- [ ] P1-A15: `npm run build && npm start` serves `/health` for all services and the worker.
-- [ ] P1-A16: the assignee persists a `userId` and shows a name; non-members are rejected (TC-050/115 pass).
-- [ ] P1-A17: bulk create is all-or-nothing and idempotent; no double click (TC-048/117 pass).
-- [ ] P1-A18: lowercase codes join; no duplicate members (TC-068/143 pass).
-- [ ] P1-A19: "Open in Kanban" and "Ask ResearchMind" work; authenticated redirects are correct (TC-144/145 pass).
-- [ ] P1-A20: DOCX opens safely (TC-147 passes).
-- [ ] P1-A21: a truncated stream is flagged as incomplete (TC-109 passes).
-- [ ] P1-A22: status updates live; actions give feedback (TC-146 passes).
-- [ ] P1-A23: null or truncated LLM output is handled; no wrong dates saved (TC-130/139 pass).
-- [ ] P1-A24: invalid AI queries return 400 (TC-055/089/092 pass).
-- [ ] P1-A25: no dead control or fake status remains.
-- [ ] P1-A26: README and docs match the implemented system; roadmap clearly separated.
-
-**Tier 1B**
-- [ ] P1-B01: the role matrix is enforced; members can be removed.
-- [ ] P1-B02: the refresh token lives only in an httpOnly cookie; CORS uses an allowlist.
-- [ ] P1-B03: the red-team document does not alter behaviour.
-- [ ] P1-B04: sources include title and page; the type filter works.
-- [ ] P1-B05: MD and TXT index and are cited.
-- [ ] P1-B06: answers render as Markdown with no remote image fetches.
-- [ ] P1-B07: meeting summaries persist; tasks link to them.
-- [ ] P1-B08: 4 Kanban columns; order persists.
-- [ ] P1-B09: the dashboard shows task summary and overdue counts.
-- [ ] P1-B10: the remaining §8.2/§8.3 endpoints are implemented or explicitly descoped.
-
-**Tier 1C**
-- [ ] P1-C01: the agent completes a multi-step instruction with visible steps.
-- [ ] P1-C02: a literature review with resolvable citations is generated and exported.
-- [ ] P1-C03: the remaining AI endpoints return grounded output.
-- [ ] P1-C04: task assignment produces a real notification.
-- [ ] P1-C05: real-time chat with mentions works.
-- [ ] P1-C06: the full stack runs from compose and is deployed with demo credentials.
-- [ ] P1-C07: the analytics page renders real metrics.
-
-**Phase 1 exit gate**
-- [ ] All Tier 1A items checked, and CI green on `develop`.
-- [ ] The scope decision for 1B/1C is recorded in the README.
-- [ ] Every in-scope 1B/1C item is checked, or explicitly deferred with a README note.
-- [ ] Edge-case matrix rows linked to Phase 1 tasks re-run, with results recorded (Pass, or a documented exception).
-
----
-
-## 20. Phase 2 — Code Quality and Improvement Roadmap
-
-> **Phase 2 begins only after Phase 1 (at minimum Tier 1A) is complete and verified.** "N" = necessary; "O" = optional. Complexity: S/M/L.
-
-| ID | Current implementation | Weakness | Proposed improvement | Justification / benefit | Cx | Priority | N/O | Files | Dependencies | Risks / trade-offs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| P2-01 | `{success,message}` errors; 400 validation; 502 LLM | Not the README §13 contract; no stable codes (ISS-041) | Shared `ApiError(code,status,field)` + response helper; UNAUTHORIZED, FORBIDDEN, NOT_FOUND, VALIDATION_ERROR (422), RATE_LIMITED, AI_UNAVAILABLE (503), FILE_TOO_LARGE (413) | Clients branch on codes; contract fidelity | M | High | N | `packages/shared/errors/*`, `packages/validation/validation.ts`, controllers, frontend error handling | P1-A05 | Frontend must migrate in lockstep |
-| P2-02 | 5 JWT verifiers, 2 internal-token guards | Drift, inconsistent 401 messages (ISS-047) | Use only `packages/shared/auth` everywhere | One code path | S | Medium | N | gateway/auth/workspace middlewares, document-service internal guard | P1-A01 | Minor behaviour changes |
-| P2-03 | Each service `db.ts`/`redis.ts` differs | Inconsistent connection handling | `packages/shared/db/connect.ts` + shared Redis factory with options, events, shutdown | Consistency | S | Medium | N | `services/*/src/config/*` | P1-A14 | — |
-| P2-04 | Tasks/boards/sessions in component `useState` | No caching or dedupe; races | Move to TanStack Query keys with invalidation | Fewer requests, fewer race bugs | M | Medium | N | `KanbanPage.tsx`, `MeetingSummarizerPage.tsx`, `TaskDetailModal.tsx`, `OverviewPage.tsx`, `useAiQuery.ts` | P1-A16 | Regressions in optimistic DnD |
-| P2-05 | 44 ESLint errors, not enforced; no backend lint | Hidden hook bugs (immutability, exhaustive-deps) (ISS-051) | Fix and make lint blocking in CI; add backend ESLint; ratchet `no-explicit-any` | Quality gate | M | Medium | N | `frontend/**`, new backend eslint config, `ci.yml` | P1-A04 | Short-term churn |
-| P2-06 | Client register rules weaker than server | Late errors (ISS-039) | Share zod rules from `packages/validation` with the frontend; strength meter reflects real rules | Consistency | S | Low | N | `frontend/src/lib/validations/*`, `PasswordStrength.tsx` | — | Bundling shared package into Vite |
-| P2-07 | Dead code: unused dashboard cards, stepper steps, 3 unused API functions, empty packages, unused auth Redis | Noise (ISS-047) | Delete or wire; add `/auth/me` boot validation | Clarity | S | Low | N | `components/dashboard/*`, `components/workspace/*Step*`, `packages/shared-types`, `packages/shared-utils`, `auth-service/src/config/redis.ts` | — | — |
-| P2-08 | Hand-rolled modals, `window.confirm` | No focus trap; not accessible | radix Dialog / ConfirmDialog | Accessibility | M | Low | N | all modals | — | Visual changes |
-| P2-09 | Theme logic copied 3×, hard-coded hex | Inconsistent light mode | `useUIStore` + tokens only | Consistency | S | Low | O | `TopBar.tsx`, `AuthLayout.tsx`, `CreateWorkspacePage.tsx`, `PdfViewerModal.tsx`, auth forms, `AppRouter.tsx` | — | Visual regressions |
-| P2-10 | Responsive gaps | Kanban overflow; drawer stays open; resize resets toggles | flex-wrap, close-on-navigate, breakpoint-crossing logic | Mobile usability (README P9) | S | Low | N | `KanbanPage.tsx`, `AppShell.tsx`, `Sidebar.tsx` | — | — |
-| P2-11 | Hand-written stale Swagger, publicly served | Misleading docs; exposure | Generate OpenAPI from zod; gate outside dev | Accurate docs | M | Low | O | `services/*/src/swagger.json` | P2-01 | Tooling |
-| P2-12 | Phase 1 test tiers only | Gaps in E2E, coverage, concurrency | Playwright E2E for upload→index→ask, meeting→tasks; c8/Vitest coverage thresholds (start 60%); concurrency suite; nightly E2E; k6 load per README §21 | Regression safety | M | Medium | N | `tests/`, `e2e/`, `frontend/`, `ci.yml` | P1-A04 | CI time |
-
----
-
-## 21. Phase 2 — Performance, Security and Scalability Improvements
-
-| ID | Current implementation | Weakness | Proposed improvement | Justification / benefit | Cx | Priority | N/O | Files | Dependencies | Risks / trade-offs |
-|---|---|---|---|---|---|---|---|---|---|---|
-| P2-13 | Unbounded `find()`, in-memory sorts; README indexes missing | Linear growth (ISS-043) | Indexes `documents {workspaceId,createdAt}`, `{embeddingStatus,updatedAt}`; `tasks {workspaceId,boardId,createdAt}`; `taskactivities {workspaceId,taskId,createdAt}`; `aisessions {workspaceId,createdAt}`; cursor pagination + `meta` | Predictable latency | M | Medium | N | models, list services, frontend hooks | P2-01 | Frontend pagination UI |
-| P2-14 | HTTP membership call on every request | Latency, coupling | Redis `cache:workspace:{id}:members` with 10-minute TTL, invalidated on join/remove (README §14.7) | Fewer cross-service calls | S-M | Medium | N | `*/utils/workspace-checker.ts`, `workspace.service.ts` | P1-A13, P1-B01 | Stale membership after removal without invalidation |
-| P2-15 | Standalone Mongo, no transactions | Partial writes in bulk, cascade and board delete (DB-007, DB-021) | Single-node replica set in compose; shared `withTransaction` helper | Atomicity | M | Medium | N | `docker-compose.yml`, `task.service.ts`, `board.service.ts` | P1-A17 | Dev setup friction |
-| P2-16 | SSE keeps generating after disconnect | Cost waste (ISS-015) | `res.on('close')` → AbortSignal through retrieval and LLM; skip session save | Cost and rate-limit control | S | Medium | N | `query.controller.ts`, `rag.service.ts`, `grok.service.ts` | — | — |
-| P2-17 | Dense top-K with no threshold | Irrelevant "citations" (ISS-028) | Model-calibrated `minScore`; short-circuit "not found in your documents" without an LLM call; status-aware message when documents are pending | Answer quality, cost | S | Medium | N | `retrieval.service.ts`, `rag.service.ts`, `SemanticSearchPage.tsx` | P1-A09 | Threshold tuning |
-| P2-18 | Pure dense retrieval | Weak on acronyms and exact terms | Hybrid (sparse + dense) or Voyage rerank top-20 → top-5; MMR dedupe | Retrieval precision | M | Medium | O | `retrieval.service.ts`, `query.service.ts` | P2-20 | Latency, cost |
-| P2-19 | Recursive splitter, chars/4 estimate | Overlap lost at boundaries; 400-char fallback; sentences split (ISS-029) | Real tokenizer; heading/sentence-aware chunking with consistent overlap | Recall, citation quality | M | Medium | N | `chunking.service.ts` | P1-B04 | Re-index cost |
-| P2-20 | Retrieval quality unmeasured | No regression signal | Golden Q/A set per fixture workspace; recall@k, citation precision, faithfulness, refusal rate | Safe iteration on P2-17/18/19 | M | Medium | N | `tests/eval/` | live keys or recorded fixtures | Needs maintenance |
-| P2-21 | No request IDs; static health; mixed console/winston | Weak observability (ISS-044) | Gateway `X-Request-ID` + propagation; structured JSON logs with redaction; `createHealthHandler` everywhere; gateway aggregates downstream health; JSON 404; proxy timeouts (SSE-aware) | Traceability, ops | S-M | Medium | N | all `app.ts`, `packages/shared/health` | — | Log volume |
-| P2-22 | Fail-open limiters, no `trust proxy`, refresh unthrottled, wildcard CORS, services on 0.0.0.0 | Abuse and bypass (ISS-024) | Exact `trust proxy` hop count; limiter on `/api/auth/*`; fail-closed decision for auth limiters; CORS allowlist at gateway only; per-account login limiter in auth-service | Abuse resistance | S | Medium | N | `api-gateway/src/app.ts`, `rate-limit.middleware.ts`, `services/*/src/app.ts` | P1-B02 (CORS) | Lockouts if misconfigured |
-| P2-23 | Public Cloudinary delivery | Ex-members keep file access (ISS-023) | `type:"authenticated"` + random `public_id` + short-lived signed URLs via authorized `GET /documents/:id/file`; `invalidate:true` on destroy | Confidentiality | M | Medium | N | `document.service.ts`, frontend viewer | P1-B10 | Migrating existing assets |
-| P2-24 | Compose on 0.0.0.0, weak defaults, Redis without auth/AOF | Local exposure; queue loss (ISS-025) | Bind `127.0.0.1:`; `${VAR:?required}`; Redis `requirepass` + `appendonly yes`; mongo-express in a dev profile only | Safer dev | S | Low | N | `docker-compose.yml`, env | — | Env updates |
-| P2-25 | No iss/aud/typ/jti; token without `userId` accepted; bcrypt 10; enumeration timing | Defense-in-depth gaps (ISS-049/050) | Add and verify claims; reject missing `userId`; configurable bcrypt 12; dummy compare for unknown users; assert access ≠ refresh secret | Hardening | S | Low | N | `jwt.ts`, `authenticate.ts`, `hash.ts`, `auth.service.ts`, `secrets.ts` | P1-A11 | Token invalidation on rollout |
-| P2-26 | No CSP on SPA; pdf.js worker from unpkg | XSS blast radius; offline fragility | Strict CSP; bundle pdf.js worker locally; restrict PDF source host | Hardening | S | Low | N | `frontend/index.html`, `vite.config.ts`, `PdfViewerModal.tsx` | P1-A07 | CSP tuning |
-| P2-27 | No caching of embeddings/answers | Repeat cost | Cache query embeddings and answers per (namespace, model, normalized query), invalidated on index change | Cost, latency | S | Low | O | `query-embedding.service.ts`, `rag.service.ts` | P1-A06 (invalidation on delete) | Stale answers if invalidation missed |
-| P2-28 | Single sequential worker inside the API process | Throughput; nodemon kills jobs in dev | Dedicated worker process (`dev:worker` in root `dev`); BullMQ concurrency + rate limiter + progress events | Throughput, isolation | M | Medium | N | `ai-service/src/server.ts`, `worker.ts`, root `package.json` | P1-A08 | Infra change |
-| P2-29 | `extractedText` inline in Document; full text duplicated in queue | Large hot documents, memory | Separate text collection or object storage; queue carries IDs only | Memory, read efficiency | M | Low | O | document-service, worker | P1-A08 | Extra hop |
-| P2-30 | Upload extraction synchronous in request | Request latency; parser DoS in API process | Move extraction to the worker with time/memory limits | Resilience | M | Medium | N | `document.service.ts`, worker | P1-A08, P1-A10 | Status UX for "extracting" |
-| P2-31 | `AISession` lacks type/tokens/duration | No cost/usage metrics | Record `type`, `tokensUsed`, `durationMs`, latency metrics; dashboards | Cost control; P1-C07 data | S | Low | N | `AISession.ts`, `rag.service.ts`, `grok.service.ts` | — | PII in logs |
-| P2-32 | AI history visible to all members | Privacy ambiguity (DB-018) | Product decision; per-user filter or `visibility` field; retention TTL | Privacy | S | Low | N | `ai-session.service.ts` | P1-B01 | Feature expectation change |
-| P2-33 | No dependency-update process | Advisories accumulate | Scheduled `npm audit` gate (`--omit=dev`) in CI; Renovate/Dependabot; align ioredis/mongoose/zod versions; remove stray `@types/mongoose` v5 | Supply-chain hygiene | S | Medium | N | root and service `package.json`, `ci.yml` | P1-A10 | Upgrade churn |
-
----
-
-## 22. Technical Debt and Optional Enhancements
-
-### 22.1 Technical-debt register
-
-| Debt | Location | Effect | Addressed by |
+| # | Condition | Required evidence | State at audit |
 |---|---|---|---|
-| Deep relative imports `../../../../packages/...`; no package manifests for shared code | `services/*/src/**`, `packages/shared`, `packages/validation` | Fragile builds; `rootDir: "../.."` → odd `dist` paths | P1-C06, P1-A15 |
-| 3 copies of `workspace-checker.ts`, 2 copies of the workspace middleware | document/task/ai services | Divergent behaviour | P1-A13, P2-02 |
-| `withOptionalTransaction` referenced in comments but not implemented; "deepest-first" delete claim not real | `board.service.ts:92`, `task.service.ts:517,543-550` | Misleading guarantees | P2-15 (or fix comments) |
-| Doc comment claims vector deletion | `document.service.ts:193` | Misleading | P1-A06 |
-| `TaskActivity` `"comment"` action with no writer | `TaskActivity.ts:56` | Dead enum | P2-07 |
-| `syncIndexes()` runs whenever `NODE_ENV` unset (can drop manual indexes) | `workspace-service/src/config/db.ts:9-13`, `task-service/src/config/db.ts:16-20` | Index loss in dev | P2-13 (declare all indexes; explicit migrations) |
-| `verifyPineconeIndex` never called; hard-coded dimension 1024 | `ai-service/src/utils/verify-pinecone.ts` | Misconfig found late | P1-A09 |
-| Unused `@langchain/pinecone`, direct `@langchain/core`; unused `cookie-parser` | ai-service, auth-service manifests | Bloat | P2-07, P1-B02 |
-| Leftover temp uploads and logs on disk (untracked) | `services/document-service/uploads/`, `*.log` | Disk clutter | Hygiene |
-| `tsconfig.node.json` re-checks `src` and omits `vite.config.ts` | `frontend/tsconfig.node.json` | Double errors; config unchecked | P2-05 |
-| notification-service has no tsconfig/scripts; `shared-types` / `shared-utils` empty | `services/notification-service`, `packages/*` | Confusion | P1-C04 or delete |
-| Two Redis env conventions (`REDIS_HOST`/`PORT` vs `REDIS_URL`); two Mongo conventions (`MONGO_URI` vs `MONGODB_URI`) | auth vs others | Setup errors | P1-A03, P2-03 |
-| No `.nvmrc` / `engines`; local Node 22 vs CI Node 20 | root | Toolchain drift | Hygiene |
-| README example JWT values look secret-like | `ResearchMind_readme.md` ~L1928-1930 | Could be copied into real config | P1-A26 |
+| 1 | SEC-001 remediated on the host: infrastructure bound to localhost or firewalled, non-default credentials, Redis authentication, least-privilege MongoDB users | `docker ps` bindings; failed LAN connects; NOAUTH from Redis; per-service users verified | NOT MET |
+| 2 | SEC-003, SEC-002 and RT-001 fixed, each with a regression test | Tests in the repository; passing locally and in CI | NOT MET |
+| 3 | CI green on a pull request into `develop` | A green GitHub Actions run on the PR (CI has never passed and has never run on fix-wave code) | NOT MET |
 
-### 22.2 Optional enhancements (beyond README requirements)
+**Restrictions**
+- Until gates 2 (Security) and 6 (Operational readiness) pass, nothing is exposed beyond localhost: no deployment, no shared or public URL, no LAN access to services or infrastructure.
+- After the prerequisites, permitted scope is feature work that does not touch upload, gateway or queue internals until their P2 items (SEC-005, SEC-006/ARC-007, ISS-037; plus RT-001 already in the prerequisites) are fixed.
+- Missing capabilities (section 25.6) are product scope, not bugs, and do not block entry.
+- A production or internet-facing release additionally requires gate 6 items (Dockerfiles and deployment configuration, RT-002, RT-003, SEC-004, SEC-005, SEC-006, SEC-007/008, SEC-009, SEC-021, RT-005, REQ-128, dependency upgrades, gateway health) and live-provider plus browser E2E verification of the core RAG journey.
 
-| ID | Enhancement | Value | Cx |
-|---|---|---|---|
-| OPT-01 | Multi-turn RAG conversations using `sessionId` + query rewriting | Conversational UX | M |
-| OPT-02 | OCR fallback for image-only PDFs | Coverage of scanned papers | M |
-| OPT-03 | Duplicate-upload detection (content hash) | Cleaner retrieval | S |
-| OPT-04 | Activity log pagination / archival | Bounded growth | S |
-| OPT-05 | Context-aware prompting (workspace name, members, date; README §4) | Better grounding | S |
-| OPT-06 | Contract tests sharing types between frontend and backend | Prevents ISS-004-class bugs | M |
+**Reversion:** if the prerequisites are not met before feature development begins, the decision reverts to **C**.
 
 ---
 
-## 23. Risks, Dependencies and External Requirements
+## 27. Final development readiness decision
 
-**External services and accounts required:**
+### **B. READY FOR DEVELOPMENT WITH CONDITIONS**
 
-| Dependency | Used for | Config (names only) | Risk |
-|---|---|---|---|
-| MongoDB 7 | All services | `MONGO_URI` (auth, workspace) / `MONGODB_URI\|MONGO_URI` (others) | Standalone → no transactions |
-| Redis 7 | Queue, rate limits | `REDIS_URL` (gateway, doc, ai), `REDIS_HOST/PORT` (auth, unused) | No auth/AOF in dev compose |
-| Pinecone | Vector store | `PINECONE_API_KEY`, `PINECONE_INDEX` | Index dimension/metric and delete-by-filter support **not verified** live |
-| Voyage AI | Embeddings | `VOYAGE_API_KEY`, `VOYAGE_MODEL`, `VOYAGE_EMBEDDING_DIMENSION` | Free-tier rate limits (~3 RPM noted in code); model drift |
-| Groq / xAI (OpenAI-compatible) | RAG + meeting LLM | `XAI_API_KEY` or `GROQ_API_KEY`, optional `XAI_BASE_URL`, `XAI_MODEL` | Reasoning-model token budget (`gpt-oss-120b`, `max_tokens 1500`) **unverified** |
-| Cloudinary | File storage | `CLOUDINARY_CLOUD_NAME/_API_KEY/_API_SECRET` | Public delivery; PDF delivery as `image` resource type not verified on account |
-| Email provider (future) | Password reset, notifications | (none yet) | Needed for P1-B10/C04 |
-| Hosting (future) | Railway / Vercel / Atlas / Upstash | (none yet) | P1-C06 |
+**Strict prerequisites, to be COMPLETED BEFORE any new feature development begins:**
+1. Remediate **SEC-001** on the host: bind the infrastructure to localhost or firewall it, use non-default credentials, enable Redis authentication, and create least-privilege MongoDB users.
+2. Fix **SEC-003** (double-slash / path-normalisation rate-limit bypass), **SEC-002** (DOCX parser resource exhaustion) and **RT-001** (fail-open limiter latency when Redis is down), each with regression tests.
+3. Get **CI green on a pull request into `develop`**. CI has never passed and has never run on fix-wave code.
 
-**Shared secrets that must match across services:**
-- `JWT_ACCESS_SECRET` across all 6 services. Verified identical by fingerprint.
-- `INTERNAL_SERVICE_TOKEN` across auth, workspace, document and ai. Currently missing in auth and workspace.
+**Restrictions:**
+- Until gates 2 (Security) and 6 (Operational readiness) pass, nothing is exposed beyond localhost.
+- Permitted scope after the prerequisites: feature work that does not touch upload, gateway or queue internals until their P2 items are fixed.
+- Missing capabilities are product scope, not bugs.
 
-**Key risks:**
+**Recorded unresolved disagreement:** Agent 5 proposed allowing isolated feature branches (for example task-model completeness, roles, frontend fixes, an E2E harness) to proceed in parallel with the prerequisites, with merges held until the stabilization PR is green. The lead decided that the prerequisites come first. This report applies the lead's decision.
 
-| Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|
-| Committing a partial working tree breaks clones/CI (ISS-008) | High | High | P1-A01 first |
-| Deleted documents remain in AI answers (ISS-001) | Certain today | High (privacy) | P1-A06, plus a one-off orphan sweep |
-| XSS / token theft chain (ISS-002) | Medium (needs a malicious member) | High | P1-A07, then P1-B02 |
-| Scope overrun: README describes ~2× what exists | High | Schedule | Explicit 1B/1C scope decision (P1-A26) |
-| Embedding model change silently degrades retrieval | Medium | Medium | P1-A09 |
-| Uncommitted RefreshToken index change on existing data | Unknown | Low–Medium | P1-A11 migration |
-| Dependency upgrades (zod 4.6, multer 2.5, xmldom) cause breakage | Medium | Medium | P1-A04 tests before P1-A10 |
-| Free-tier rate limits (Voyage) stall indexing of large documents | Medium | Medium | P1-A08 backoff/timeouts; P2-28 |
-| Single shared standalone Mongo for 5 service DBs | — | Ops coupling | P2-15 / deployment design |
+**Reversion:** if the prerequisites are not met, the decision reverts to **C**.
 
----
-
-## 24. Final Project Readiness Checklist
-
-**Functional readiness**
-- [ ] Register → create workspace → see dashboard works end to end (automated E2E).
-- [ ] Join a workspace from both entry points (any case).
-- [ ] Upload PDF/DOCX (and MD/TXT if in scope) → status reaches `indexed` live.
-- [ ] Ask a question → streamed, grounded answer with resolvable citations (title/page).
-- [ ] Delete a document → it never appears in answers again.
-- [ ] Meeting notes → structured summary → tasks on the board with correct assignees → summary persisted.
-- [ ] Kanban drag-and-drop, task detail, subtasks and activity work with real member names.
-- [ ] Roles enforced (if in scope); advisors read-only.
-- [ ] No dead controls or fake status indicators.
-
-**Quality and reliability readiness**
-- [ ] CI green on `develop`: service typechecks, frontend `tsc -b` + build, lint, unit + integration tests.
-- [ ] Edge-case matrix rows linked to Phase 1 re-run and recorded.
-- [ ] No client error returns 500; outages return 503.
-- [ ] Embedding pipeline survives worker/Redis/document-service restarts without loss or duplication.
-- [ ] Graceful shutdown on SIGTERM for all services.
-
-**Security readiness**
-- [ ] No client-writable server-owned fields; URL schemes validated.
-- [ ] Refresh rotation atomic; tokens unique; refresh token in an httpOnly cookie (if in scope).
-- [ ] No High advisories on runtime paths (`npm audit --omit=dev`).
-- [ ] CORS allowlist; services not publicly reachable except the gateway.
-- [ ] Prompt-injection hardening in place before agent/Markdown rendering.
-
-**Operational and documentation readiness**
-- [ ] All source, tests, CI and docs tracked in git; clean checkout builds.
-- [ ] `npm run build && npm start` works for every service.
-- [ ] `.env.example` complete for every service; onboarding boots the stack verbatim.
-- [ ] README separates implemented features from roadmap; phase claims evidence-based.
-- [ ] Deployment artifacts and demo workspace (if Phase 9 in scope).
-
----
-
-## 25. Audit Limitations and Unverified Areas
-
-1. **No end-to-end runtime.** Docker, MongoDB and Redis were not running, and starting them was outside the audit's non-destructive scope. No HTTP request travelled gateway → service → DB. All "Executed" results are module-level runs of real application code with synthetic inputs. Everything else is static analysis. That is why most features are UNVERIFIED rather than COMPLETE.
-2. **No external service calls.** Voyage, Pinecone, Groq/xAI and Cloudinary were not contacted, by rule. The following are therefore **unverified**:
-   - the Pinecone index dimension, metric and delete-by-filter support;
-   - whether `voyage-3` accepts `output_dimension`;
-   - how the LLM provider and reasoning model count tokens;
-   - Cloudinary account settings and PDF delivery;
-   - actual retrieval quality.
-3. **Inferred library or browser behaviour [I]:**
-   - ioredis "end" semantics after `retryStrategy` returns `null`;
-   - Mongoose command buffering delays;
-   - `<option>` value fallback to its text;
-   - `javascript:` execution via `window.open`;
-   - race conditions in rotation and join.
-   All are documented behaviour, but none was executed.
-4. **`npm test` was not run as specified.** `tsx` is not installed, and downloading was forbidden. The same test files were run with Node's built-in type stripping.
-5. **The frontend production bundle was not built.** The non-writing Vite config loader cannot load this ESM config. The default loader would write a temp file inside the repo. TypeScript and ESLint gates were executed instead.
-6. **Verification sampling:**
-   - Every Critical, High and Medium finding was independently verified, plus 53 of 66 Low findings.
-   - 13 Low findings were not re-checked: FE-023/024/025, BE-026/027/030/033, DB-020/021, RAG-022, SEC-022, ARC-017/018.
-   - Of the requirements matrix, 33 of 83 "wired" rows and 6 of 36 documentation contradictions were independently re-traced.
-   - Typecheck was re-run by the verifier for 2 of 6 services; the other 4 rely on the QA agent's raw outputs (exit 0, empty error files).
-7. **Working-tree audit.** The audit reflects uncommitted and untracked user changes on disk at 2026-11-10. Some findings depend on those changes:
-   - the in-process worker start;
-   - the voyage-3 default;
-   - the DOCX regression;
-   - the RefreshToken schema change;
-   - JoinWorkspaceModal.
-
-   Line numbers may drift as the user continues editing.
-8. **Depth trade-offs.** Large frontend files (`KanbanPage.tsx`, `TaskDetailModal.tsx`, `MeetingSummarizerPage.tsx`) were read in full by the frontend specialist. The requirements specialist read them selectively around traced requirements. UI-to-mockup visual parity was only glanced at (one mockup).
-9. **Not included verbatim.** The full 260-row traceability matrix and the per-specialist working reports were produced in session-temporary storage and are summarized here (§6.2–§6.4, §16) rather than reproduced in full.
-10. **Repository integrity.** SHA-1 hashes of all 306 non-dependency files and the full `git status --porcelain` output matched the pre-audit baseline at three checkpoints (after the specialists, after verification, and before writing this report). The only new artifact is this document. Note that `docs/` is listed in `.gitignore`, so this report does **not** appear in `git status` until that rule changes (see P1-A01).
+**Basis:** no core flow is broken in code, and the API-level journeys pass at runtime against the current source; the confirmed P0/P1 items are small, well localised and have known fixes (SEC-001 is environment configuration, SEC-003 a routing guard, SEC-002 an extraction wrapper, RT-001 limiter configuration). A live P0 exposure, two P1 defects and CI that has never run on this code rule out A. The two FAIL gates are driven by these items and by production-deployment scope, not by systemic instability, which rules out C provided the prerequisites are completed.
