@@ -9,9 +9,12 @@ export interface DocumentItem {
   originalName: string;
   fileType: DocumentFileType;
   fileSize: number;
-  /** Null when the file has no stored copy (server-owned field). */
-  cloudinaryUrl: string | null;
-  cloudinaryPublicId: string | null;
+  /**
+   * Whether the document has a stored file. Files are private (SEC-005): the
+   * API never returns a storage URL; fetch the bytes with
+   * documentApi.getDocumentFile (GET /api/documents/:id/file).
+   */
+  hasFile?: boolean;
   extractedText: string;
   embeddingStatus: EmbeddingStatus;
   /** Why processing failed (set by the server when status is "failed"). */

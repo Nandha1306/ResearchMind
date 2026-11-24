@@ -16,7 +16,10 @@ import { recoverEmbeddingWork } from "./services/document.service";
 import redis from "./config/redis";
 import { disconnectMongo } from "../../../packages/shared/lifecycle/mongo";
 import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
+import { startHttpServer } from "../../../packages/shared/lifecycle/listen";
 import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
+import { sweepUploadTmpDir } from "./utils/upload-tmp";
+import { UPLOAD_TMP_DIR } from "./middlewares/upload.middleware";
 
 const PORT =
   process.env.PORT || 5003;
@@ -49,10 +52,19 @@ const startServer = async () => {
   void runSweep();
   const sweepTimer = setInterval(() => void runSweep(), RECOVERY_SWEEP_INTERVAL_MS);
 
-  const server = app.listen(PORT, () => {
-    logger.info(
-      `Document Service running on port ${PORT}`
-    );
+  // SEC-024 (a): remove upload temp files left behind by a crash (only this
+  // service's own temp files older than 1 h, in UPLOAD_TMP_DIR; see upload-tmp.ts).
+  void sweepUploadTmpDir(UPLOAD_TMP_DIR, {
+    log: (message) => logger.info(message),
+    warn: (message) => logger.warn(message),
+  });
+
+  // HOST (default 127.0.0.1); exits 1 if the port cannot be bound (SEC-004, RT-002).
+  const server = startHttpServer(app, {
+    serviceName: "Document Service",
+    port: PORT,
+    log: (message) => logger.info(message),
+    logError: (message) => logger.error(message),
   });
 
   registerGracefulShutdown({

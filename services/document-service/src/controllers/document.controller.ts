@@ -1,9 +1,12 @@
 import { Response } from "express";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
-import { getWorkspaceDocuments, getDocumentById, createDocument, deleteDocument, reindexDocument, claimDocumentForEmbedding } from "../services/document.service";
-import { checkWorkspaceMembership } from "../utils/workspace-checker";
+import { getWorkspaceDocuments, getDocumentById, deleteDocument, reindexDocument, claimDocumentForEmbedding } from "../services/document.service";
+import { checkWorkspaceMembership, assertWorkspaceOwner } from "../utils/workspace-checker";
 import { Document } from "../models/Document";
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { toClientDocument, toClientDocuments } from "../utils/document-serializer";
+import { parseListPage } from "../../../../packages/shared/http/list-page";
+import { DOCUMENT_LIST_MAX } from "../services/document.service";
 
 /** Return all documents for a workspace. */
 export const getDocuments = asyncHandler(
@@ -31,14 +34,13 @@ export const getDocuments = asyncHandler(
       });
     }
 
-    const documents =
-      await getWorkspaceDocuments(
-        workspaceId
-      );
+    const page = parseListPage(req.query, { defaultLimit: DOCUMENT_LIST_MAX, maxLimit: DOCUMENT_LIST_MAX });
+    const { data, meta } = await getWorkspaceDocuments(workspaceId, page);
 
     res.status(200).json({
       success: true,
-      data: documents,
+      data: toClientDocuments(data as any),
+      meta,
     });
   }
 );
@@ -93,67 +95,7 @@ export const getDocument = asyncHandler(
 
     res.status(200).json({
       success: true,
-      data: document,
-    });
-  }
-);
-
-/** Create document metadata and store in MongoDB. */
-export const createDocumentHandler = asyncHandler(
-  async (req: any, res: Response) => {
-    const userId = req.user?.userId || req.user?.id;
-    const { workspaceId } = req.body;
-
-    if (!userId) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
-    }
-
-    /*
-     * Same rule as getDocument: the membership check must not sit behind a
-     * truthiness test. `createDocumentSchema` already requires workspaceId, so
-     * the old `if (workspaceId)` branch was unreachable -- but an authorization
-     * check that silently no-ops when a field is absent is one schema edit away
-     * from being a hole. Reject explicitly instead.
-     */
-    if (!workspaceId) {
-      return res.status(400).json({
-        success: false,
-        message: "Workspace ID is required",
-      });
-    }
-
-    const isMember = await checkWorkspaceMembership(
-      workspaceId,
-      userId,
-      req.headers.authorization
-    );
-
-    if (!isMember) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You are not a member of this workspace.",
-      });
-    }
-
-    // Built field by field: storage location, extracted text and status are
-    // server-owned and never copied from the request body.
-    const { originalName, fileType, fileSize } = req.body;
-    const document = await createDocument({
-      workspaceId,
-      originalName,
-      fileType,
-      fileSize,
-      uploadedBy: userId,
-      cloudinaryUrl: null,
-      cloudinaryPublicId: null,
-      extractedText: "",
-    });
-    res.status(201).json({
-      success: true,
-      data: document,
+      data: toClientDocument(document as any),
     });
   }
 );
@@ -281,6 +223,96 @@ export const claimEmbeddingHandler = async (
   });
 };
 
+const OBJECT_ID = /^[a-f0-9]{24}$/i;
+
+/**
+ * GET /internal/documents/:id/embedding-source?workspaceId=&claimToken=
+ * (ai-service worker; shared-secret internal route, never proxied by the
+ * gateway). Returns the text to embed for the CURRENT claim only (SEC-006):
+ * queue entries are pointers, and the worker takes the text -- and the
+ * uploader/file type written into vector metadata -- from here, never from
+ * Redis.
+ *
+ *   400 malformed parameters
+ *   404 unknown document           410 deleted
+ *   403 the document belongs to another workspace than the job names
+ *   409 the claim is not (or no longer) current (fencing)
+ */
+export const getEmbeddingSourceHandler = async (req: any, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const { id } = req.params;
+  const workspaceId = req.query?.workspaceId;
+  const claimToken = Number(req.query?.claimToken);
+
+  if (!OBJECT_ID.test(String(id)) || typeof workspaceId !== "string" || !OBJECT_ID.test(workspaceId) || !Number.isInteger(claimToken)) {
+    throw new AppError("Invalid embedding source request", 400);
+  }
+
+  const document = await Document.findById(id).select(
+    "workspaceId uploadedBy fileType extractedText deletedAt embeddingStatus claimSequence"
+  );
+  const refuse = (status: number, reason: string) =>
+    res.status(status).json({ success: false, message: `Embedding source unavailable: ${reason}`, reason });
+
+  if (!document) return refuse(404, "not-found");
+  if (document.deletedAt) return refuse(410, "deleted");
+  if (document.workspaceId !== workspaceId) return refuse(403, "workspace-mismatch");
+  if (document.embeddingStatus !== "indexing" || document.claimSequence !== claimToken) {
+    return refuse(409, "claim-not-current");
+  }
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      documentId: document._id,
+      workspaceId: document.workspaceId,
+      uploadedBy: document.uploadedBy,
+      fileType: document.fileType,
+      extractedText: document.extractedText ?? "",
+    },
+  });
+};
+
+/** Most document ids accepted in one live-documents check (topK is at most 20). */
+const MAX_LIVE_CHECK_IDS = 200;
+
+/**
+ * POST /internal/documents/live { workspaceId, documentIds } (ai-service).
+ * Which of these documents still exist, are not (being) deleted, and belong
+ * to `workspaceId` -- one batched query. ai-service drops every retrieval
+ * match that is not in the answer, so text of a deleted document (for
+ * example a vector written late by a timed-out upsert) is never returned or
+ * cited (SEC-012 retrieval side).
+ */
+export const liveDocumentsHandler = async (req: any, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  const workspaceId = req.body?.workspaceId;
+  const documentIds = req.body?.documentIds;
+  if (
+    typeof workspaceId !== "string" ||
+    !OBJECT_ID.test(workspaceId) ||
+    !Array.isArray(documentIds) ||
+    documentIds.length > MAX_LIVE_CHECK_IDS ||
+    !documentIds.every((id: unknown) => typeof id === "string")
+  ) {
+    throw new AppError("Invalid live-documents request", 400);
+  }
+  // Ids that are not ObjectIds cannot be documents: they are simply not live.
+  const candidates = [...new Set(documentIds as string[])].filter((id) => OBJECT_ID.test(id));
+  const live = candidates.length
+    ? await Document.find({ _id: { $in: candidates }, workspaceId, deletedAt: null }).select("_id originalName").lean()
+    : [];
+  return res.status(200).json({
+    success: true,
+    data: {
+      // Unchanged field: older ai-service versions read only this one.
+      liveDocumentIds: live.map((doc: any) => String(doc._id)),
+      // Additive (ISS-029): titles, so answers can name their sources.
+      liveDocuments: live.map((doc: any) => ({ id: String(doc._id), name: String(doc.originalName ?? "") })),
+    },
+  });
+};
+
 /** Delete a document and clean up associated resources. */
 export const deleteDocumentHandler = asyncHandler(
   async (req: any, res: Response) => {
@@ -302,18 +334,12 @@ export const deleteDocumentHandler = asyncHandler(
       });
     }
 
-    const isMember = await checkWorkspaceMembership(
+    // Owner only (SEC-010): a member who is not the owner gets 403.
+    await assertWorkspaceOwner(
       document.workspaceId,
-      userId,
-      req.headers.authorization
+      req.headers.authorization,
+      "Only the workspace owner can delete documents."
     );
-
-    if (!isMember) {
-      return res.status(403).json({
-        success: false,
-        message: "Access denied. You are not a member of this workspace.",
-      });
-    }
 
     const deleted = await deleteDocument(id, document.workspaceId);
 
@@ -329,7 +355,7 @@ export const deleteDocumentHandler = asyncHandler(
     res.status(200).json({
       success: true,
       message: "Document deleted successfully",
-      data: deleted,
+      data: toClientDocument(deleted as any),
     });
   }
 );
@@ -381,7 +407,7 @@ export const reindexDocumentHandler = asyncHandler(
     res.status(200).json({
       success: true,
       message: "Re-indexing initiated successfully",
-      data: updated,
+      data: toClientDocument(updated as any),
     });
   }
 );

@@ -5,7 +5,9 @@ import {
   getBoardById,
   updateBoard,
   deleteBoard,
+  BOARD_LIST_MAX,
 } from "../services/board.service";
+import { parseListPage } from "../../../../packages/shared/http/list-page";
 import { AppError } from "../../../../packages/shared/errors/AppError";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 
@@ -58,11 +60,16 @@ export const getWorkspaceBoardsHandler = asyncHandler(
   async (req: Request, res: Response) => {
     const workspaceId = getRequiredWorkspaceId(req);
 
-    const boards = await getWorkspaceBoards(workspaceId);
+    const page = parseListPage(req.query as Record<string, unknown>, {
+      defaultLimit: BOARD_LIST_MAX,
+      maxLimit: BOARD_LIST_MAX,
+    });
+    const { data, meta } = await getWorkspaceBoards(workspaceId, page);
 
     res.status(200).json({
       success: true,
-      data: boards,
+      data,
+      meta,
     });
   }
 );

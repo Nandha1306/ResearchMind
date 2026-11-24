@@ -1,13 +1,22 @@
 import axiosInstance from "./axios";
 import type { Board, Task, BulkCreateTasksPayload, TaskActivity, CreateTaskPayload, BulkCreateTasksResult } from "../types/task.types";
+import { fetchAllPages, type GetFn, type PagedList } from "./paging";
+
+/*
+ * List endpoints are paged on the server (ISS-043). These helpers follow the
+ * cursor up to the page ceiling (api/paging.ts); the `...Paged` variants also
+ * report whether the ceiling was hit, for the "showing first N" notice.
+ */
+const get: GetFn = (url, config) => axiosInstance.get(url, config);
+
+/** Fetch the Kanban boards of a workspace (oldest first), with truncation. */
+export const getWorkspaceBoardsPaged = (workspaceId: string): Promise<PagedList<Board>> =>
+  fetchAllPages<Board>(get, `/tasks/workspaces/${workspaceId}/boards`);
 
 /** Fetch all Kanban boards for the given workspace. */
 export const getWorkspaceBoards = async (
   workspaceId: string
-): Promise<Board[]> => {
-  const response = await axiosInstance.get(`/tasks/workspaces/${workspaceId}/boards`);
-  return response.data.data || [];
-};
+): Promise<Board[]> => (await getWorkspaceBoardsPaged(workspaceId)).items;
 
 /** Create a new Kanban board in a workspace. */
 export const createBoard = async (
@@ -48,22 +57,24 @@ export const bulkCreateTasks = async (
   };
 };
 
+/** Fetch the tasks of a workspace (newest first), with truncation. */
+export const getWorkspaceTasksPaged = (
+  workspaceId: string,
+  boardId?: string,
+  parentTaskId?: string | null
+): Promise<PagedList<Task>> => {
+  const params: Record<string, string> = {};
+  if (boardId) params.boardId = boardId;
+  if (parentTaskId !== undefined) params.parentTaskId = String(parentTaskId);
+  return fetchAllPages<Task>(get, `/tasks/workspaces/${workspaceId}/tasks`, params);
+};
+
 /** Fetch all tasks for a workspace (optionally filtered by boardId or parentTaskId). */
 export const getWorkspaceTasks = async (
   workspaceId: string,
   boardId?: string,
   parentTaskId?: string | null
-): Promise<Task[]> => {
-  const params: Record<string, string> = {};
-  if (boardId) params.boardId = boardId;
-  if (parentTaskId !== undefined) params.parentTaskId = String(parentTaskId);
-
-  const response = await axiosInstance.get(
-    `/tasks/workspaces/${workspaceId}/tasks`,
-    { params: Object.keys(params).length ? params : undefined }
-  );
-  return response.data.data || [];
-};
+): Promise<Task[]> => (await getWorkspaceTasksPaged(workspaceId, boardId, parentTaskId)).items;
 
 /** Fetch single task details by ID. */
 export const getTaskById = async (
@@ -80,12 +91,9 @@ export const getTaskById = async (
 export const getTaskActivities = async (
   workspaceId: string,
   taskId: string
-): Promise<TaskActivity[]> => {
-  const response = await axiosInstance.get(
-    `/tasks/workspaces/${workspaceId}/tasks/${taskId}/activities`
-  );
-  return response.data.data || [];
-};
+): Promise<TaskActivity[]> =>
+  // Up to 10 pages x 200 entries; older entries beyond that are not loaded.
+  (await fetchAllPages<TaskActivity>(get, `/tasks/workspaces/${workspaceId}/tasks/${taskId}/activities`)).items;
 
 /** Update task details or status. */
 export const updateTask = async (

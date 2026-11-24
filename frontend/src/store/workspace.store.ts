@@ -74,7 +74,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         } catch (error: any) {
           const message = error.response?.data?.message || error.message || "Failed to create workspace";
           set({ isLoading: false, error: message });
-          throw new Error(message);
+          throw new Error(message, { cause: error });
         }
       },
 
@@ -152,7 +152,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         } catch (error: any) {
           const message = error.response?.data?.message || error.message || "Failed to join workspace";
           set({ isLoading: false, error: message });
-          throw new Error(message);
+          throw new Error(message, { cause: error });
         }
       },
 

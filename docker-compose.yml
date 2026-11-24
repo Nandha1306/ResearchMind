@@ -1,66 +1,90 @@
 # ---------------------------------------------------------------------------
-# Local development stack.
+# Local development infrastructure: MongoDB and Redis.
 #
-# Credentials are environment REFERENCES, not literals. The :- defaults keep an
-# existing local setup working unchanged; override them in a root .env (which is
-# gitignored) for anything that is not a throwaway dev database.
-#
-# These containers publish their ports on 0.0.0.0 -- do not run this compose
-# file unmodified on a host reachable from an untrusted network.
+# - Ports are published on 127.0.0.1 ONLY. Nothing here is reachable from the
+#   network. The host ports can be changed with MONGO_HOST_PORT / REDIS_HOST_PORT
+#   (defaults 27017 / 6379).
+# - There are NO default credentials. Every credential is required from the
+#   root .env (gitignored; copy .env.example) and `docker compose` refuses to
+#   start while one is missing or empty.
+# - Redis requires a password (REDIS_PASSWORD). Clients use
+#   REDIS_URL=redis://:<password>@127.0.0.1:6379. The password is visible to
+#   anyone who can run `docker inspect` on this host.
+# - Each service gets its own MongoDB user with readWrite on its own database
+#   only (MONGO_<SERVICE>_USERNAME / _PASSWORD / _DATABASE). The users are
+#   created by docker/mongo/provision-service-users.js when the data volume is
+#   FIRST initialised. An existing volume keeps its old users and passwords:
+#   follow "Securing an existing installation" in
+#   docs/deployment/docker-process.md.
+# - The mongo-express admin UI is NOT part of this file. It is opt-in:
+#     docker compose -f docker-compose.yml -f docker-compose.tools.yml up -d mongo-express
 # ---------------------------------------------------------------------------
-version: "3.9"
 
 services:
   mongodb:
-    image: mongo:7
+    # Pinned to the minor line (W6-CI-20); the same tag as the CI test job.
+    image: mongo:7.0
     container_name: researchmind-mongodb
-
     restart: unless-stopped
 
     ports:
-      - "27017:27017"
+      - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
 
     environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-password}
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME in the root .env (see .env.example)}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in the root .env (see .env.example)}
+
+      # Per-service users, read by docker/mongo/provision-service-users.js.
+      MONGO_AUTH_USERNAME: ${MONGO_AUTH_USERNAME:?set MONGO_AUTH_USERNAME in the root .env (see .env.example)}
+      MONGO_AUTH_PASSWORD: ${MONGO_AUTH_PASSWORD:?set MONGO_AUTH_PASSWORD in the root .env (see .env.example)}
+      MONGO_AUTH_DATABASE: ${MONGO_AUTH_DATABASE:?set MONGO_AUTH_DATABASE in the root .env (see .env.example)}
+      MONGO_WORKSPACE_USERNAME: ${MONGO_WORKSPACE_USERNAME:?set MONGO_WORKSPACE_USERNAME in the root .env (see .env.example)}
+      MONGO_WORKSPACE_PASSWORD: ${MONGO_WORKSPACE_PASSWORD:?set MONGO_WORKSPACE_PASSWORD in the root .env (see .env.example)}
+      MONGO_WORKSPACE_DATABASE: ${MONGO_WORKSPACE_DATABASE:?set MONGO_WORKSPACE_DATABASE in the root .env (see .env.example)}
+      MONGO_DOCUMENT_USERNAME: ${MONGO_DOCUMENT_USERNAME:?set MONGO_DOCUMENT_USERNAME in the root .env (see .env.example)}
+      MONGO_DOCUMENT_PASSWORD: ${MONGO_DOCUMENT_PASSWORD:?set MONGO_DOCUMENT_PASSWORD in the root .env (see .env.example)}
+      MONGO_DOCUMENT_DATABASE: ${MONGO_DOCUMENT_DATABASE:?set MONGO_DOCUMENT_DATABASE in the root .env (see .env.example)}
+      MONGO_TASK_USERNAME: ${MONGO_TASK_USERNAME:?set MONGO_TASK_USERNAME in the root .env (see .env.example)}
+      MONGO_TASK_PASSWORD: ${MONGO_TASK_PASSWORD:?set MONGO_TASK_PASSWORD in the root .env (see .env.example)}
+      MONGO_TASK_DATABASE: ${MONGO_TASK_DATABASE:?set MONGO_TASK_DATABASE in the root .env (see .env.example)}
+      MONGO_AI_USERNAME: ${MONGO_AI_USERNAME:?set MONGO_AI_USERNAME in the root .env (see .env.example)}
+      MONGO_AI_PASSWORD: ${MONGO_AI_PASSWORD:?set MONGO_AI_PASSWORD in the root .env (see .env.example)}
+      MONGO_AI_DATABASE: ${MONGO_AI_DATABASE:?set MONGO_AI_DATABASE in the root .env (see .env.example)}
 
     volumes:
       - mongodb_data:/data/db
+      # Runs once, when the data volume is first initialised.
+      - ./docker/mongo/provision-service-users.js:/docker-entrypoint-initdb.d/10-provision-service-users.js:ro
+
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--norc", "--eval", "quit(db.adminCommand({ ping: 1 }).ok ? 0 : 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 60s
+      start_interval: 2s
 
   redis:
-    image: redis:7
-
+    # Pinned to the minor line (W6-CI-20); the same tag as the CI test job.
+    image: redis:7.4
     container_name: researchmind-redis
-
     restart: unless-stopped
 
+    # --protected-mode is passed explicitly: the official image builds Redis
+    # with protected-mode defaulting to "no".
+    command:
+      - redis-server
+      - --requirepass
+      - ${REDIS_PASSWORD:?set REDIS_PASSWORD in the root .env (see .env.example)}
+      - --protected-mode
+      - "yes"
+
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
 
     volumes:
       - redis_data:/data
 
-  mongo-express:
-    image: mongo-express
-
-    container_name: researchmind-mongo-express
-
-    restart: unless-stopped
-
-    depends_on:
-      - mongodb
-
-    ports:
-      - "8081:8081"
-
-    environment:
-      ME_CONFIG_MONGODB_SERVER: mongodb
-      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USERNAME:-admin}
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:-password}
-
-      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:-admin}
-      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:-password}
-      
 volumes:
   mongodb_data:
   redis_data:

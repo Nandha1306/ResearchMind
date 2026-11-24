@@ -7,7 +7,9 @@ export const createWorkspaceSchema =
       .min(
         3,
         "Workspace name is required"
-      ),
+      )
+      // ISS-050 (iii): same bound as the client form.
+      .max(100, "Workspace name must be at most 100 characters"),
 
     description: z
       .string()

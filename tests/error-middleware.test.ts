@@ -3,7 +3,8 @@ import { test, describe, before, after } from "node:test";
 import express from "express";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { listen } from "./helpers/test-env";
+import { listen, setTestSecrets } from "./helpers/test-env";
+import { startGateway } from "./helpers/gateway";
 import { errorMiddleware } from "../packages/shared/errors/error.middleware";
 import { AppError } from "../packages/shared/errors/AppError";
 import { validate } from "../packages/validation/validation";
@@ -196,5 +197,94 @@ describe("Server and dependency errors are safe", () => {
     // The server must still serve requests afterwards.
     const res = await get("/app-error");
     assert.strictEqual(res.status, 404);
+  });
+});
+
+/*
+ * ISS-041: an unmatched route used to get Express's default HTML page
+ * ("<pre>Cannot GET /api/...</pre>"), so clients that parse error bodies as
+ * JSON failed. Every app now ends with a JSON not-found handler using the
+ * documented envelope, without echoing the path. REAL service and gateway
+ * apps; no database is needed for an unmatched path; Redis on a dead port.
+ */
+describe("ISS-041: unknown routes return the JSON error envelope (404)", () => {
+  const PROBE = "__iss041_nope__";
+  const servers: Array<{ close: () => Promise<void> }> = [];
+  let gateway: { url: string; close: () => Promise<void> } | undefined;
+
+  const assertJsonNotFound = async (res: Response, label: string) => {
+    const body = await res.text();
+    assert.strictEqual(res.status, 404, label);
+    assert.match(res.headers.get("content-type") ?? "", /^application\/json/, `${label}: ${body.slice(0, 80)}`);
+    assert.deepStrictEqual(JSON.parse(body), { success: false, message: "Route not found" }, label);
+    assert.ok(!body.includes(PROBE), `${label}: the path must not be echoed`);
+  };
+
+  before(async () => {
+    setTestSecrets();
+    process.env.REDIS_URL = "redis://127.0.0.1:6599";
+    process.env.VOYAGE_API_KEY ||= "test-voyage-key";
+    process.env.PINECONE_API_KEY ||= "test-pinecone-key";
+    process.env.PINECONE_INDEX ||= "test-index";
+    process.env.XAI_API_KEY ||= "gsk_test_key_for_unit_tests";
+    delete process.env.API_DOCS_ENABLED;
+    delete process.env.CORS_ORIGIN;
+    delete process.env.TRUST_PROXY;
+  });
+
+  after(async () => {
+    await gateway?.close();
+    for (const server of servers) await server.close();
+    // document-service and ai-service open Redis clients at import (dead port);
+    // the gateway's limiter client is closed by its own close().
+    for (const client of [
+      (await import("../services/document-service/src/config/redis")).default,
+      (await import("../services/ai-service/src/config/redis")).default,
+    ]) {
+      (client as { disconnect: () => void }).disconnect();
+    }
+  });
+
+  for (const [name, modulePath, prefix] of [
+    ["auth-service", "../services/auth-service/src/app", "/api/auth"],
+    ["workspace-service", "../services/workspace-service/src/app", "/api/workspaces"],
+    ["document-service", "../services/document-service/src/app", "/api/documents"],
+    ["task-service", "../services/task-service/src/app", "/api/tasks"],
+    ["ai-service", "../services/ai-service/src/app", "/api/ai"],
+  ] as const) {
+    test(`${name}: an unknown route is a JSON 404`, async () => {
+      const { default: app } = await import(modulePath);
+      const server = await listen(app);
+      servers.push(server);
+      await assertJsonNotFound(await fetch(`${server.url}/${PROBE}`), `${name} GET /${PROBE}`);
+      await assertJsonNotFound(
+        await fetch(`${server.url}${prefix}/${PROBE}/x`, { method: "POST" }),
+        `${name} POST ${prefix}/${PROBE}/x`
+      );
+      // Known routes are unaffected (the handler is mounted after them).
+      const health = await fetch(`${server.url}/health`);
+      await health.text();
+      assert.notStrictEqual(health.status, 404, `${name} /health`);
+    });
+  }
+
+  test("api-gateway: unknown prefixes and unknown routes behind the auth proxy are JSON 404s", async () => {
+    // The real auth-service app is the gateway's auth upstream, so the
+    // proxied 404 is the service's own JSON body.
+    const { default: authApp } = await import("../services/auth-service/src/app");
+    const auth = await listen(authApp);
+    servers.push(auth);
+    process.env.AUTH_SERVICE_URL = auth.url;
+    gateway = await startGateway();
+
+    await assertJsonNotFound(await fetch(`${gateway.url}/api/${PROBE}`), "gateway GET /api/<unknown>");
+    await assertJsonNotFound(await fetch(`${gateway.url}/${PROBE}`, { method: "DELETE" }), "gateway DELETE /<unknown>");
+    await assertJsonNotFound(await fetch(`${gateway.url}/api-docs/`), "gateway /api-docs/ (docs disabled)");
+    await assertJsonNotFound(await fetch(`${gateway.url}/api/auth/${PROBE}`), "gateway -> auth unknown route");
+
+    // /health is unaffected.
+    const health = await fetch(`${gateway.url}/health`);
+    await health.text();
+    assert.strictEqual(health.status, 200);
   });
 });

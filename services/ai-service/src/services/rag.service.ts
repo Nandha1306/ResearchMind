@@ -5,6 +5,7 @@ import { streamGrokResponse } from "./grok.service";
 import { saveAiSession } from "./ai-session.service";
 import { auditAnswerCitations } from "./citation-validator.service";
 import { XAI_MODEL } from "../config/grok";
+import { describeErrorForLog } from "../../../../packages/shared/errors/safe-error";
 import {
   LLM_UNAVAILABLE_MESSAGE,
   isLlmUnavailableError,
@@ -17,7 +18,7 @@ export interface RagSseEvent {
   data: any;
 }
 
-const RETRIEVAL_UNAVAILABLE_MESSAGE =
+export const RETRIEVAL_UNAVAILABLE_MESSAGE =
   "Could not search this workspace's documents right now. Please try again.";
 
 /** Execute full end-to-end RAG stream pipeline over workspace documents. */
@@ -27,12 +28,15 @@ export const runRagStreamQuery = async ({
   query,
   topK = 5,
   emitEvent,
+  signal,
 }: {
   workspaceId: string;
   userId: string;
   query: string;
   topK?: number;
   emitEvent: (event: RagEventType, data: any) => void;
+  /** Aborted when the client disconnects (ISS-015): stop, emit and save nothing. */
+  signal?: AbortSignal;
 }): Promise<void> => {
   const normalizedQuery = query.trim();
 
@@ -55,13 +59,17 @@ export const runRagStreamQuery = async ({
   } catch (err) {
     // Retrieval failure must not fall through to generation: answering without
     // context would produce an ungrounded answer presented as a grounded one.
-    console.error("[ai-service] Retrieval failed:", err);
+    console.error("[ai-service] Retrieval failed:", describeErrorForLog(err));
     emitEvent("error", {
       message: RETRIEVAL_UNAVAILABLE_MESSAGE,
       partial: false,
     });
     return;
   }
+
+  // Retrieval cannot be cancelled mid-call; if the client left meanwhile,
+  // do not start (and pay for) a generation nobody will read.
+  if (signal?.aborted) return;
 
   // 3. Build RAG context
   const ragContext = buildRagContext(chunks);
@@ -90,9 +98,12 @@ export const runRagStreamQuery = async ({
       userPrompt,
       (token) => {
         emitEvent("token", { text: token });
-      }
+      },
+      { signal }
     );
   } catch (err: any) {
+    // The client disconnected: nothing to tell it, and nothing is saved.
+    if (signal?.aborted) return;
     // No answer is persisted and no `done` is emitted, so the client can never
     // read a failed generation as a completed one. `partial` tells it whether
     // the tokens it already rendered are an incomplete real answer.
@@ -104,6 +115,9 @@ export const runRagStreamQuery = async ({
     });
     return;
   }
+
+  // A disconnect right at the end of generation: still never persist.
+  if (signal?.aborted) return;
 
   // 7. Audit citation markers against what was actually retrieved.
   const citationAudit = auditAnswerCitations(fullAnswer, sourcesPayload.length);

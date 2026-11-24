@@ -68,4 +68,7 @@ const aiSessionSchema = new Schema<IAISession>(
   }
 );
 
+// SEC-023: the per-user, newest-first history page (built at the next start).
+aiSessionSchema.index({ workspaceId: 1, userId: 1, createdAt: -1, _id: -1 });
+
 export const AISession = model<IAISession>("AISession", aiSessionSchema);

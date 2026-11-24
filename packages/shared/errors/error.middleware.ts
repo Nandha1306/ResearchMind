@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from "express";
 import { AppError } from "./AppError";
+import { describeErrorForLog, redactSecrets } from "./safe-error";
 
 /**
  * Mongo driver errors that mean "the database is unreachable", as opposed to
@@ -28,6 +29,13 @@ const sendError = (res: Response, statusCode: number, message: string) =>
     message,
   });
 
+/**
+ * ISS-041: unmatched routes get the documented JSON envelope instead of
+ * Express's default HTML page. Mount it after every route (and, in the
+ * services, just before errorMiddleware). The path is not echoed.
+ */
+export const notFoundHandler = (_req: Request, res: Response) => sendError(res, 404, "Route not found");
+
 export const errorMiddleware = (
   err: any,
   req: Request,
@@ -40,9 +48,29 @@ export const errorMiddleware = (
     return next(err);
   }
 
+  // RT-007 / Wave 6 (W5-L3): every server-side log line below is a redacted,
+  // bounded description, never the raw error object (which can carry a
+  // wrapped provider error, a `cause`, request config or headers).
+  const logPath = `${req.method} ${req.originalUrl.split("?")[0]}`;
+  // Only real frames ("    at …"), at most 8, each at most 300 characters: the
+  // lines after the first message line of a multi-line message are message
+  // text, not frames (W6-R5-02), and must never bypass the redaction.
+  const framesOf = (error: any): string =>
+    typeof error?.stack === "string"
+      ? error.stack
+          .split("\n")
+          .filter((line: string) => /^\s+at /.test(line))
+          .slice(0, 8)
+          // Stage E round 2 (W6-R5-10): a message line can look like a frame
+          // ("    at … (redis://:pw@host)"), so every kept line is redacted too.
+          .map((line: string) => redactSecrets(line).slice(0, 300))
+          .join("\n")
+      : "";
+
   if (err instanceof AppError) {
     if (err.statusCode >= 500) {
-      console.error(err);
+      const frames = framesOf(err);
+      console.error(`[${logPath}] ${describeErrorForLog(err)}${frames ? `\n${frames}` : ""}`);
     }
     return sendError(res, err.statusCode, err.message);
   }
@@ -88,11 +116,15 @@ export const errorMiddleware = (
   }
 
   if (isMongoUnavailable(err)) {
-    console.error(`[${req.method} ${req.originalUrl}] Database unavailable:`, err?.message);
+    console.error(`[${logPath}] Database unavailable: ${describeErrorForLog(err)}`);
     return sendError(res, 503, "Service temporarily unavailable. Please try again later.");
   }
 
-  console.error(err);
+  // RT-007: an unexpected error can be a provider SDK error carrying key
+  // identifiers, headers or URLs. Log a redacted description plus the stack
+  // frames (without the message line), never the raw object.
+  const frames = framesOf(err);
+  console.error(`[${logPath}] Unhandled error: ${describeErrorForLog(err)}${frames ? `\n${frames}` : ""}`);
 
   return sendError(res, 500, "Internal Server Error");
 };

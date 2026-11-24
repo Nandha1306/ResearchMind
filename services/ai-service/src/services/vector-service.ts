@@ -1,4 +1,5 @@
 import { pineconeIndex } from "../config/pinecone";
+import { timeouts, withTimeout } from "../config/timeouts";
 import { VOYAGE_MODEL } from "../config/voyage";
 import { EmbeddingResult } from "./embedding.service";
 
@@ -89,9 +90,11 @@ export const upsertDocumentEmbeddings = async ({
         start + PINECONE_BATCH_SIZE
   );
 
-  await pineconeIndex
-    .namespace(workspaceId)
-    .upsert(batch);
+  await withTimeout(
+    pineconeIndex.namespace(workspaceId).upsert(batch),
+    timeouts.pineconeMs(),
+    "Pinecone upsert"
+  );
 
     console.log(
         `Upserted Pinecone vectors ${start}-${
@@ -113,13 +116,15 @@ export const deleteDocumentEmbeddings = async (
   documentId: string
 ) => {
   try {
-    await pineconeIndex
-      .namespace(workspaceId)
-      .deleteMany({
+    await withTimeout(
+      pineconeIndex.namespace(workspaceId).deleteMany({
         documentId: {
           $eq: documentId,
         },
-      });
+      }),
+      timeouts.pineconeMs(),
+      "Pinecone delete"
+    );
   } catch (error: any) {
     const is404 =
       error?.name === "PineconeNotFoundError" ||

@@ -19,6 +19,29 @@ export const readInitialQuery = (state: unknown): string | null => {
   return trimmed;
 };
 
+export type DeepLinkResolution<W> =
+  | { action: "select"; workspace: W }
+  | { action: "stay" }
+  | { action: "redirect" };
+
+/**
+ * `/app/workspace/:id/search` (REQ-128): which workspace the AI researcher
+ * should open. A member's workspace is selected (or kept if it is already
+ * current); a malformed id or a workspace the user is not a member of
+ * redirects without switching. The server still enforces membership.
+ */
+export const resolveWorkspaceDeepLink = <W extends { _id: string }>(
+  workspaces: W[] | null | undefined,
+  currentId: string | null | undefined,
+  id: string | null | undefined
+): DeepLinkResolution<W> => {
+  if (typeof id !== "string" || !/^[a-f0-9]{24}$/i.test(id)) return { action: "redirect" };
+  const workspace = workspaces?.find((ws) => ws._id === id);
+  if (!workspace) return { action: "redirect" };
+  if (workspace._id === currentId) return { action: "stay" };
+  return { action: "select", workspace };
+};
+
 /** Where an unknown URL (or "/") leads. */
 export const defaultRouteFor = (isAuthenticated: boolean) =>
   isAuthenticated ? "/dashboard" : "/login";

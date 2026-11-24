@@ -47,12 +47,20 @@ export const VOYAGE_MODEL = embeddingConfig.model;
 export const VOYAGE_EMBEDDING_DIMENSION = embeddingConfig.dimension;
 export const VOYAGE_MODEL_IS_DEFAULT = embeddingConfig.modelIsDefault;
 
+/*
+ * maxRetries: LangChain's AsyncCaller otherwise retries silently up to 6
+ * times with backoff, each attempt bounded only by undici's 300 s header
+ * timeout -- a hung provider then held the worker for about 36 minutes
+ * (ISS-037). One retry here; every call is additionally bounded by
+ * VOYAGE_DOCUMENT_TIMEOUT_MS / VOYAGE_QUERY_TIMEOUT_MS (config/timeouts.ts).
+ */
 export const voyageEmbeddings = new VoyageEmbeddings({
   apiKey,
   modelName: VOYAGE_MODEL,
   inputType: "document",
   outputDimension: VOYAGE_EMBEDDING_DIMENSION,
   batchSize: 8,
+  maxRetries: 1,
 });
 
 export const voyageQueryEmbeddings = new VoyageEmbeddings({
@@ -60,4 +68,5 @@ export const voyageQueryEmbeddings = new VoyageEmbeddings({
   modelName: VOYAGE_MODEL,
   inputType: "query",
   outputDimension: VOYAGE_EMBEDDING_DIMENSION,
+  maxRetries: 1,
 });

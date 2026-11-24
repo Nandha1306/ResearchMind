@@ -7,36 +7,18 @@ import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 import { AppError } from "../../../../packages/shared/errors/AppError";
 import { extractPdfText } from "../utils/pdf-extractor";
 import { extractDocxText } from "../utils/docx-extractor";
+import { assertExtractedTextWithinLimit } from "../utils/extraction-limits";
 import { checkWorkspaceMembership } from "../utils/workspace-checker";
 
 import cloudinary from "../config/cloudinary";
 import { addEmbeddingJob, getEmbeddingQueueLength } from "../queues/embedding.queue";
 import { deleteDocumentVectors } from "./vector-cleanup.client";
 import { assertFileMatchesType } from "../utils/file-signature";
+import { destroyOptionsFor, uploadToCloudinary } from "./file-storage";
+import { toClientDocument } from "../utils/document-serializer";
+import { afterCursor, pageSort, toPage, type ListPageRequest } from "../../../../packages/shared/http/list-page";
 
-/** Upload a document file to Cloudinary. */
-export const uploadToCloudinary = async (
-  filePath: string,
-  fileName: string,
-  fileExtension?: string
-) => {
-  const resourceType = fileExtension === "pdf" ? "image" : "raw";
-  const publicId = fileName.replace(/\.(pdf|docx)$/i, "");
-
-  const result = await cloudinary.uploader.upload(
-    filePath,
-    {
-      resource_type: resourceType,
-      folder: "researchmind/documents",
-      public_id: publicId,
-    }
-  );
-
-  return {
-    url: result.secure_url,
-    publicId: result.public_id,
-  };
-};
+export { uploadToCloudinary };
 
 /** Save document metadata in MongoDB. */
 export const createDocument = async (
@@ -128,25 +110,39 @@ export const uploadDocument = asyncHandler(
         );
       }
 
+      // Bound what is stored and embedded (DOCX is also capped in its worker).
+      assertExtractedTextWithinLimit(extractedText);
+
+      // A file with no extractable text (e.g. a scanned PDF: pdf-parse
+      // returns only "-- 1 of 1 --" page markers) can never be embedded.
+      // Store it with no text, marked failed with a reason the UI shows,
+      // instead of queuing a job that fails three times (ARC-001).
+      const hasText = extractedText.replace(PAGE_MARKERS, "").trim().length > 0;
+      if (!hasText) extractedText = "";
+
       let cloudinaryFile: Awaited<ReturnType<typeof uploadToCloudinary>>;
       try {
         cloudinaryFile = await uploadToCloudinary(
           req.file.path,
-          req.file.filename,
           fileExtension
         );
       } catch (storageError) {
-        // External storage failure: log the cause server-side, return a safe
-        // message instead of a generic 500.
-        console.error("Cloudinary upload failed:", storageError);
+        // External storage failure: log name and HTTP code only (RT-007:
+        // Cloudinary puts the api_key identifier in its message), and return
+        // a safe message instead of a generic 500.
+        const failure = storageError as { name?: string; http_code?: unknown };
+        console.error(
+          `[document-service] Cloudinary upload failed: ${failure?.name ?? "Error"} http_code=${failure?.http_code ?? "none"}`
+        );
         throw new AppError(
           "File storage is temporarily unavailable. Please try again later.",
           502
         );
       }
 
-      const document =
-        await createDocument({
+      let document: Awaited<ReturnType<typeof createDocument>>;
+      try {
+        document = await createDocument({
           workspaceId,
           uploadedBy: userId,
           originalName:
@@ -154,32 +150,56 @@ export const uploadDocument = asyncHandler(
           fileType:
             fileExtension as "pdf" | "docx",
           fileSize: req.file.size,
-          cloudinaryUrl:
-            cloudinaryFile.url,
-          cloudinaryPublicId:
-            cloudinaryFile.publicId,
+          // Private asset: no delivery URL is stored (SEC-005).
+          cloudinaryUrl: null,
+          cloudinaryPublicId: cloudinaryFile.publicId,
+          cloudinaryResourceType: cloudinaryFile.resourceType,
+          cloudinaryDeliveryType: cloudinaryFile.deliveryType,
+          cloudinaryFormat: cloudinaryFile.format,
           extractedText,
-          embeddingStatus: "pending",
+          embeddingStatus: hasText ? "pending" : "failed",
+          ...(hasText ? {} : { embeddingError: NO_EXTRACTABLE_TEXT_ERROR }),
         });
+      } catch (createError) {
+        // SEC-013: the record could not be stored, so nothing references the
+        // asset just uploaded -- remove it instead of leaving an orphan in
+        // storage. A failure here is logged (message only); the original
+        // error is what the client gets.
+        try {
+          await cloudinary.uploader.destroy(
+            cloudinaryFile.publicId,
+            destroyOptionsFor({
+              fileType: fileExtension as string,
+              cloudinaryResourceType: cloudinaryFile.resourceType,
+              cloudinaryDeliveryType: cloudinaryFile.deliveryType,
+            })
+          );
+        } catch (destroyError) {
+          console.error(
+            "[document-service] Could not remove the uploaded asset after the record failed to save:",
+            (destroyError as Error)?.message
+          );
+        }
+        throw createError;
+      }
 
-      try {
-        await addEmbeddingJob({
-          documentId: document._id.toString(),
-          workspaceId: document.workspaceId,
-          uploadedBy: document.uploadedBy,
-          extractedText: document.extractedText,
-          fileType: document.fileType,
-        });
-      } catch (error) {
-        // Message only: ioredis errors carry the failed command's arguments,
-        // i.e. the whole job including the document's extracted text.
-        console.error("Failed to enqueue embedding job:", (error as Error)?.message);
-        await Document.findByIdAndUpdate(
-          document._id,
-          {
-            embeddingStatus: "failed",
-          }
-        );
+      if (hasText) {
+        try {
+          await addEmbeddingJob({
+            documentId: document._id.toString(),
+            workspaceId: document.workspaceId,
+          });
+        } catch (error) {
+          // Message only (jobs no longer carry text, but older ioredis errors
+          // echo the command's arguments).
+          console.error("Failed to enqueue embedding job:", (error as Error)?.message);
+          await Document.findByIdAndUpdate(
+            document._id,
+            {
+              embeddingStatus: "failed",
+            }
+          );
+        }
       }
 
       await fs.unlink(req.file.path);
@@ -188,7 +208,7 @@ export const uploadDocument = asyncHandler(
         success: true,
         message:
           "Document uploaded successfully",
-        data: document,
+        data: toClientDocument(document),
       });
     } catch (error) {
       await fs.unlink(req.file.path).catch(() => {});
@@ -197,18 +217,26 @@ export const uploadDocument = asyncHandler(
   }
 );
 
-/** Return all documents for a workspace (without full extracted text payload). */
+/** Most documents in one list page (ISS-043); also the default page size. */
+export const DOCUMENT_LIST_MAX = 500;
+
+/**
+ * One page of a workspace's documents, newest first (without the extracted
+ * text). Bounded and cursor-paged (ISS-043).
+ */
 export const getWorkspaceDocuments = async (
-  workspaceId: string
+  workspaceId: string,
+  page: ListPageRequest = { limit: DOCUMENT_LIST_MAX, cursor: null }
 ) => {
-  return Document.find({
+  const rows = await Document.find({
     workspaceId,
     deletedAt: null,
+    ...afterCursor(page.cursor, -1),
   })
     .select("-extractedText")
-    .sort({
-      createdAt: -1,
-    });
+    .sort(pageSort(-1))
+    .limit(page.limit + 1);
+  return toPage(rows, page.limit);
 };
 
 /** Find a document by id (documents being deleted are not visible). */
@@ -247,10 +275,9 @@ const destroyCloudinaryAsset = async (document: DocumentRecord) => {
   }
 
   try {
-    const resourceType = document.fileType === "pdf" ? "image" : "raw";
-    await cloudinary.uploader.destroy(document.cloudinaryPublicId, {
-      resource_type: resourceType,
-    });
+    // Same resource AND delivery type as stored: destroying an authenticated
+    // asset with the default ("upload") type would silently miss it.
+    await cloudinary.uploader.destroy(document.cloudinaryPublicId, destroyOptionsFor(document));
   } catch (err) {
     // Storage cleanup failure does not make the document retrievable (its
     // vectors are already gone); log the id so the orphan can be removed.
@@ -306,15 +333,31 @@ export const deleteDocument = async (
   try {
     await deleteDocumentVectors(document.workspaceId, document._id.toString());
   } catch (error) {
-    console.error(
-      `[document-service] Vector cleanup failed for document ${document._id}; deletion rolled back:`,
-      (error as Error)?.message
-    );
-    await Document.updateOne({ _id: document._id }, { $set: { deletedAt: null } });
-    throw new AppError(
-      "The document could not be removed from the search index. Please try again later.",
-      503
-    );
+    /*
+     * RT-010 (variant A): cleanup is always tried first. If it fails, a
+     * document whose RAW stored record says it was never claimed
+     * (`claimSequence: 0`) never had vectors written, so it is deleted
+     * anyway. The check is a raw query: legacy records without the field
+     * do not match (a hydrated default 0 must not count). The soft delete
+     * above already blocks new claims (claims require deletedAt: null).
+     */
+    const neverClaimed = await Document.exists({ _id: document._id, claimSequence: 0 });
+    if (neverClaimed) {
+      console.warn(
+        `[document-service] Vector cleanup failed for never-claimed document ${document._id}; deleting anyway:`,
+        (error as Error)?.message
+      );
+    } else {
+      console.error(
+        `[document-service] Vector cleanup failed for document ${document._id}; deletion rolled back:`,
+        (error as Error)?.message
+      );
+      await Document.updateOne({ _id: document._id }, { $set: { deletedAt: null } });
+      throw new AppError(
+        "The document could not be removed from the search index. Please try again later.",
+        503
+      );
+    }
   }
 
   await destroyCloudinaryAsset(document);
@@ -366,15 +409,18 @@ export const reindexDocument = async (
     await addEmbeddingJob({
       documentId: document._id.toString(),
       workspaceId: document.workspaceId,
-      uploadedBy: document.uploadedBy,
-      extractedText: document.extractedText,
-      fileType: document.fileType,
     });
   } catch (error) {
     console.error("Failed to re-enqueue embedding job:", (error as Error)?.message);
+    // updateOne, not document.save(): save() on a hydrated legacy record would
+    // persist schema defaults such as `claimSequence: 0`, which is exactly the
+    // stored "never claimed" marker the delete path relies on (RT-010).
     document.embeddingStatus = "failed";
     document.embeddingError = "Could not queue the document for indexing";
-    await document.save();
+    await Document.updateOne(
+      { _id: document._id },
+      { $set: { embeddingStatus: "failed", embeddingError: "Could not queue the document for indexing" } }
+    );
     throw new AppError(
       "Indexing queue is temporarily unavailable. Please try again later.",
       503
@@ -407,6 +453,17 @@ const HAS_RETRIES_LEFT = {
     { embeddingAttempts: { $lt: MAX_EMBEDDING_ATTEMPTS } },
     { embeddingAttempts: { $exists: false } },
   ],
+};
+
+/** Reason recorded on documents that have no text to embed (ARC-001). */
+export const NO_EXTRACTABLE_TEXT_ERROR = "No extractable text";
+
+/** pdf-parse page markers ("-- 1 of 3 --"); the chunker removes them too. */
+const PAGE_MARKERS = /--\s*\d+\s+of\s+\d+\s*--/gi;
+
+/** Matches documents whose stored text is missing or empty. */
+const NO_STORED_TEXT = {
+  $or: [{ extractedText: { $exists: false } }, { extractedText: { $in: ["", null] } }],
 };
 
 /** The sweep does not re-queue while at least this many jobs are waiting. */
@@ -530,7 +587,7 @@ export const recoverEmbeddingWork = async ({
   now?: Date;
   batchSize?: number;
 } = {}) => {
-  const summary = { requeued: 0, exhausted: 0, deletionsFinished: 0, errors: 0, backlog: 0 };
+  const summary = { requeued: 0, exhausted: 0, textless: 0, deletionsFinished: 0, errors: 0, backlog: 0 };
 
   // 1. Finish deletions interrupted after their vectors were removed.
   const unfinishedDeletions = await Document.find({
@@ -566,9 +623,48 @@ export const recoverEmbeddingWork = async ({
   );
   summary.exhausted = exhausted.modifiedCount ?? 0;
 
+  // 2b. Documents with no stored text can never be embedded (ARC-001): the
+  // removed metadata-only route created them, and an upload of a file
+  // without extractable text (for example a scanned PDF) produces them too.
+  // Mark them failed once, with a reason the UI shows, instead of re-queuing
+  // them on every sweep. Records and files are never deleted here.
+  const textless = await Document.find({
+    deletedAt: null,
+    embeddingError: { $ne: NO_EXTRACTABLE_TEXT_ERROR },
+    $and: [
+      NO_STORED_TEXT,
+      {
+        $or: [
+          {
+            embeddingStatus: { $in: ["pending", "failed"] },
+            updatedAt: { $lt: new Date(now.getTime() - STALE_PENDING_MS) },
+          },
+          // An abandoned claim of such a document would otherwise stay "indexing".
+          { embeddingStatus: "indexing", indexingStartedAt: { $lt: new Date(now.getTime() - STALE_INDEXING_MS) } },
+          { embeddingStatus: "indexing", indexingStartedAt: null },
+        ],
+      },
+    ],
+  })
+    .select("_id")
+    .limit(batchSize)
+    .lean();
+  if (textless.length > 0) {
+    const ids = textless.map((doc) => doc._id);
+    const marked = await Document.updateMany(
+      { _id: { $in: ids }, embeddingStatus: { $in: ["pending", "failed", "indexing"] }, ...NO_STORED_TEXT },
+      { $set: { embeddingStatus: "failed", embeddingError: NO_EXTRACTABLE_TEXT_ERROR } }
+    );
+    summary.textless = marked.modifiedCount ?? 0;
+    // Ids and count only, never document content.
+    console.log(
+      `[document-service] Marked ${summary.textless} document(s) without stored text as failed: ${ids.map(String).join(", ")}`
+    );
+  }
+
   // 3. Re-queue recoverable work -- unless jobs are already waiting. While
   // workers are down, every sweep would otherwise add another copy of each
-  // pending document (with its full text) to Redis. Once the backlog drains,
+  // pending document's job to Redis. Once the backlog drains,
   // the next sweep re-queues whatever is still unfinished.
   try {
     summary.backlog = await queueLength();
@@ -586,6 +682,8 @@ export const recoverEmbeddingWork = async ({
 
   const recoverable = await Document.find({
     deletedAt: null,
+    // Only documents that have text to embed (ARC-001).
+    extractedText: { $exists: true, $nin: ["", null] },
     $and: [HAS_RETRIES_LEFT],
     $or: [
       {
@@ -599,6 +697,8 @@ export const recoverEmbeddingWork = async ({
       },
     ],
   })
+    // Jobs are pointers: never load up to 100 full texts per sweep (ARC-007).
+    .select("-extractedText")
     .sort({ updatedAt: 1 })
     .limit(batchSize);
 
@@ -607,9 +707,6 @@ export const recoverEmbeddingWork = async ({
       await enqueue({
         documentId: doc._id.toString(),
         workspaceId: doc.workspaceId,
-        uploadedBy: doc.uploadedBy,
-        extractedText: doc.extractedText || "",
-        fileType: doc.fileType,
       });
       // Mark the document as waiting again so it is not re-queued on every
       // sweep while its job sits in the queue: a re-queued abandoned claim
@@ -635,7 +732,7 @@ export const recoverEmbeddingWork = async ({
     }
   }
 
-  if (summary.requeued || summary.exhausted || summary.deletionsFinished || summary.errors) {
+  if (summary.requeued || summary.exhausted || summary.textless || summary.deletionsFinished || summary.errors) {
     console.log("[document-service] Embedding recovery sweep:", summary);
   }
   return summary;

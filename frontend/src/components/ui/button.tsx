@@ -62,4 +62,6 @@ function Button({
   )
 }
 
-export { Button, buttonVariants }
+// buttonVariants is not exported: nothing imports it, and a non-component
+// export breaks React Fast Refresh for this file (react-refresh/only-export-components).
+export { Button }

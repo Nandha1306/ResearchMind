@@ -1,23 +1,38 @@
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 import { User } from "../models/User";
 import { RefreshToken } from "../models/RefreshToken";
 import { RegisterUserDto, LoginUserDto } from "../types/auth.type";
-import { hashPassword, comparePassword } from "../utils/hash";
+import { hashPassword, comparePassword, comparePasswordForUnknownUser } from "../utils/hash";
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/jwt";
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import {
+  assertLoginAllowed,
+  clearLoginFailures,
+  loginThrottleKey,
+  recordLoginFailure,
+} from "./login-throttle";
 
 /** SHA-256 hash helper for refresh tokens */
 const hashToken = (token: string): string => {
   return crypto.createHash("sha256").update(token).digest("hex");
 };
 
-/** Save refresh token hash for active user session. */
+/**
+ * Save refresh token hash for active user session. The stored record expires
+ * when the token does (its `exp` claim, i.e. REFRESH_TOKEN_EXPIRES; SEC-019 d):
+ * it used to be a fixed 7 days, so a longer setting made a still-valid token
+ * look like reuse and a shorter one kept dead records around.
+ */
 const saveRefreshToken = async (
   userId: string,
   token: string
 ) => {
-  const expiresAt = new Date();
-  expiresAt.setDate(expiresAt.getDate() + 7);
+  const exp = (jwt.decode(token) as { exp?: unknown } | null)?.exp;
+  const expiresAt =
+    typeof exp === "number" && Number.isFinite(exp)
+      ? new Date(exp * 1000)
+      : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const tokenHash = hashToken(token);
 
@@ -70,14 +85,26 @@ export const registerUser = async ({
   };
 };
 
-/** Verify credentials and issue new tokens. */
+/**
+ * Verify credentials and issue new tokens.
+ *
+ * Failed attempts are counted per account (wrong password and unknown e-mail
+ * alike); a locked account gets 429 before any password check (SEC-025, see
+ * login-throttle.ts).
+ */
 export const loginUser = async ({
   email,
   password,
 }: LoginUserDto) => {
+  const throttleKey = loginThrottleKey(email);
+  await assertLoginAllowed(throttleKey);
+
   const user = await User.findOne({ email });
 
   if (!user) {
+    // Same bcrypt cost as a real check: timing must not reveal the account.
+    await comparePasswordForUnknownUser(password);
+    await recordLoginFailure(throttleKey);
     throw new AppError("Invalid credentials", 401);
   }
 
@@ -87,8 +114,11 @@ export const loginUser = async ({
   );
 
   if (!isPasswordValid) {
+    await recordLoginFailure(throttleKey);
     throw new AppError("Invalid credentials", 401);
   }
+
+  await clearLoginFailures(throttleKey);
 
   const accessToken = generateAccessToken({
     userId: user._id.toString(),

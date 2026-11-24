@@ -6,4 +6,5 @@
 export {
   checkWorkspaceMembership,
   getWorkspaceMemberIds,
+  assertWorkspaceOwner,
 } from "../../../../packages/shared/auth/workspace-membership";

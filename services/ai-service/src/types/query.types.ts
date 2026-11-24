@@ -11,4 +11,6 @@ export interface RetrievedChunk {
   text: string;
   score: number;
   fileType: "pdf" | "docx";
+  /** Document title (its file name) from document-service, when known (ISS-029). */
+  title?: string;
 }

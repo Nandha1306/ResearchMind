@@ -12,8 +12,9 @@ The frontend client provides the user interface for researchers to log in, regis
 ## 2. Responsibilities
 - User authentication UI (Register, Login). Access and refresh tokens are kept in a Zustand store persisted to `localStorage`; the axios interceptor refreshes them on `401` (`POST /api/auth/refresh` with the refresh token in the body).
 - Workspace management (Create workspace, Join via invite code, Workspace switcher).
-- Documents page: upload (PDF/DOCX only; the server rejects files over 10 MB), embedding status, in-app PDF viewer (`react-pdf`), delete and re-index.
-- AI Q&A page (`/dashboard/ai-researcher`): streams answers from `POST /api/ai/query` with `fetch` and reads the SSE events.
+- Documents page: upload (PDF/DOCX only; the server rejects files over 10 MB), embedding status, in-app PDF viewer (`react-pdf`), delete and re-index. Since Wave 5 the pdf.js worker is bundled from react-pdf's exact `pdfjs-dist` (Vite alias in `vite.config.ts`, helper `pdf-worker.ts`; no CDN), and the Documents, Q&A, Meeting Notes and Kanban pages and the PDF viewer are lazy-loaded chunks (ARC-011).
+- Client-side form rules mirror the server (ISS-039): name at least 2 characters and a password with a letter and a digit on registration, meeting notes 10..50,000 characters, workspace name 3..100 characters.
+- AI Q&A page (`/dashboard/ai-researcher`): streams answers from `POST /api/ai/query` with `fetch` and reads the SSE events. The history panel shows only the signed-in member's own questions (SEC-023).
 - Meeting Notes page (`/dashboard/meeting-notes`): structured summary and "create tasks from action items" (bulk task creation).
 - Kanban board (`/dashboard/tasks`) with drag and drop (`@dnd-kit`), task detail modal with subtasks and activity.
 - Placeholder pages only (not yet implemented): Sources, Analytics, Literature Review, Report Drafter, Settings. "Forgot password" and "Continue with Google" are shown as "coming soon" and do nothing.

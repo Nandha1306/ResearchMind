@@ -6,6 +6,7 @@ export interface IWorkspace extends Document {
   ownerId: string;
   members: string[];
   inviteCode: string;
+  removedMembers?: string[];
 }
 
 const workspaceSchema = new Schema<IWorkspace>(
@@ -36,6 +37,17 @@ const workspaceSchema = new Schema<IWorkspace>(
       type: [String],
       default: [],
       index: true,
+    },
+
+    /*
+     * Users the owner removed (SEC-010). They cannot rejoin with any invite
+     * code until the owner re-admits them (POST /:id/members/:userId/readmit).
+     * Not returned in API responses (select: false).
+     */
+    removedMembers: {
+      type: [String],
+      default: [],
+      select: false,
     },
   },
   {

@@ -18,7 +18,7 @@ import {
   getTaskActivitiesHandler,
 } from "../controllers/task.controller";
 
-import { requireWorkspaceMembership } from "../middlewares/workspace.middleware";
+import { requireWorkspaceMembership, requireWorkspaceOwner } from "../middlewares/workspace.middleware";
 
 const router = Router();
 
@@ -67,10 +67,11 @@ router.patch(
   updateTaskHandler
 );
 
+/** Delete a task and its subtasks (workspace owner only; SEC-010). */
 router.delete(
   "/workspaces/:workspaceId/tasks/:id",
   authenticate,
-  requireWorkspaceMembership,
+  requireWorkspaceOwner("Only the workspace owner can delete tasks."),
   deleteTaskHandler
 );
 

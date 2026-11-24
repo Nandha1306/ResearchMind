@@ -10,7 +10,7 @@ The AI Service handles document chunking, Voyage AI vector embedding generation,
 ---
 
 ## 2. Key Responsibilities
-- **Background Redis Queue Consumer**: The HTTP server (`npm run dev`) starts the embedding worker in-process; `npm run dev:worker` runs an additional standalone worker (optional — a second consumer on the same queue is safe but not required). The worker consumes jobs from the Redis list `researchmind:embedding:jobs`, claims the document from document-service before processing, splits the text into overlapping chunks (LangChain `RecursiveCharacterTextSplitter`, ~400 estimated tokens with 60 overlap), embeds them with Voyage AI (model `VOYAGE_MODEL`, default `voyage-3`, 1024 dimensions by default) and upserts the vectors to Pinecone under `namespace = workspaceId`. It reports `indexed` or `failed` (with a reason) back to document-service, which allows up to 3 attempts per document.
+- **Background Redis Queue Consumer**: The HTTP server (`npm run dev`) starts the embedding worker in-process; `npm run dev:worker` runs an additional standalone worker (optional — a second consumer on the same queue is safe but not required). The worker consumes pointer jobs (`{ documentId, workspaceId }`) from the Redis list `researchmind:embedding:jobs`, claims the document from document-service before processing, fetches the text for that claim from document-service (`GET /internal/documents/:id/embedding-source`; text in a queue entry is ignored, SEC-006), splits the text into overlapping chunks (LangChain `RecursiveCharacterTextSplitter`, ~400 estimated tokens with 60 overlap), embeds them with Voyage AI (model `VOYAGE_MODEL`, default `voyage-3`, 1024 dimensions by default) and upserts the vectors to Pinecone under `namespace = workspaceId`. It reports `indexed` or `failed` (with a reason) back to document-service, which allows up to 3 attempts per document.
 - **Pure Vector Retrieval (`POST /api/ai/search`)**: Embeds the query and returns the raw retrieval results (chunks with similarity scores) from Pinecone. Not streamed.
 - **Real-Time RAG Stream (`POST /api/ai/query`)**: Validates workspace membership, retrieves chunks, builds the context with `[Source N]` references and streams the answer as Server-Sent Events: `start` → `sources` → `token` (repeated) → `done` (`sessionId`, `unverifiedCitations`), or `error` (`message`, `partial`) if generation fails. The query is trimmed and must be 1–2000 characters; `topK` is 1–10 (default 5).
 - **Session History (`GET /api/ai/sessions/workspace/:workspaceId`)**: Lists the workspace's past Q&A sessions (`AISession` Mongoose model).
@@ -36,11 +36,12 @@ This table summarises this service's routes. The cross-service reference (reques
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| `GET` | `/health` | No | Health check endpoint |
-| `POST` | `/api/ai/search` | JWT + membership | Raw vector retrieval results (`{ workspaceId, query, topK? }`) |
+| `GET` | `/health` | No | Liveness: 503 only when MongoDB is down; Redis down alone is `200` `status: "degraded"` (ARC-008) |
+| `GET` | `/health/ready` | No | Strict readiness: 503 unless MongoDB and Redis are up |
+| `POST` | `/api/ai/search` | JWT + membership | Raw vector retrieval results (`{ workspaceId, query, topK? }`); a provider failure is `502` with a fixed message (RT-011) |
 | `POST` | `/api/ai/query` | JWT + membership | RAG answer streamed as `text/event-stream` (`{ workspaceId, query, topK?, sessionId? }`) |
-| `GET` | `/api/ai/sessions/workspace/:workspaceId` | JWT + membership | List past Q&A sessions |
-| `POST` | `/api/ai/summarize-meeting` | JWT + membership | Structured meeting summary JSON (`{ workspaceId, text }`) |
+| `GET` | `/api/ai/sessions/workspace/:workspaceId` | JWT + membership | The caller's **own** past Q&A sessions in the workspace, paged (`limit` default 20, cap 100, `cursor`; SEC-023) |
+| `POST` | `/api/ai/summarize-meeting` | JWT + membership | Structured meeting summary JSON (`{ workspaceId, text }`; up to 50,000 characters of any script, body limit 320 kB, REQ-082) |
 | `DELETE` | `/internal/vectors/workspaces/:workspaceId/documents/:documentId` | `X-Internal-Token` | Remove a document's vectors (called by document-service) |
 
 Membership is checked against workspace-service: malformed workspace id → `400`, not a member → `403`, check could not run → `503`.
@@ -52,15 +53,16 @@ Membership is checked against workspace-service: malformed workspace id → `400
 Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
 - **Required (refuses to start without them):** `MONGODB_URI` or `MONGO_URI` (`MONGODB_URI` is read first), `JWT_ACCESS_SECRET` (same value in every service), `INTERNAL_SERVICE_TOKEN` (same value as document-service), `VOYAGE_API_KEY`, `PINECONE_API_KEY`, `PINECONE_INDEX`, and `XAI_API_KEY` (a Groq `gsk_...` key or an xAI key; `GROQ_API_KEY` is accepted instead). The two secrets must be at least 32 characters and not placeholders or known-insecure values.
-- **Embedding model:** `VOYAGE_MODEL` (default `voyage-3`) and `VOYAGE_EMBEDDING_DIMENSION` (default `1024`) must match the Pinecone index. At startup the service exits if the index is missing or its dimension differs; if Pinecone cannot be reached it logs a warning and continues. Changing the model requires re-indexing every document.
-- **Optional:** `PORT` (default `5006`), `REDIS_URL` (embedding queue, default `redis://127.0.0.1:6379`), `DOCUMENT_SERVICE_URL` (worker claim/status, default `http://localhost:5003`), `WORKSPACE_SERVICE_URL` (membership checks), `XAI_MODEL`, `XAI_BASE_URL`, `LLM_REQUEST_TIMEOUT_MS` (default `60000`), `LLM_STREAM_IDLE_TIMEOUT_MS` (default `30000`).
+- **Embedding model:** `VOYAGE_MODEL` (default `voyage-3`) and `VOYAGE_EMBEDDING_DIMENSION` (default `1024`) must match the Pinecone index. At startup the service (and the worker) exits if the index is missing, its dimension differs, or Pinecone rejects `PINECONE_API_KEY` (401, RT-006); if Pinecone cannot be reached it logs a warning and continues. Changing the model requires re-indexing every document: retrieval ignores vectors labelled with another model (ISS-027).
+- **Wave 4 settings:** `HOST` (default `127.0.0.1`), `MIN_RELEVANCE_SCORE` (default `0.2`, `0`..`1`; chunks below it are not used as sources, ISS-028). A client that leaves an answer stream stops generation and nothing is saved (ISS-015); the meeting summary asks the provider for JSON mode and retries once without it on a 400 (ISS-030).
+- **Optional:** `PORT` (default `5006`), `REDIS_URL` (embedding queue, default `redis://127.0.0.1:6379`; the compose Redis requires a password, so set `redis://:<REDIS_PASSWORD>@127.0.0.1:6379`, otherwise `/health` reports `status: "degraded"`, `/health/ready` answers 503 and the worker consumes no jobs), `DOCUMENT_SERVICE_URL` (worker claim/status, default `http://localhost:5003`), `WORKSPACE_SERVICE_URL` (membership checks), `XAI_MODEL`, `XAI_BASE_URL`, `LLM_REQUEST_TIMEOUT_MS` (default `60000`), `LLM_STREAM_IDLE_TIMEOUT_MS` (default `30000`), and the provider time limits `VOYAGE_DOCUMENT_TIMEOUT_MS` (30000), `VOYAGE_QUERY_TIMEOUT_MS` (15000), `PINECONE_TIMEOUT_MS` (20000), `DOCUMENT_SOURCE_TIMEOUT_MS` (30000), `EMBEDDING_JOB_TIMEOUT_MS` (600000, job watchdog) and `SSE_HEARTBEAT_MS` (15000). Invalid values fall back to these defaults with a warning (ISS-037, ARC-013). Deploy ai-service before document-service when upgrading to pointer jobs.
 - The standalone worker (`src/worker.ts`) reads the same `.env`; it needs `INTERNAL_SERVICE_TOKEN`, Redis, document-service and the Voyage/Pinecone settings, but not MongoDB or `JWT_ACCESS_SECRET`.
 
 ---
 
 ## 6. Local Development Commands
 
-Run from the repository root: one `npm install` there installs every workspace. The service reads `services/ai-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/ai-service/.env` (create it from `.env.example` only if it does not exist yet: `cp -n services/ai-service/.env.example services/ai-service/.env`, PowerShell `if (-not (Test-Path services/ai-service/.env)) { Copy-Item services/ai-service/.env.example services/ai-service/.env }`; never copy over an existing `.env`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
 
 ```bash
 npm run dev:ai                        # HTTP server + in-process worker, live reload; same as `npm run dev -w ai-service`  [UNTESTED]

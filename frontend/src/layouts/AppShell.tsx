@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { Suspense, useState, useEffect } from "react";
 import { Outlet, Navigate } from "react-router-dom";
 import { Sidebar } from "../components/layout/Sidebar";
 import { TopBar } from "../components/layout/TopBar";
 import { RightContextPanel } from "../components/layout/RightContextPanel";
 import { useAuthStore } from "../store/auth.store";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 
 export const AppShell: React.FC = () => {
   const { isAuthenticated } = useAuthStore();
@@ -96,7 +96,17 @@ export const AppShell: React.FC = () => {
           
           {/* Main Outlet Container (Only this section scrolls) */}
           <main className="flex-1 overflow-y-auto h-full min-h-0 no-scrollbar flex flex-col min-w-0">
-            <Outlet />
+            {/* ARC-011: lazy-loaded pages show a spinner while their chunk loads. */}
+            <Suspense
+              fallback={
+                <div className="flex-1 flex items-center justify-center gap-2 text-text-secondary" role="status">
+                  <Loader2 className="w-5 h-5 animate-spin text-accent-primary" />
+                  <span className="text-[13px]">Loading...</span>
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </main>
 
           {/* Desktop Right Context Panel (Static sidebar pinned to viewport) */}

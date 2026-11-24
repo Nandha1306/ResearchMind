@@ -1,58 +1,331 @@
-name: ResearchMind CI Pipeline
+name: ResearchMind CI
+
+# Wave 6 (W6-CI-02..20, W6-SEC-07, W6-TEST-07/08/17): five jobs, each a
+# required check for branch protection: static, build, test, compose-runtime,
+# audit. Statically validated by tests/ci-config.test.ts; see
+# docs/testing.md section 4 for the design and the count floors.
 
 on:
-  push:
-    branches: [ develop, main ]
   pull_request:
-    branches: [ develop, main ]
+    branches: [develop, main]
+  push:
+    branches: [develop, main]
+  workflow_dispatch:
+
+# Least privilege (W6-SEC-07): the token can only read the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    # GitHub runs this as: bash --noprofile --norc -eo pipefail {0}
+    shell: bash
+
+env:
+  npm_config_fund: "false"
+  npm_config_audit: "false"
 
 jobs:
-  typecheck-and-test:
+  static:
     runs-on: ubuntu-latest
-
-    # Disposable MongoDB for the integration tests (tests/*.integration.test.ts).
-    # Without it those tests are skipped, not passed.
-    services:
-      mongodb:
-        image: mongo:7
-        ports:
-          - 27017:27017
-        options: >-
-          --health-cmd "mongosh --quiet --eval 'db.runCommand({ ping: 1 })'"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-
+    timeout-minutes: 20
     steps:
-      - name: Checkout Code Repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js Environment
-        uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          # Node 20 is end-of-life; several dependencies (pdfjs-dist, openai,
-          # concurrently) declare node >= 22, and local development uses 22.
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install Dependencies
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Tool versions
+        run: |
+          node -v
+          npm -v
+      - name: Install (npm ci)
         run: npm ci
-
-      - name: Typecheck Backend Services
+      - name: Lockfile unchanged by install
+        run: git diff --exit-code -- package-lock.json
+      # npm ci never rewrites the lockfile; a lock-only install does, if the
+      # committed lock is not npm's stable output for package.json (W6-R6-09).
+      - name: Lockfile is npm's stable output (lock-only install changes nothing)
         run: |
-          npx tsc --noEmit -p services/api-gateway
-          npx tsc --noEmit -p services/auth-service
-          npx tsc --noEmit -p services/workspace-service
-          npx tsc --noEmit -p services/task-service
-          npx tsc --noEmit -p services/document-service
-          npx tsc --noEmit -p services/ai-service
-
-      - name: Typecheck & Build Frontend
+          npm install --package-lock-only --ignore-scripts
+          git diff --exit-code -- package-lock.json
+      - name: Top-level dependency tree resolves
+        run: npm ls --depth=0
+      - name: Typecheck services
         run: |
-          npm run build --workspace=frontend
-
-      - name: Run Automated Test Suite
-        env:
-          TEST_MONGO_URI: mongodb://localhost:27017
+          for s in api-gateway auth-service workspace-service document-service task-service ai-service; do
+            echo "tsc --noEmit -p services/$s"
+            npx tsc --noEmit -p "services/$s"
+          done
+      - name: Typecheck frontend
+        run: npx tsc -b frontend
+      - name: Typecheck tests
+        run: npm run typecheck:tests
+      - name: Lint (max 3 warnings; stale suppressions fail)
+        run: npm run lint
+      - name: Lint suppressions may only shrink
+        run: npx tsx --test tests/lint-ratchet.test.ts
+      - name: No focused tests
         run: |
-          npm test
+          if grep -RnE '\.only\(|only: *true' tests; then
+            echo "focused tests found"
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install (npm ci)
+        run: npm ci
+      - name: Build services and check the dist entry points
+        run: |
+          for s in api-gateway auth-service workspace-service document-service task-service ai-service; do
+            npm run build -w "$s"
+            test -f "services/$s/dist/services/$s/src/server.js"
+          done
+      - name: Build frontend
+        run: npm run build -w frontend
+      - name: Frontend dist checks (CSP meta, no CDN worker)
+        run: |
+          grep -q 'http-equiv="Content-Security-Policy"' frontend/dist/index.html
+          if grep -rl 'unpkg.com' frontend/dist; then
+            echo "unpkg.com referenced in the build"
+            exit 1
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Dead ports: anything that forgets its own URL fails instead of
+      # reaching the job's databases (scope amendment A-5).
+      MONGO_URI: mongodb://127.0.0.1:6598/rmtest_unused
+      REDIS_URL: redis://127.0.0.1:6399
+      # Count floors = the Wave 6 final local counts (docs/testing.md section 4).
+      UNIT_MIN_TESTS: "794"
+      TIMING_MIN_TESTS: "57"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install (npm ci)
+        run: npm ci
+      - name: Pre-pull images (retry)
+        run: |
+          for img in mongo:7.0 redis:7.4; do
+            ok=0
+            for i in 1 2 3; do
+              if docker pull -q "$img"; then ok=1; break; fi
+              sleep 10
+            done
+            if [ "$ok" != 1 ]; then
+              echo "could not pull $img"
+              exit 1
+            fi
+          done
+      - name: Start disposable MongoDB (root auth) and Redis (password), loopback only
+        run: |
+          MONGO_INITDB_ROOT_PASSWORD="$(openssl rand -hex 32)"
+          REDIS_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$MONGO_INITDB_ROOT_PASSWORD"
+          echo "::add-mask::$REDIS_PASSWORD"
+          export MONGO_INITDB_ROOT_USERNAME=ci_root MONGO_INITDB_ROOT_PASSWORD REDIS_PASSWORD
+          docker run -d --name ci-mongo -p 127.0.0.1:27018:27017 \
+            -e MONGO_INITDB_ROOT_USERNAME -e MONGO_INITDB_ROOT_PASSWORD \
+            mongo:7.0
+          docker run -d --name ci-redis -p 127.0.0.1:6380:6379 \
+            -e REDIS_PASSWORD \
+            redis:7.4 sh -c 'exec redis-server --requirepass "$REDIS_PASSWORD" --save "" --appendonly no --protected-mode yes'
+          echo "TEST_MONGO_URI=mongodb://ci_root:${MONGO_INITDB_ROOT_PASSWORD}@127.0.0.1:27018/?authSource=admin" >> "$GITHUB_ENV"
+          echo "TEST_REDIS_URL=redis://:${REDIS_PASSWORD}@127.0.0.1:6380/7" >> "$GITHUB_ENV"
+      - name: Wait for authenticated access (anonymous access must be refused)
+        run: node scripts/ci/wait-infra.cjs --timeout 90
+      - name: Unit stage (coverage report, TAP)
+        run: |
+          mkdir -p reports
+          npx tsx --test \
+            --experimental-test-coverage \
+            --test-coverage-include='services/*/src/**' \
+            --test-coverage-include='packages/**' \
+            --test-coverage-include='frontend/src/**' \
+            --test-coverage-exclude='tests/**' \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=reports/unit.tap \
+            --test-reporter=lcov --test-reporter-destination=reports/lcov.info \
+            'tests/*.test.ts'
+      - name: Unit gate (0 fail, exactly 1 allowed skip, count floor)
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/check-tap.mjs reports/unit.tap --min-tests "$UNIT_MIN_TESTS" --skips 1 --allow-skip "set TEST_COMPOSE_RUNTIME=1"
+      - name: Timing stage (serialized, no coverage)
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p reports
+          npx tsx --test --test-concurrency=1 \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=reports/timing.tap \
+            'tests/*.timing.ts'
+      - name: Timing gate (0 fail, 0 skip, count floor)
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/check-tap.mjs reports/timing.tap --min-tests "$TIMING_MIN_TESTS" --skips 0
+      - name: Reports contain no credentials
+        id: scan-unit
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/scan-reports.mjs reports
+      - name: Tests left the tree clean
+        if: ${{ !cancelled() }}
+        run: |
+          status="$(git status --porcelain --untracked-files=all -- . ':!reports')"
+          if [ -n "$status" ]; then
+            echo "$status"
+            exit 1
+          fi
+      # Published only when the credential scan succeeded (W6-R5-04).
+      - name: Upload test reports
+        if: ${{ always() && steps.scan-unit.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-reports
+          path: reports/
+          retention-days: 14
+      - name: Remove disposable databases
+        if: ${{ always() }}
+        run: |
+          set +e
+          docker rm -fv ci-mongo ci-redis
+          echo "cleanup exit=$?"
+          exit 0
+
+  compose-runtime:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TEST_COMPOSE_RUNTIME: "1"
+      TEST_COMPOSE_PROJECT: rmcitest
+      TEST_COMPOSE_PORT_BASE: "15940"
+      # The suite writes its generated compose env file to os.tmpdir():
+      # keep it in RUNNER_TEMP, outside the checkout (R8).
+      TMPDIR: ${{ runner.temp }}
+      MONGO_URI: mongodb://127.0.0.1:6598/rmtest_unused
+      REDIS_URL: redis://127.0.0.1:6399
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: Install (npm ci)
+        run: npm ci
+      - name: Docker Compose is at least 2.24 (the override uses !reset)
+        run: |
+          version="$(docker compose version --short)"
+          echo "docker compose $version"
+          node -e 'const [a, b] = process.argv[1].replace(/^v/, "").split(".").map(Number); if (a < 2 || (a === 2 && b < 24)) { console.error("docker compose >= 2.24 required"); process.exit(1); }' "$version"
+      - name: Pre-pull images (retry)
+        run: |
+          for img in mongo:7.0 redis:7.4 mongo-express:1.0.2; do
+            ok=0
+            for i in 1 2 3; do
+              if docker pull -q "$img"; then ok=1; break; fi
+              sleep 10
+            done
+            if [ "$ok" != 1 ]; then
+              echo "could not pull $img"
+              exit 1
+            fi
+          done
+      - name: Compose runtime suite
+        run: |
+          mkdir -p reports
+          npx tsx --test \
+            --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=tap --test-reporter-destination=reports/compose.tap \
+            tests/compose-security.runtime.test.ts
+      - name: Compose gate (0 fail, 0 skip, at least 12 tests)
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/check-tap.mjs reports/compose.tap --min-tests 12 --skips 0
+      - name: Reports contain no credentials
+        id: scan-compose
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/scan-reports.mjs reports
+      # Published only when the credential scan succeeded (W6-R5-04).
+      - name: Upload compose reports
+        if: ${{ always() && steps.scan-compose.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: compose-reports
+          path: reports/
+          retention-days: 14
+      - name: Remove the throwaway compose project (by label)
+        if: ${{ always() }}
+        run: |
+          set +e
+          label=label=com.docker.compose.project=rmcitest
+          docker ps -aq --filter "$label" | xargs -r docker rm -fv
+          docker network ls -q --filter "$label" | xargs -r docker network rm
+          docker volume ls -q --filter "$label" | xargs -r docker volume rm
+          echo "cleanup done"
+          exit 0
+
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Node (.nvmrc)
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      # npm audit reads package-lock.json: no install is needed (A-22).
+      - name: Production dependencies (gate, moderate and above)
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Full dependency tree (report only)
+        if: ${{ !cancelled() }}
+        run: |
+          set +e
+          npm audit --json > npm-audit-full.json
+          echo "npm audit exit=$?"
+          node -e 'const v = require("./npm-audit-full.json").metadata.vulnerabilities; console.log("full tree:", JSON.stringify(v));'
+          exit 0
+      - name: Report contains no credentials
+        id: scan-audit
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/scan-reports.mjs npm-audit-full.json
+      # Published only when the credential scan succeeded (W6-R5-04).
+      - name: Upload audit report
+        if: ${{ always() && steps.scan-audit.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: npm-audit
+          path: npm-audit-full.json
+          retention-days: 14

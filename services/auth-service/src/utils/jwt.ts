@@ -2,6 +2,8 @@ import crypto from "crypto";
 import jwt, { SignOptions, VerifyOptions } from "jsonwebtoken";
 
 import { requireSecret } from "../../../../packages/shared/config/secrets";
+import { requireTokenUserId } from "../../../../packages/shared/auth/access-token";
+import { readTokenLifetimes } from "../config/token-lifetimes";
 
 interface TokenPayload {
   userId: string;
@@ -25,16 +27,30 @@ const JWT_REFRESH_SECRET = requireSecret("JWT_REFRESH_SECRET");
  */
 const JWT_ALGORITHM = "HS256" as const;
 
-/** Access token options */
+/*
+ * Token lifetimes, validated with jwt.sign's own parser (W6-SEC-05; see
+ * config/token-lifetimes.ts). server.ts refuses to start with an invalid
+ * value; this module also fails closed if it is ever loaded with one.
+ */
+const lifetimes = readTokenLifetimes(process.env);
+if (!lifetimes.ok) {
+  throw new Error(lifetimes.message);
+}
+
+/**
+ * Access token options. Default lifetime 5 minutes (SEC-007, user decision):
+ * access tokens cannot be revoked, so logout and reuse revocation take full
+ * effect within 5 minutes. The client refreshes transparently.
+ */
 const accessOptions: SignOptions = {
   algorithm: JWT_ALGORITHM,
-  expiresIn: (process.env.ACCESS_TOKEN_EXPIRES as any) || "15m",
+  expiresIn: lifetimes.access.expiresIn as any,
 };
 
 /** Refresh token options */
 const refreshOptions: SignOptions = {
   algorithm: JWT_ALGORITHM,
-  expiresIn: (process.env.REFRESH_TOKEN_EXPIRES as any) || "7d",
+  expiresIn: lifetimes.refresh.expiresIn as any,
 };
 
 /** Verification options: only the pinned algorithm is accepted. */
@@ -67,22 +83,18 @@ export const generateRefreshToken = (payload: TokenPayload): string => {
   );
 };
 
-/** Verify access token */
-export const verifyAccessToken = (token: string): TokenPayload => {
-  return jwt.verify(
-    token,
-    JWT_ACCESS_SECRET,
-    verifyOptions
-  ) as TokenPayload;
-};
+/**
+ * Verify access token. Same rules as the shared verifier (SEC-019): the
+ * payload's userId must be a 24-hex id, and only `{ userId }` is returned.
+ */
+export const verifyAccessToken = (token: string): TokenPayload =>
+  requireTokenUserId(jwt.verify(token, JWT_ACCESS_SECRET, verifyOptions));
 
-/** Verify refresh token */
-export const verifyRefreshToken = (token: string): TokenPayload => {
-  return jwt.verify(
-    token,
-    JWT_REFRESH_SECRET,
-    verifyOptions
-  ) as TokenPayload;
-};
+/**
+ * Verify refresh token. The userId check (SEC-019 c) stops an operator-shaped
+ * userId before it reaches `RefreshToken.deleteMany({ userId })`.
+ */
+export const verifyRefreshToken = (token: string): TokenPayload =>
+  requireTokenUserId(jwt.verify(token, JWT_REFRESH_SECRET, verifyOptions));
 /** The single algorithm this system signs and verifies with. */
 export const JWT_VERIFY_OPTIONS: VerifyOptions = verifyOptions;

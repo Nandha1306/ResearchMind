@@ -1,0 +1,21 @@
+# Wave 6 (W6-CI-17): one line ending in the repository, whatever the
+# contributor's core.autocrlf. The index is already all LF (git ls-files --eol:
+# 0 i/crlf), so this file needs no renormalisation commit. Windows working
+# copies keep working (Git converts on checkout only where configured).
+* text=auto eol=lf
+
+# Binary files: never converted, never diffed as text.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.docx binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary

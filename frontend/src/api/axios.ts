@@ -9,7 +9,9 @@ import {
   SessionExpiredError,
 } from "../lib/token-refresh";
 
-export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// Trailing slashes stripped: `${API_URL}/ai/query` must not become `//ai/query`,
+// which the gateway rejects as a non-canonical path (SEC-003).
+export const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/+$/, "");
 
 declare module "axios" {
   interface AxiosRequestConfig {

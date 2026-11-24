@@ -808,46 +808,6 @@
         }
       }
     },
-    "/api/documents": {
-      "post": {
-        "summary": "Create document metadata record in MongoDB",
-        "tags": ["Documents"],
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateDocumentDto"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Document metadata created successfully",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "success": { "type": "boolean", "example": true },
-                    "data": { "$ref": "#/components/schemas/DocumentResponse" }
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          }
-        }
-      }
-    },
     "/api/documents/workspace/{workspaceId}": {
       "get": {
         "summary": "Get all documents for a workspace",

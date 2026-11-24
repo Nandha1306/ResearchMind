@@ -150,3 +150,23 @@ export const assertRequiredSecrets = (
     process.exit(1);
   }
 };
+
+/**
+ * Refuse to start when two secrets that must differ are equal (SEC-019 b:
+ * with equal access and refresh secrets a refresh token verifies as an access
+ * token). Names only, never the values.
+ */
+export const assertDistinctSecrets = (
+  serviceName: string,
+  first: string,
+  second: string
+): void => {
+  const a = process.env[first]?.trim();
+  const b = process.env[second]?.trim();
+  if (a && b && a === b) {
+    console.error(
+      `[${serviceName}] refusing to start: ${first} and ${second} must be different values.`
+    );
+    process.exit(1);
+  }
+};

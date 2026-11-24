@@ -1,13 +1,9 @@
 import { NextFunction, Request, Response } from "express";
-import jwt from "jsonwebtoken";
 import { requireSecret } from "../../../../packages/shared/config/secrets";
+import { verifyAccessToken } from "../../../../packages/shared/auth/access-token";
 
 /* Resolved at module load: the gateway must not verify tokens with a default. */
 const ACCESS_SECRET = requireSecret("JWT_ACCESS_SECRET");
-
-interface JwtPayload {
-  userId: string;
-}
 
 export interface AuthenticatedRequest extends Request {
   user?: {
@@ -32,14 +28,9 @@ export const authenticate = (
     }
 
     const token = authHeader.split(" ")[1];
-    const secret = ACCESS_SECRET;
 
-    const decoded = jwt.verify(
-      token,
-      secret,
-      // Pinned: reject any token claiming a different algorithm.
-      { algorithms: ["HS256"] }
-    ) as JwtPayload;
+    // Shared verifier: HS256 pinned, userId must be a 24-hex id (SEC-019).
+    const decoded = verifyAccessToken(token, ACCESS_SECRET);
 
     /*
      * Attach the caller so downstream gateway middleware can key on them.

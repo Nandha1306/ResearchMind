@@ -56,7 +56,9 @@ export const streamAiQuery = async (
     try {
       const errorJson = await response.json();
       if (errorJson.message) errorMessage = errorJson.message;
-    } catch {}
+    } catch {
+      // A non-JSON error body: keep the HTTP status message.
+    }
 
     if (response.status === 401) {
       errorMessage = "Your session has expired. Please sign in again.";

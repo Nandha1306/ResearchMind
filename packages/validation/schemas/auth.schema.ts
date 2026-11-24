@@ -1,16 +1,31 @@
 import { z } from "zod";
 
+/*
+ * Upper bounds (Wave 6, W6-SEC-04): registration only. The name is shown to
+ * every workspace member, so it is trimmed and capped; 254 is the longest
+ * usable e-mail address; bcrypt reads at most 72 bytes, 128 keeps room for
+ * passphrases. loginSchema deliberately has no password maximum, so no
+ * existing account can be locked out.
+ */
+export const MAX_NAME_LENGTH = 100;
+export const MAX_EMAIL_LENGTH = 254;
+export const MAX_PASSWORD_LENGTH = 128;
+
 export const registerSchema = z.object({
   name: z
     .string()
-    .min(2, "Name is required"),
+    .trim()
+    .min(2, "Name is required")
+    .max(MAX_NAME_LENGTH, `Name must be at most ${MAX_NAME_LENGTH} characters`),
 
   email: z
-    .email("Invalid email address"),
+    .email("Invalid email address")
+    .max(MAX_EMAIL_LENGTH, `Email must be at most ${MAX_EMAIL_LENGTH} characters`),
 
   password: z
     .string()
     .min(8, "Password must be at least 8 characters")
+    .max(MAX_PASSWORD_LENGTH, `Password must be at most ${MAX_PASSWORD_LENGTH} characters`)
     .regex(/[A-Za-z]/, "Password must contain at least one letter")
     .regex(/[0-9]/, "Password must contain at least one digit"),
 });

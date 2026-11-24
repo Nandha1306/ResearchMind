@@ -24,4 +24,7 @@ const boardSchema = new Schema(
   }
 );
 
+// Paged board list, oldest first (ISS-043).
+boardSchema.index({ workspaceId: 1, createdAt: 1, _id: 1 });
+
 export const Board = model("Board", boardSchema);

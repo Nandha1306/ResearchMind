@@ -12,6 +12,7 @@ The Auth Service manages user accounts, registration, authentication, password h
 ## 2. Responsibilities
 - User account creation with hashed passwords using `bcryptjs`.
 - Login validation and issuing signed JWT access and refresh tokens.
+- Per-account sign-in throttle (`src/services/login-throttle.ts`, `LoginThrottle` model, MongoDB): after 10 failed sign-ins for one e-mail (wrong password or unknown account alike) within 15 minutes, every sign-in for it answers `429` for 15 minutes without a password check; a successful sign-in clears the count. Independent of Redis and of the gateway's per-IP limit.
 - Refresh token rotation via `/api/auth/refresh`: the refresh token is sent in the JSON request body (no cookie). Only its SHA-256 hash is stored, in MongoDB (`RefreshToken` model). Every refresh rotates the pair; presenting a token that was already rotated revokes all of that user's sessions (reuse detection), except within a short grace window (`REFRESH_REUSE_GRACE_MS`, default 10 s) where a concurrent refresh from a second tab is rejected with `401` without revoking anything.
 - Logout via `/api/auth/logout` (revokes the named refresh token).
 - Fetching authenticated user profile via `/api/auth/me`.
@@ -24,7 +25,7 @@ The Auth Service manages user accounts, registration, authentication, password h
 ```
 auth-service/
 ├── src/
-│   ├── config/               # Database and Redis connection configurations (Redis is connected but not used by any route)
+│   ├── config/               # Database connection configuration (auth-service does not use Redis)
 │   ├── controllers/          # Route handlers (register, login, refresh, me, logout)
 │   ├── middlewares/          # JWT authentication middleware
 │   ├── models/               # User and RefreshToken Mongoose schemas
@@ -62,9 +63,9 @@ Swagger UI is not served by this service; the gateway serves Swagger UI (which i
 
 Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
-- **Required:** `MONGO_URI` (this service reads only `MONGO_URI`), `JWT_ACCESS_SECRET` (same value in every service), `JWT_REFRESH_SECRET` (different from `JWT_ACCESS_SECRET`). The service refuses to start if either secret is missing, a placeholder, shorter than 32 characters or a known-insecure value.
-- **For workspace member names:** `INTERNAL_SERVICE_TOKEN` (same value as workspace-service). It is not checked at startup, but `/internal/users/bulk` rejects every request while it is missing or weak.
-- **Optional:** `PORT` (default `5001`), `ACCESS_TOKEN_EXPIRES` (default `15m`), `REFRESH_TOKEN_EXPIRES` (default `7d`), `REFRESH_REUSE_GRACE_MS` (default `10000`; `0` disables, capped at `60000`), `REDIS_HOST` / `REDIS_PORT` (connected in the background, not used by any route; startup does not wait for Redis).
+- **Required:** `MONGO_URI` (this service reads only `MONGO_URI`), `JWT_ACCESS_SECRET` (same value in every service), `JWT_REFRESH_SECRET` (must differ from `JWT_ACCESS_SECRET`), `INTERNAL_SERVICE_TOKEN` (same value as workspace-service; used by `/internal/users/bulk`). Since Wave 5 the service refuses to start if any of the three is missing, a placeholder, shorter than 32 characters or a known-insecure value, **or if the two JWT secrets are equal** (SEC-018, SEC-019). The message names the variable only.
+- **Token checks (SEC-019).** Access and refresh tokens are verified with HS256 only, and their `userId` must be a 24-character hex id; anything else is `401`. The stored refresh-token expiry is taken from the token's own `exp`.
+- **Optional:** `PORT` (default `5001`), `HOST` (default `127.0.0.1`; set `0.0.0.0` for container or multi-host use), `ACCESS_TOKEN_EXPIRES` (default `5m` since Wave 4; an existing `.env` with `15m` keeps the old value, remove it), `REFRESH_TOKEN_EXPIRES` (default `7d`), `REFRESH_REUSE_GRACE_MS` (default `10000`; `0` disables, capped at `60000`). `LOGIN_THROTTLE_MAX_FAILURES` (default `10`), `LOGIN_THROTTLE_WINDOW_MS` (default `900000`), `LOGIN_THROTTLE_LOCK_MS` (default `900000`): per-account sign-in throttle, see below. auth-service does not use Redis (`REDIS_HOST` / `REDIS_PORT` are no longer read).
 
 ---
 
@@ -72,13 +73,13 @@ Full list, defaults and examples: [docs/reference/environment-variables.md](../.
 - **`bcryptjs`**: Password hashing.
 - **`jsonwebtoken`**: JWT access and refresh token signing and verification.
 - **`mongoose`**: MongoDB ODM for User persistence (`researchmind-auth`).
-- **`redis`**: Redis client (connected, currently unused by any route).
+- No Redis: the unused client was removed (RT-009) and the `redis` declaration was removed with the Wave 4 lockfile update.
 
 ---
 
 ## 7. Local Development Commands
 
-Run from the repository root: one `npm install` there installs every workspace. The service reads `services/auth-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/auth-service/.env` (create it from `.env.example` only if it does not exist yet: `cp -n services/auth-service/.env.example services/auth-service/.env`, PowerShell `if (-not (Test-Path services/auth-service/.env)) { Copy-Item services/auth-service/.env.example services/auth-service/.env }`; never copy over an existing `.env`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
 
 ```bash
 npm run dev:auth                    # live reload (nodemon + ts-node), same as `npm run dev -w auth-service`  [UNTESTED]

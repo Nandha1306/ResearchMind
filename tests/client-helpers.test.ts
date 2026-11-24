@@ -1,11 +1,15 @@
 import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
 import { test, describe } from "node:test";
 import {
   readInitialQuery,
   defaultRouteFor,
   postLoginDestination,
+  resolveWorkspaceDeepLink,
 } from "../frontend/src/utils/navigation.ts";
 import {
+  formatDueDate,
   toIsoDueDate,
   buildImportKey,
   buildActionItemTasks,
@@ -137,6 +141,9 @@ describe("P1-A22 document status polling and actions", () => {
     assert.strictEqual(failureReasonForDisplay("connect ECONNREFUSED 10.0.3.7:6379"), GENERIC_FAILURE_REASON);
     assert.strictEqual(failureReasonForDisplay("Voyage 503 Service Unavailable"), GENERIC_FAILURE_REASON);
     assert.strictEqual(failureReasonForDisplay(null), GENERIC_FAILURE_REASON);
+    // RT-007 / ARC-001: the newer canonical reasons are shown verbatim.
+    assert.strictEqual(failureReasonForDisplay("No extractable text"), "No extractable text");
+    assert.strictEqual(failureReasonForDisplay("Indexing timed out"), "Indexing timed out");
   });
 
   test("missing/garbled timestamps count as stale (never stuck spinning forever)", () => {
@@ -188,5 +195,80 @@ describe("P1-A16 assignee display", () => {
   test("unassigned is nothing to show", () => {
     assert.strictEqual(describeMember(members, null), null);
     assert.strictEqual(describeMember(members, ""), null);
+  });
+});
+
+const FRONTEND_SRC = path.join(__dirname, "..", "frontend", "src");
+const readSource = (...parts: string[]) => fs.readFileSync(path.join(FRONTEND_SRC, ...parts), "utf8");
+
+/*
+ * ARC-003: a due date is a calendar date stored as UTC midnight. Formatting
+ * it in the browser's zone showed the previous day west of UTC.
+ * Node honours a runtime TZ change, so the zones are switched in-process.
+ */
+describe("ARC-003 due date display", () => {
+  test("the same calendar day in every time zone", () => {
+    const saved = process.env.TZ;
+    try {
+      for (const zone of ["America/Los_Angeles", "America/New_York", "UTC", "Pacific/Kiritimati"]) {
+        process.env.TZ = zone;
+        assert.strictEqual(formatDueDate("2026-11-12T00:00:00.000Z", "en-US"), "11/12/2026", zone);
+      }
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
+  });
+
+  test("invalid or missing input gives an empty string", () => {
+    assert.strictEqual(formatDueDate(null), "");
+    assert.strictEqual(formatDueDate(undefined), "");
+    assert.strictEqual(formatDueDate("not a date"), "");
+  });
+
+  test("static guard: no due date is formatted in the local zone", () => {
+    const offenders: string[] = [];
+    const walk = (dir: string) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) walk(full);
+        else if (/\.(ts|tsx)$/.test(entry.name) && /new Date\([^)]*due[^)]*\)\.toLocale/i.test(fs.readFileSync(full, "utf8"))) {
+          offenders.push(path.relative(FRONTEND_SRC, full));
+        }
+      }
+    };
+    walk(FRONTEND_SRC);
+    assert.deepStrictEqual(offenders, []);
+    assert.match(readSource("pages", "KanbanPage.tsx"), /formatDueDate\(task\.dueDate\)/);
+  });
+});
+
+/*
+ * REQ-128: /app/workspace/:id/search selects that workspace (for a member)
+ * and opens the AI researcher; a non-member or malformed id redirects
+ * without switching. The server still enforces membership.
+ */
+describe("REQ-128 workspace deep link", () => {
+  const A = { _id: "665f1c2b9d3e4a00000000a1", name: "A" };
+  const B = { _id: "665f1c2b9d3e4a00000000b2", name: "B" };
+
+  test("a member's other workspace is selected", () => {
+    assert.deepStrictEqual(resolveWorkspaceDeepLink([A, B], A._id, B._id), { action: "select", workspace: B });
+  });
+
+  test("the current workspace stays", () => {
+    assert.deepStrictEqual(resolveWorkspaceDeepLink([A, B], A._id, A._id), { action: "stay" });
+  });
+
+  test("a non-member or malformed id redirects without switching", () => {
+    for (const id of ["665f1c2b9d3e4a00000000ff", "abc", "../x", "", undefined]) {
+      assert.deepStrictEqual(resolveWorkspaceDeepLink([A, B], A._id, id), { action: "redirect" }, String(id));
+    }
+  });
+
+  test("static guard: the alias route renders the deep-link element, not the page directly", () => {
+    const router = readSource("routes", "AppRouter.tsx");
+    assert.doesNotMatch(router, /path="\/app\/workspace\/:id\/search"\s+element=\{<SemanticSearchPage \/>\}/);
+    assert.match(router, /path="\/app\/workspace\/:id\/search"\s+element=\{<WorkspaceSearchDeepLink \/>\}/);
   });
 });

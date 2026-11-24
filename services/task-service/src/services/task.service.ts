@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import mongoose from "mongoose";
 import { Board } from "../models/Board";
 import { Task, TaskDocument } from "../models/Task";
@@ -5,6 +6,7 @@ import { TaskActivity } from "../models/TaskActivity";
 import { createActivity } from "./task-activity.service";
 import { detectTaskActivityChanges } from "./task-activity-diff.service";
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { afterCursor, pageSort, toPage, type ListPageRequest } from "../../../../packages/shared/http/list-page";
 
 interface CreateTaskInput {
   workspaceId: string;
@@ -240,17 +242,19 @@ export const bulkCreateTasks = async ({
   createdBy: string;
   importKey?: string;
 }): Promise<{ tasks: any[]; replayed: boolean }> => {
+  const importHash = importKey ? computeImportHash(tasks) : undefined;
+
   if (importKey) {
     const previous = await findImportedTasks(workspaceId, importKey);
     if (previous) {
-      // Only a COMPLETE earlier import is a replay. A partial set means the
-      // first request is still writing (or was rolled back): never report
+      // Only the SAME payload, COMPLETELY imported, is a replay (RT-004). A
+      // different payload under the key is refused (it used to be answered
+      // with the earlier tasks when the count matched). A partial set means
+      // the first request is still writing (or was rolled back): never report
       // tasks as created that may not all exist.
+      assertSameImport(previous.tasks, importHash as string, tasks.length);
       if (previous.tasks.length === tasks.length) return previous;
-      throw new AppError(
-        "Only part of this import exists: it may still be in progress, or some of its tasks were removed since. Try again shortly, or submit it as a new import.",
-        409
-      );
+      throw new AppError(IMPORT_PARTIAL_MESSAGE, 409);
     }
   }
 
@@ -296,7 +300,7 @@ export const bulkCreateTasks = async ({
     dueDate: task.dueDate ? new Date(task.dueDate) : null,
     parentTaskId: task.parentTaskId ?? null,
     createdBy,
-    ...(importKey ? { importKey, importIndex: index } : {}),
+    ...(importKey ? { importKey, importIndex: index, importHash } : {}),
   }));
   const ids = documents.map((doc) => doc._id);
 
@@ -343,6 +347,7 @@ export const bulkCreateTasks = async ({
       await TaskActivity.deleteMany({ taskId: { $in: ids }, workspaceId }).catch(() => {});
       await Task.deleteMany({ _id: { $in: ids }, workspaceId }).catch(() => {});
       const previous = await findImportedTasks(workspaceId, importKey);
+      if (previous) assertSameImport(previous.tasks, importHash as string, tasks.length);
       if (previous && previous.tasks.length === tasks.length) return previous;
       throw new AppError("This import is already being processed. Please try again shortly.", 409);
     }
@@ -350,6 +355,48 @@ export const bulkCreateTasks = async ({
   }
 
   return { tasks: created, replayed: false };
+};
+
+const IMPORT_PARTIAL_MESSAGE =
+  "Only part of this import exists: it may still be in progress, or some of its tasks were removed since. Try again shortly, or submit it as a new import.";
+
+export const IMPORT_MISMATCH_MESSAGE =
+  "This importKey was already used with a different set of tasks. Submit it as a new import.";
+
+/**
+ * Fingerprint of an import payload (RT-004): sha256 over the tasks in order,
+ * each with a fixed key order. Stored on every imported task; a replay must
+ * present the same fingerprint.
+ */
+export const computeImportHash = (tasks: BulkTaskInput[]): string =>
+  crypto
+    .createHash("sha256")
+    .update(
+      JSON.stringify(
+        tasks.map((task) => [
+          task.boardId,
+          task.title,
+          task.description ?? null,
+          task.status ?? null,
+          task.priority ?? null,
+          task.assigneeId ?? null,
+          task.dueDate ? new Date(task.dueDate).toISOString() : null,
+          task.parentTaskId ?? null,
+        ])
+      )
+    )
+    .digest("hex");
+
+/**
+ * Refuse a replay whose payload differs from the stored import. Rows from
+ * before RT-004 carry no hash: they keep the old count-only rule.
+ */
+const assertSameImport = (previousTasks: any[], importHash: string, count: number) => {
+  const storedHash = previousTasks.find((task) => task.importHash)?.importHash;
+  if (storedHash && storedHash !== importHash) {
+    throw new AppError(IMPORT_MISMATCH_MESSAGE, 409);
+  }
+  void count;
 };
 
 /** Tasks created earlier by the same import, or null if there are none. */
@@ -361,28 +408,35 @@ const findImportedTasks = async (workspaceId: string, importKey: string) => {
 /**
  * Get all tasks belonging to a workspace.
  */
+/** Most tasks in one list page (ISS-043); also the default page size. */
+export const TASK_LIST_MAX = 500;
+
 export const getWorkspaceTasks = async (
   workspaceId: string,
   boardId?: string,
-  parentTaskId?: string | null
+  parentTaskId?: string | null,
+  page: ListPageRequest = { limit: TASK_LIST_MAX, cursor: null }
 ) => {
-  const filter: Record<string, any> = {
-    workspaceId,
-  };
+  const conditions: Record<string, any>[] = [{ workspaceId }];
 
   if (boardId) {
-    filter.boardId = boardId;
+    conditions.push({ boardId });
   }
 
   if (parentTaskId === "null" || parentTaskId === null) {
-    filter.$or = [{ parentTaskId: null }, { parentTaskId: { $exists: false } }];
+    conditions.push({ $or: [{ parentTaskId: null }, { parentTaskId: { $exists: false } }] });
   } else if (parentTaskId) {
-    filter.parentTaskId = parentTaskId;
+    conditions.push({ parentTaskId });
   }
 
-  return Task.find(filter)
-    .sort({ createdAt: -1 })
+  // Newest first, cursor-paged and bounded (ISS-043).
+  if (page.cursor) conditions.push(afterCursor(page.cursor, -1));
+
+  const rows = await Task.find({ $and: conditions })
+    .sort(pageSort(-1))
+    .limit(page.limit + 1)
     .lean();
+  return toPage(rows as any[], page.limit);
 };
 
 /**
@@ -478,7 +532,8 @@ export const updateTask = async (
       $set: data,
     },
     {
-      new: true,
+      // ARC-010: replaces Mongoose's deprecated "new" option (same behaviour).
+      returnDocument: "after",
       runValidators: true,
     }
   );

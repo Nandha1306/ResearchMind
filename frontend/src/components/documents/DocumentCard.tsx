@@ -1,7 +1,9 @@
 import React from "react";
 import type { DocumentItem } from "../../types/document.types";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
-import { formatFileSize, formatDocumentDate, getSafeExternalUrl } from "../../utils/fileUtils";
+import { formatFileSize, formatDocumentDate } from "../../utils/fileUtils";
+import { downloadDocumentFile } from "../../utils/document-file";
+import { documentApi } from "../../api/document.api";
 import { canRetryDocument, failureReasonForDisplay } from "../../utils/document-status";
 import { FileText, FileType, ExternalLink, Calendar, HardDrive, Trash2, RefreshCw } from "lucide-react";
 
@@ -27,18 +29,18 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
   // The card used to be an `<a href={cloudinaryUrl}>` (PDF: same tab, DOCX: new
   // tab). It became a `<div>` so it can contain the Delete/Retry buttons, which
   // dropped the non-PDF navigation and keyboard access. This restores both.
+  // Files are private (SEC-005): PDFs open in the in-app viewer, other files
+  // are fetched through the authenticated API and saved; no storage URL is
+  // ever exposed to the browser.
   const openDocument = () => {
     if (isPdf && onSelect) {
       onSelect(document);
       return;
     }
-    const url = getSafeExternalUrl(document.cloudinaryUrl);
-    if (!url) return; // same as the old `href="#"` fallback
-    if (isPdf) {
-      window.location.assign(url);
-    } else {
-      window.open(url, "_blank", "noopener,noreferrer");
-    }
+    if (document.hasFile === false) return;
+    void downloadDocumentFile(documentApi.getDocumentFile, document._id, document.originalName).catch(() => {
+      window.alert(`Could not download "${document.originalName}". Please try again.`);
+    });
   };
 
   const handleClick = () => {
@@ -81,7 +83,7 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
       title={
         isPdf
           ? `View ${document.originalName} in-app`
-          : `Open ${document.originalName} in new tab`
+          : `Download ${document.originalName}`
       }
     >
       {/* Top Row: Icon + Status Badge + Actions */}

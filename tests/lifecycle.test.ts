@@ -250,4 +250,28 @@ describe("Health / readiness (shared createHealthHandler)", () => {
       delete connection.readyState;
     }
   });
+
+  test("ARC-008: with redisRequired false, Redis down is 200 'degraded'; MongoDB down is still 503", async () => {
+    const express = (await import("express")).default;
+    const app = express();
+    app.get("/live", createHealthHandler("test-service", () => redisUp, { redisRequired: false }));
+    const live = await listen(app);
+    const connection = mongoose.connection as any;
+    try {
+      Object.defineProperty(connection, "readyState", { get: () => 1, configurable: true });
+      redisUp = false;
+      let res = await fetch(`${live.url}/live`);
+      assert.strictEqual(res.status, 200);
+      const body = await res.json();
+      assert.strictEqual(body.status, "degraded");
+      assert.deepStrictEqual(body.dependencies, { mongo: "up", redis: "down" });
+      Object.defineProperty(connection, "readyState", { get: () => 0, configurable: true });
+      res = await fetch(`${live.url}/live`);
+      assert.strictEqual(res.status, 503);
+      await res.text();
+    } finally {
+      delete connection.readyState;
+      await live.close();
+    }
+  });
 });

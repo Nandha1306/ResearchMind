@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useWorkspaceStore } from "../../store/workspace.store";
 import { useAuthStore } from "../../store/auth.store";
 import { useWorkspaceDocuments } from "../../hooks/useDocuments";
+import { WorkspaceMembersList } from "../workspace/WorkspaceMembersList";
 import {
   Sparkles,
   SearchCode,
@@ -152,6 +153,9 @@ export const RightContextPanel: React.FC<RightContextPanelProps> = ({ isVisible 
 
       {/* 2. MIDDLE SECTION: Quick Actions + RAG System Status (Fills all remaining height) */}
       <div className="p-4 flex-1 min-h-0 overflow-y-auto space-y-4 no-scrollbar">
+        {/* Members, with a Remove action for the owner (SEC-010). */}
+        <WorkspaceMembersList />
+
         <div>
           <h3 className="text-xs font-bold uppercase tracking-wider text-text-secondary mb-2.5">
             Quick Actions

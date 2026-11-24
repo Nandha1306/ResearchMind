@@ -111,6 +111,9 @@ const USER_FACING_FAILURE_REASONS = [
   /^Indexing failed after \d+ attempts$/,
   /^Could not queue the document for indexing$/,
   /^Indexing failed$/,
+  // RT-007 / ARC-001: reasons the worker and the upload path write since Wave 4/5.
+  /^No extractable text$/,
+  /^Indexing timed out$/,
 ];
 
 export const GENERIC_FAILURE_REASON = "Processing failed. You can retry indexing.";

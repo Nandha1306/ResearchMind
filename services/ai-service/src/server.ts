@@ -16,8 +16,10 @@ import { connectDB } from "./config/db";
 import { startEmbeddingWorker, stopEmbeddingWorker } from "./workers/embedding.worker";
 import { disconnectMongo } from "../../../packages/shared/lifecycle/mongo";
 import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
+import { startHttpServer } from "../../../packages/shared/lifecycle/listen";
 import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
 import { validateVectorIndexAtStartup } from "./utils/verify-pinecone";
+import { describeErrorForLog } from "../../../packages/shared/errors/safe-error";
 import { logEffectiveModelConfiguration } from "./config/model-config";
 
 const PORT = process.env.PORT || 5006;
@@ -60,12 +62,11 @@ const startServer = async () => {
 
   // Start background embedding worker for vector queue processing
   startEmbeddingWorker().catch((error) => {
-    console.error("Embedding background worker error:", error);
+    console.error("Embedding background worker error:", describeErrorForLog(error));
   });
 
-  const server = app.listen(PORT, () => {
-    console.log(`AI Service running on port ${PORT}`);
-  });
+  // HOST (default 127.0.0.1); exits 1 if the port cannot be bound (SEC-004, RT-002).
+  const server = startHttpServer(app, { serviceName: "AI Service", port: PORT });
 
   registerGracefulShutdown({
     serviceName: "ai-service",

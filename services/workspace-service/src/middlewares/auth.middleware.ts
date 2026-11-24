@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from "express";
-import jwt from "jsonwebtoken";
 import { requireSecret } from "../../../../packages/shared/config/secrets";
+import { verifyAccessToken } from "../../../../packages/shared/auth/access-token";
 
 /*
  * Previously `process.env.JWT_ACCESS_SECRET!` -- the non-null assertion is a
@@ -9,15 +9,16 @@ import { requireSecret } from "../../../../packages/shared/config/secrets";
  */
 const ACCESS_SECRET = requireSecret("JWT_ACCESS_SECRET");
 
-interface JwtPayload {
-  userId: string;
-}
-
 export interface AuthRequest extends Request {
-  user?: JwtPayload;
+  user?: { userId: string };
 }
 
-/** Verify access token and attach user info to the request. */
+/**
+ * Verify access token and attach `{ userId }` to the request. The shared
+ * verifier pins HS256 and requires a 24-hex userId (SEC-019): the whole
+ * decoded payload used to be copied here, and an object userId acted as a
+ * Mongo operator on `members`.
+ */
 export const authenticate = (
   req: AuthRequest,
   res: Response,
@@ -35,14 +36,7 @@ export const authenticate = (
 
     const token = authHeader.split(" ")[1];
 
-    const decoded = jwt.verify(
-      token,
-      ACCESS_SECRET,
-      // Pinned: reject any token claiming a different algorithm.
-      { algorithms: ["HS256"] }
-    ) as JwtPayload;
-
-    req.user = decoded;
+    req.user = verifyAccessToken(token, ACCESS_SECRET);
 
     next();
   } catch {

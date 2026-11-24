@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import type { DocumentItem } from "../../types/document.types";
-import { getSafeExternalUrl } from "../../utils/fileUtils";
+import { useDocumentFileUrl } from "../../hooks/useDocumentFile";
 import {
   X,
   ChevronLeft,
@@ -12,9 +12,12 @@ import {
   AlertCircle,
   FileText,
 } from "lucide-react";
+// ISS-050: the pdf.js worker is bundled and served from this origin. Vite
+// aliases pdfjs-dist to react-pdf's own copy (vite.config.ts), so the worker
+// version always equals the API version react-pdf uses.
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-// Configure PDF.js worker using matching pdfjs.version
-pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 interface PdfViewerModalProps {
   document: DocumentItem;
@@ -29,10 +32,10 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
   const [pageNumber, setPageNumber] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [hasError, setHasError] = useState<boolean>(false);
-  // Only load http(s) URLs; anything else (e.g. a forged javascript:/data: URL)
-  // is shown as an unloadable document instead of being handed to pdf.js.
-  const safeUrl = getSafeExternalUrl(doc.cloudinaryUrl);
-  const showError = hasError || !safeUrl;
+  // The file is fetched through the authenticated API (no storage URL ever
+  // reaches the browser) and shown from an object URL revoked on unmount.
+  const { url: fileUrl, error: fileError, isLoading: fileLoading } = useDocumentFileUrl(doc._id);
+  const showError = hasError || Boolean(fileError) || (!fileLoading && !fileUrl);
 
   const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
@@ -134,9 +137,14 @@ export const PdfViewerModal: React.FC<PdfViewerModalProps> = ({
               Close
             </button>
           </div>
+        ) : fileLoading || !fileUrl ? (
+          <div className="flex flex-col items-center gap-3 text-[#8B8B8F] py-12">
+            <Loader2 className="w-7 h-7 animate-spin text-[#7C6AF7]" />
+            <span className="text-xs font-medium">Loading document...</span>
+          </div>
         ) : (
           <Document
-            file={safeUrl}
+            file={fileUrl}
             onLoadSuccess={onDocumentLoadSuccess}
             onLoadError={onDocumentLoadError}
             loading={

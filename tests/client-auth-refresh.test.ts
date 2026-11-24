@@ -12,6 +12,15 @@ import {
 } from "../frontend/src/lib/token-refresh.ts";
 import { attachAuthInterceptors } from "../frontend/src/api/auth-interceptors.ts";
 
+// Wave 6 (W6-TEST-10): the frontend declares this request option in
+// frontend/src/api/axios.ts (module augmentation), which this test does not
+// load; repeat the declaration so the test type-checks. Types only.
+declare module "axios" {
+  interface AxiosRequestConfig {
+    skipAuthRefresh?: boolean;
+  }
+}
+
 /*
  * P1-A12 -- client-side refresh coordination. UNIT tests of the real frontend
  * modules (no browser): a fake session store and a fake refresh endpoint; the
@@ -99,6 +108,14 @@ describe("token refresh coordinator (frontend/src/lib/token-refresh.ts)", () => 
       assert.strictEqual(calls.ended, 0);
       assert.strictEqual(state.refreshToken, "refresh-0");
     }
+  });
+
+  test("SEC-021: a rate-limited refresh (429) keeps the session (no sign-out)", async () => {
+    const { deps, calls, state } = makeSession({ requestRefresh: async () => Promise.reject(httpError(429)) });
+    const coordinator = createTokenRefreshCoordinator(deps);
+    await assert.rejects(coordinator.refreshAccessToken("access-0"), RefreshUnavailableError);
+    assert.strictEqual(calls.ended, 0);
+    assert.strictEqual(state.refreshToken, "refresh-0");
   });
 
   test("no refresh token: the session ends without a network call", async () => {

@@ -7,7 +7,9 @@ import {
   updateTask,
   deleteTask,
 } from "../services/task.service";
-import { getTaskActivities } from "../services/task-activity.service";
+import { getTaskActivities, ACTIVITY_LIST_MAX } from "../services/task-activity.service";
+import { TASK_LIST_MAX } from "../services/task.service";
+import { parseListPage } from "../../../../packages/shared/http/list-page";
 import { AppError } from "../../../../packages/shared/errors/AppError";
 import { asyncHandler } from "../../../../packages/shared/errors/asyncHandler";
 import { AuthRequest } from "../../../../packages/shared/auth/authenticate";
@@ -134,15 +136,21 @@ export const getWorkspaceTasksHandler = asyncHandler(
   async (req: Request, res: Response) => {
     const workspaceId = getWorkspaceId(req);
 
-    const tasks = await getWorkspaceTasks(
+    const page = parseListPage(req.query as Record<string, unknown>, {
+      defaultLimit: TASK_LIST_MAX,
+      maxLimit: TASK_LIST_MAX,
+    });
+    const { data, meta } = await getWorkspaceTasks(
       workspaceId,
       req.query.boardId as string | undefined,
-      req.query.parentTaskId as string | undefined
+      req.query.parentTaskId as string | undefined,
+      page
     );
 
     res.status(200).json({
       success: true,
-      data: tasks,
+      data,
+      meta,
     });
   }
 );
@@ -238,7 +246,11 @@ export const getTaskActivitiesHandler = asyncHandler(
     const workspaceId = getWorkspaceId(req);
     const taskId = (req.params.id || req.params.taskId) as string;
 
-    const activities = await getTaskActivities(workspaceId, taskId);
+    const page = parseListPage(req.query as Record<string, unknown>, {
+      defaultLimit: ACTIVITY_LIST_MAX,
+      maxLimit: ACTIVITY_LIST_MAX,
+    });
+    const activities = await getTaskActivities(workspaceId, taskId, page);
 
     if (activities === null) {
       throw new AppError("Task not found", 404);
@@ -246,7 +258,8 @@ export const getTaskActivitiesHandler = asyncHandler(
 
     res.status(200).json({
       success: true,
-      data: activities,
+      data: activities.data,
+      meta: activities.meta,
     });
   }
 );

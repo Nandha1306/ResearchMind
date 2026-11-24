@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test, describe, before, after } from "node:test";
+import "./helpers/test-env"; // A-5: dead-port REDIS_URL/MONGO_URI defaults before any service code
 import { extractPdfText } from "../services/document-service/src/utils/pdf-extractor";
 import { extractDocxText } from "../services/document-service/src/utils/docx-extractor";
 import { AppError } from "../packages/shared/errors/AppError";

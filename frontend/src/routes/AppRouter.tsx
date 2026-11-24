@@ -1,7 +1,7 @@
-import React, { useEffect } from "react";
-import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
+import React, { lazy, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation, useParams } from "react-router-dom";
 import { useAuthStore } from "../store/auth.store";
-import { defaultRouteFor, postLoginDestination } from "../utils/navigation";
+import { defaultRouteFor, postLoginDestination, resolveWorkspaceDeepLink } from "../utils/navigation";
 import { LoginPage } from "../pages/LoginPage";
 import { RegisterPage } from "../pages/RegisterPage";
 import { CreateWorkspacePage } from "../pages/CreateWorkspacePage";
@@ -118,10 +118,21 @@ const OnboardingGuard: React.FC = () => {
 
 import { AppShell } from "../layouts/AppShell";
 import { OverviewPage } from "../pages/OverviewPage";
-import { DocumentsPage } from "../pages/DocumentsPage";
-import { SemanticSearchPage } from "../pages/SemanticSearchPage";
-import { MeetingSummarizerPage } from "../pages/MeetingSummarizerPage";
-import { KanbanPage } from "../pages/KanbanPage";
+
+/*
+ * ARC-011: the heavy pages are separate chunks, loaded on first visit (the
+ * PDF viewer and the KaTeX renderer come with them). AppShell wraps its
+ * <Outlet/> in <Suspense>. Chunks load from same-origin /assets, so the CSP
+ * is unchanged.
+ */
+const DocumentsPage = lazy(() => import("../pages/DocumentsPage").then((m) => ({ default: m.DocumentsPage })));
+const SemanticSearchPage = lazy(() =>
+  import("../pages/SemanticSearchPage").then((m) => ({ default: m.SemanticSearchPage }))
+);
+const MeetingSummarizerPage = lazy(() =>
+  import("../pages/MeetingSummarizerPage").then((m) => ({ default: m.MeetingSummarizerPage }))
+);
+const KanbanPage = lazy(() => import("../pages/KanbanPage").then((m) => ({ default: m.KanbanPage })));
 
 // Generic placeholder page to render for sub-routes under development
 const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
@@ -137,6 +148,36 @@ const PlaceholderPage: React.FC<{ title: string }> = ({ title }) => {
         </p>
       </div>
     </div>
+  );
+};
+
+/**
+ * `/app/workspace/:id/search` (REQ-128): open the AI researcher for the
+ * workspace in the URL. A member's workspace is selected first; a malformed
+ * id or a workspace the user does not belong to redirects without switching.
+ * Router state (e.g. `initialQuery`) is kept for a member's workspace.
+ */
+const WorkspaceSearchDeepLink: React.FC = () => {
+  const { id } = useParams();
+  const location = useLocation();
+  const workspaces = useWorkspaceStore((state) => state.workspaces);
+  const currentId = useWorkspaceStore((state) => state.currentWorkspace?._id);
+  const setCurrentWorkspace = useWorkspaceStore((state) => state.setCurrentWorkspace);
+  const resolution = resolveWorkspaceDeepLink(workspaces, currentId, id);
+  const target = resolution.action === "select" ? resolution.workspace : null;
+
+  useEffect(() => {
+    if (target) setCurrentWorkspace(target);
+  }, [target, setCurrentWorkspace]);
+
+  // Selecting: render nothing until the store has switched (next render stays).
+  if (resolution.action === "select") return null;
+  return (
+    <Navigate
+      replace
+      to="/dashboard/ai-researcher"
+      state={resolution.action === "stay" ? location.state : undefined}
+    />
   );
 };
 
@@ -176,7 +217,7 @@ export const AppRouter: React.FC = () => {
               <Route path="/dashboard/sources" element={<PlaceholderPage title="Data Sources" />} />
               <Route path="/dashboard/analytics" element={<PlaceholderPage title="Analytics Insight" />} />
               <Route path="/dashboard/ai-researcher" element={<SemanticSearchPage />} />
-              <Route path="/app/workspace/:id/search" element={<SemanticSearchPage />} />
+              <Route path="/app/workspace/:id/search" element={<WorkspaceSearchDeepLink />} />
               <Route path="/dashboard/literature-review" element={<PlaceholderPage title="Literature Review Summarizer" />} />
               <Route path="/dashboard/meeting-notes" element={<MeetingSummarizerPage />} />
               <Route path="/dashboard/report-drafter" element={<PlaceholderPage title="Report Drafter Copilot" />} />

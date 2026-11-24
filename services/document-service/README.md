@@ -14,17 +14,23 @@ The Document Service handles document uploads (PDF and DOCX), text extraction, C
   - wrong extension, or file bytes that do not match the extension → `415`;
   - empty file, or a PDF/DOCX whose text cannot be read → `422`;
   - file larger than 10 MB → `413`;
+  - DOCX that expands too much (zip directory checked before parsing: more than 1,000 entries, 50 MB uncompressed, `word/document.xml` over 20 MB, or more than 100:1 expansion above 1 MB) → `413`; DOCX with a non-canonical zip layout (comment, trailing or hidden data, concatenated archives, header mismatch), whose contents do not match its declared sizes, or whose parse exceeds the extraction process's memory (256 MB) or time (20 s) limit → `422`;
+  - more than 2,000,000 characters of extracted text → `413`;
+  - more than 2 DOCX extractions running and 8 waiting → `503`;
   - Cloudinary unavailable → `502`.
-- Extracting raw text from PDF files using `pdf-parse` and DOCX files using `mammoth`.
+- Extracting raw text from PDF files using `pdf-parse` and DOCX files using `mammoth`. DOCX parsing runs in a separate child process with heap and time limits, on an archive rebuilt from the validated entries only (`src/utils/docx-extractor.ts`, `src/utils/zip-precheck.ts`), so a decompression bomb cannot block or crash the service; PDF parsing still runs in-process.
 - Uploading original document files to Cloudinary (`image` asset type for PDFs to enable in-app viewing; `raw` for DOCX files).
-- Persisting document metadata (`originalName`, `fileType`, `fileSize`, `cloudinaryUrl`, `cloudinaryPublicId`, `extractedText`, `embeddingStatus`) in MongoDB.
+- Persisting document metadata (`originalName`, `fileType`, `fileSize`, the private storage location, `extractedText`, `embeddingStatus`) in MongoDB. The storage location is never returned to clients; files are streamed through `GET /api/documents/:id/file` after a membership check (SEC-005).
+- Owner-only document deletion (SEC-010): only the workspace owner may delete documents.
+- Serving the text to embed to the ai-service worker for its current claim only (`GET /internal/documents/:id/embedding-source`, shared secret; SEC-006).
 - Deriving `uploadedBy` strictly from verified JWT claims (`req.user.userId`), completely ignoring client-supplied uploader IDs.
 - Validating workspace membership (against workspace-service) before upload, listing, retrieval, deletion and re-indexing: malformed workspace id → `400`, not a member → `403`, check could not run → `503`.
-- Enqueuing job payloads into Redis list `researchmind:embedding:jobs` (producer side); the ai-service worker consumes them.
+- Enqueuing pointer jobs `{ documentId, workspaceId }` into Redis list `researchmind:embedding:jobs` (producer side, no text); the ai-service worker consumes them.
+- Migration script for legacy public Cloudinary assets (run by the owner): `src/scripts/migrate-cloudinary-private.ts` (dry run by default; `--apply` migrates). See docs/architecture/security.md, "File delivery".
 - Tracking embedding status `pending` → `indexing` → `indexed` / `failed` (with the failure reason in `embeddingError`). A worker must claim a document before processing it; a document is tried at most 3 times. A recovery sweep (every 5 minutes) re-queues documents left `pending`, stuck in `indexing`, or `failed` with attempts remaining. `POST /api/documents/:id/reindex` starts a fresh retry budget (`409` while a worker is indexing it).
 - Deleting a document removes its vectors first (via ai-service `DELETE /internal/vectors/...`). If that fails the deletion is rolled back and the request answers `503`; otherwise the Cloudinary asset and the record are removed.
 - Internal routes for the ai-service worker under `/internal` (claim a job, report embedding status), protected by the `X-Internal-Token` header (`INTERNAL_SERVICE_TOKEN`).
-- Hosting interactive Swagger API documentation at `/api-docs/`.
+- Hosting interactive Swagger API documentation at `/api-docs/` when `API_DOCS_ENABLED=true` (off by default since Wave 5).
 
 ---
 
@@ -58,7 +64,7 @@ All document endpoints are mounted under `/api/documents` (default port 5003, pr
 | Method | Endpoint | Description | Auth Required | Request Body / Form-Data |
 |--------|----------|-------------|---------------|--------------------------|
 | `GET`  | `/health` | Service health status | No | None |
-| `GET`  | `/api-docs/` | Interactive Swagger API UI | No | None |
+| `GET`  | `/api-docs/` | Interactive Swagger API UI (only when `API_DOCS_ENABLED=true`) | No | None |
 | `POST` | `/api/documents/upload` | Upload PDF or DOCX file | Yes (`Bearer <token>`) | `multipart/form-data` (`file`, `workspaceId`) |
 | `POST` | `/api/documents` | Create document metadata | Yes (`Bearer <token>`) | `{ workspaceId, originalName, fileType, fileSize }` |
 | `GET`  | `/api/documents/workspace/:workspaceId` | Fetch documents for a workspace | Yes (`Bearer <token>`) | Path: `workspaceId` |
@@ -75,7 +81,8 @@ All document endpoints are mounted under `/api/documents` (default port 5003, pr
 Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
 - **Required:** `MONGODB_URI` or `MONGO_URI` (`MONGODB_URI` is read first), `JWT_ACCESS_SECRET` (same value in every service), `INTERNAL_SERVICE_TOKEN` (same value as ai-service), `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`. The service refuses to start if `JWT_ACCESS_SECRET` or `INTERNAL_SERVICE_TOKEN` is missing, a placeholder, shorter than 32 characters or a known-insecure value. Cloudinary settings are not checked at startup; uploads fail while they are wrong.
-- **Optional:** `PORT` (default `5003`), `REDIS_URL` (embedding queue, default `redis://127.0.0.1:6379`), `WORKSPACE_SERVICE_URL` (membership checks, default `http://127.0.0.1:5002`), `AI_SERVICE_URL` (vector removal on delete, default `http://127.0.0.1:5006`), `CORS_ORIGIN` (comma-separated; unset allows any origin).
+- **Optional:** `PORT` (default `5003`), `HOST` (default `127.0.0.1`; set `0.0.0.0` for container or multi-host use), `REDIS_URL` (embedding queue, default `redis://127.0.0.1:6379`; the compose Redis requires a password, so set `redis://:<REDIS_PASSWORD>@127.0.0.1:6379`, otherwise `/health` reports `redis: "down"` and no embedding job is queued), `WORKSPACE_SERVICE_URL` (membership checks, default `http://127.0.0.1:5002`), `AI_SERVICE_URL` (vector removal on delete, default `http://127.0.0.1:5006`), `UPLOAD_TMP_DIR` (upload temp folder, default `<OS temp>/researchmind-uploads`; its own temp files older than 1 h are removed at startup, SEC-024), `API_DOCS_ENABLED` (`true` serves Swagger UI at `/api-docs`; off by default, SEC-016). Since Wave 5 this service sends no CORS headers and no longer reads `CORS_ORIGIN` (the gateway applies it, SEC-015).
+- **Legacy data (optional, user-run):** `npx ts-node src/scripts/legacy-data-hygiene.ts` (dry run) reports the unused `workspaces` collection and old files in the legacy `uploads/` folder; see `docs/deployment/docker-process.md` (Legacy data hygiene) for the flags.
 - The upload limit is fixed in code at 10 MB (there is no `MAX_FILE_SIZE_MB`). The `winston` logger also writes `error.log` and `combined.log` into the working directory.
 
 ---
@@ -94,7 +101,7 @@ Full list, defaults and examples: [docs/reference/environment-variables.md](../.
 
 ## 7. Local Development Commands
 
-Run from the repository root: one `npm install` there installs every workspace. The service reads `services/document-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/document-service/.env` (create it from `.env.example` only if it does not exist yet: `cp -n services/document-service/.env.example services/document-service/.env`, PowerShell `if (-not (Test-Path services/document-service/.env)) { Copy-Item services/document-service/.env.example services/document-service/.env }`; never copy over an existing `.env`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
 
 ```bash
 npm run dev:doc                     # live reload (nodemon + ts-node), same as `npm run dev -w document-service`  [UNTESTED]

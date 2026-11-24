@@ -30,12 +30,45 @@ const documentSchema = new Schema(
       required: true,
     },
 
+    /*
+     * Storage location (server-owned; NEVER sent to clients -- see
+     * utils/document-serializer.ts). Files are delivered only through
+     * GET /api/documents/:id/file after a membership check (SEC-005).
+     *
+     * cloudinaryUrl: the public delivery URL of LEGACY assets (uploaded before
+     * SEC-005 as public `upload` assets). Null for new, authenticated assets.
+     */
     cloudinaryUrl: {
       type: String,
       default: null,
     },
 
     cloudinaryPublicId: {
+      type: String,
+      default: null,
+    },
+
+    /** "image" (PDF) or "raw" (DOCX). Null on legacy records: derived from fileType. */
+    cloudinaryResourceType: {
+      type: String,
+      enum: ["image", "raw", null],
+      default: null,
+    },
+
+    /**
+     * Cloudinary delivery type: "authenticated" for every upload since
+     * SEC-005 (signed URLs only, built server-side). Null on legacy records,
+     * which are public "upload" assets until the user runs the migration
+     * script (src/scripts/migrate-cloudinary-private.ts).
+     */
+    cloudinaryDeliveryType: {
+      type: String,
+      enum: ["upload", "authenticated", "private", null],
+      default: null,
+    },
+
+    /** Delivery format reported by Cloudinary (e.g. "pdf" for image assets). */
+    cloudinaryFormat: {
       type: String,
       default: null,
     },
@@ -108,6 +141,8 @@ const documentSchema = new Schema(
 // Recovery sweep: find pending/failed/stale documents and unfinished deletions.
 documentSchema.index({ embeddingStatus: 1, updatedAt: 1 });
 documentSchema.index({ deletedAt: 1 });
+// Paged workspace list, newest first (ISS-043).
+documentSchema.index({ workspaceId: 1, deletedAt: 1, createdAt: -1, _id: -1 });
 
 export const Document = model(
   "Document",

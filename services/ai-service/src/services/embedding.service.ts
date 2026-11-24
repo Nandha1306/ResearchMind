@@ -1,4 +1,5 @@
 import { voyageEmbeddings, VOYAGE_EMBEDDING_DIMENSION, VOYAGE_MODEL } from "../config/voyage";
+import { timeouts, withTimeout } from "../config/timeouts";
 
 const EMBEDDING_BATCH_SIZE = 20;
 
@@ -18,7 +19,14 @@ const embedBatch = async (
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      return await voyageEmbeddings.embedDocuments(texts);
+      // Bounded (ISS-037): a Voyage request that never answers must not
+      // hold the only worker. A timeout is not retried here; the job fails
+      // and the recovery sweep retries it within the attempt limit.
+      return await withTimeout(
+        voyageEmbeddings.embedDocuments(texts),
+        timeouts.voyageDocumentMs(),
+        "Voyage document embedding"
+      );
     } catch (err: any) {
       const isRateLimit =
         err?.status === 429 ||

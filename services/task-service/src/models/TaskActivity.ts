@@ -72,4 +72,7 @@ taskActivitySchema.index({
   taskId: 1,
 });
 
+// Paged activity list, newest first (ISS-043).
+taskActivitySchema.index({ workspaceId: 1, taskId: 1, createdAt: -1, _id: -1 });
+
 export const TaskActivity = model("TaskActivity", taskActivitySchema);

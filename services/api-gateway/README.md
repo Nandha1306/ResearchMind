@@ -15,14 +15,16 @@ The API Gateway serves as the single public HTTP entry point (`http://localhost:
 - Authenticating and proxying `/api/documents/*` traffic to Document Service (port 5003).
 - Authenticating and proxying `/api/tasks/*` traffic to Task Service (port 5004).
 - Authenticating and proxying `/api/ai/*` traffic to AI Service (port 5006) with SSE streaming support.
-- Rate limiting with `express-rate-limit`, stored in Redis (`REDIS_URL`); if Redis is unreachable the limiters fail open:
+- Rejecting non-canonical request paths with `400` before any other middleware (`src/middlewares/path-guard.middleware.ts`): repeated slashes, backslashes, `.`/`..` segments, percent-encoded `/` `\` `.` and other unreserved characters, NUL. Otherwise a variant such as `/api/auth//login` skipped the limiters while the proxy still delivered it. One trailing slash is accepted and counts against the same limit.
+- Rate limiting with `express-rate-limit`, stored in Redis (`REDIS_URL`). If Redis is down, frozen or not yet connected the limiters fail open immediately (300 ms command timeout, Redis skipped while not ready and for 5 s after an error, one log line per outage) and resume once Redis answers again, also when the gateway started without Redis:
   - `POST /api/auth/login`: 5 per 15 minutes per IP (successful logins are not counted);
   - `POST /api/auth/register`: 3 per hour per IP;
   - `POST /api/ai/query` and `POST /api/ai/search`: 30 per hour per user (shared limiter);
   - `POST /api/ai/summarize-meeting`: 20 per hour per user;
   - all authenticated `/api/workspaces`, `/api/documents`, `/api/tasks`, `/api/ai` routes: 100 per minute per user.
 - Answering `503` when a downstream service cannot be reached.
-- Hosting interactive Swagger UI documentation at `/api-docs/`.
+- Hosting interactive Swagger UI documentation at `/api-docs/` when `API_DOCS_ENABLED=true` (off by default since Wave 5, SEC-016).
+- Applying the CORS allow-list (`CORS_ORIGIN`; unset = loopback origins only, for local development; SEC-015) and answering unknown routes with a JSON `404 Route not found` (ISS-041).
 - Standardizing HTTP response headers with Helmet.
 
 ---
@@ -51,7 +53,7 @@ This table summarises this service's routes. The cross-service reference (reques
 | Method | Endpoint | Description | Auth Required |
 |--------|----------|-------------|---------------|
 | `GET` | `/health` | Gateway health check status | No |
-| `GET` | `/api-docs` | Interactive Swagger API UI | No |
+| `GET` | `/api-docs` | Interactive Swagger API UI (only when `API_DOCS_ENABLED=true`) | No |
 
 ### Proxied Microservice Routes
 | Match Path | Target Service | Auth Middleware | Default Target URL |
@@ -69,8 +71,11 @@ This table summarises this service's routes. The cross-service reference (reques
 Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
 - **Required:** `JWT_ACCESS_SECRET` (same value in every service). The gateway refuses to start if it is missing, a placeholder, shorter than 32 characters or a known-insecure value.
-- **Optional:** `PORT` (default `5000`); `AUTH_SERVICE_URL`, `WORKSPACE_SERVICE_URL`, `DOCUMENT_SERVICE_URL`, `TASK_SERVICE_URL`, `AI_SERVICE_URL` (default `http://localhost:<port>` of each service); `REDIS_URL` (rate-limit store, default `redis://127.0.0.1:6379`; without Redis the limiters fail open).
-- The gateway's `/health` always answers `200`; it does not check Redis or the downstream services.
+- **Optional:** `PORT` (default `5000`); `AUTH_SERVICE_URL`, `WORKSPACE_SERVICE_URL`, `DOCUMENT_SERVICE_URL`, `TASK_SERVICE_URL`, `AI_SERVICE_URL` (default `http://localhost:<port>` of each service); `REDIS_URL` (rate-limit store, default `redis://127.0.0.1:6379`; without Redis the limiters fail open). The compose Redis requires a password, so set `REDIS_URL=redis://:<REDIS_PASSWORD>@127.0.0.1:6379` (root `.env` value); with the passwordless default every Redis command fails with `NOAUTH` (logged) and the limiters fail open, so nothing is rate-limited.
+- **Wave 4 settings:** `HOST` (default `0.0.0.0` for the gateway), `TRUST_PROXY` (off by default; a hop count `1`..`10` or an address/CIDR list when behind reverse proxies; `true` and CIDRs wider than `/8` IPv4 or `/32` IPv6 are refused, RT-008), `GATEWAY_UPSTREAM_IDLE_TIMEOUT_MS` (default `120000`; a silent upstream gets `504`, RT-003).
+- **Wave 5 settings:** `CORS_ORIGIN` (comma-separated exact origins; unset = any `http://localhost:<port>` / `http://127.0.0.1:<port>` origin, logged at startup; `*` or a malformed entry stops the gateway; **set it in production**, SEC-015), `API_DOCS_ENABLED` (`true` serves Swagger UI, SEC-016). `TRUST_PROXY` is required behind a reverse proxy, also for the new per-IP auth limiter (60/min on every `/api/auth` route, SEC-021).
+- The gateway's `/health` always answers `200`. It reports `status: "degraded"` and `dependencies.rateLimitStore: "down"` while its Redis is not ready (ISS-044); it does not check the downstream services.
+- Every response carries `X-Request-ID` (kept from the client if it is a safe value, otherwise generated) and the id is forwarded upstream and logged. Responses carry helmet's default Content-Security-Policy (SEC-008).
 
 ---
 
@@ -86,7 +91,7 @@ Full list, defaults and examples: [docs/reference/environment-variables.md](../.
 
 ## 7. Local Development Commands
 
-Run from the repository root: one `npm install` there installs every workspace. The service reads `services/api-gateway/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/api-gateway/.env` (create it from `.env.example` only if it does not exist yet: `cp -n services/api-gateway/.env.example services/api-gateway/.env`, PowerShell `if (-not (Test-Path services/api-gateway/.env)) { Copy-Item services/api-gateway/.env.example services/api-gateway/.env }`; never copy over an existing `.env`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
 
 ```bash
 npm run dev:gateway                 # live reload (nodemon + ts-node), same as `npm run dev -w api-gateway`  [UNTESTED]

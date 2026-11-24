@@ -105,7 +105,7 @@ export const OverviewPage: React.FC = () => {
         />
         <StatCard
           icon={<Brain className="w-4 h-4 text-[#38BDF8]" />}
-          label="AI Q&A Sessions"
+          label="Your AI Q&A Sessions"
           value={`${sessions.length} Session${sessions.length === 1 ? "" : "s"}`}
           subtext="Logged in MongoDB database"
         />

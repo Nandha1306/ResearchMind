@@ -2,6 +2,7 @@ import React, { useState, useId } from "react";
 import { useWorkspaceStore } from "../../store/workspace.store";
 import { Button } from "../ui/button";
 import { X, Loader2, Building2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { MAX_WORKSPACE_NAME_LENGTH, workspaceNameProblem } from "../../utils/workspace-name";
 
 interface CreateWorkspaceModalProps {
   isOpen: boolean;
@@ -39,8 +40,10 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = name.trim();
-    if (!trimmedName || trimmedName.length < 3) {
-      setError("Workspace name must be at least 3 characters long.");
+    // ISS-050 (iii): the server's 3..100-character rule.
+    const nameProblem = workspaceNameProblem(trimmedName);
+    if (nameProblem) {
+      setError(nameProblem);
       return;
     }
 
@@ -149,6 +152,7 @@ export const CreateWorkspaceModal: React.FC<CreateWorkspaceModalProps> = ({
               placeholder="e.g. AI Oceanography Lab, Quantum Research"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              maxLength={MAX_WORKSPACE_NAME_LENGTH}
               className="w-full p-2.5 rounded-xl bg-bg-elevated border border-border-default text-text-primary text-xs focus:outline-none focus:ring-2 focus:ring-accent-primary/50"
               autoFocus
               required

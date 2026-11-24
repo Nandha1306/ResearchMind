@@ -43,21 +43,36 @@ after(async () => {
   await fakeDocumentService?.close();
 });
 
+/*
+ * SEC-006 (rewritten): jobs are pointers. The text, uploader and file type
+ * come from document-service for the current claim (`fetchSource`), never
+ * from the queue entry. The fake fetchSource below returns the stored values;
+ * it records into `sourceCalls`, so the existing call-order assertions below
+ * keep checking the same control flow.
+ */
 const JOB = {
   documentId: "665f1c2b9d3e4a0012345678",
   workspaceId: "665f1c2b9d3e4a0087654321",
+};
+const STORED = {
+  workspaceId: JOB.workspaceId,
   uploadedBy: "665f1c2b9d3e4a00aaaaaaaa",
-  extractedText: "First paragraph.\n\nSecond paragraph.",
   fileType: "pdf" as const,
+  extractedText: "First paragraph.\n\nSecond paragraph.",
 };
 
 type Calls = string[];
+const sourceCalls: { documentId: string; workspaceId: string; claimToken: number }[] = [];
 
 /** Fake collaborators that record the order of calls. */
 const fakeDeps = (calls: Calls, overrides: Partial<Record<string, any>> = {}) => ({
   claim: async () => {
     calls.push("claim");
     return { claimed: true as const, claimToken: 7, workspaceId: JOB.workspaceId };
+  },
+  fetchSource: async (documentId: string, workspaceId: string, claimToken: number) => {
+    sourceCalls.push({ documentId, workspaceId, claimToken });
+    return { ...STORED };
   },
   updateStatus: async (_id: string, status: string, error?: string, claimToken?: number) => {
     assert.strictEqual(claimToken, 7, "status updates carry the claim's fencing token");
@@ -137,6 +152,62 @@ describe("processEmbeddingJob (ai-service/src/workers/embedding.worker.ts)", () 
     assert.strictEqual(calls.filter((c) => c === "deleteVectors").length, 2);
   });
 
+  /*
+   * SEC-012 (b): removing the vectors of a document deleted during indexing
+   * is retried (3 attempts), so one transient Pinecone error does not leave
+   * deleted content in the index.
+   */
+  test("SEC-012b: cleanup of a deleted document's vectors is retried until it succeeds", async () => {
+    const calls: Calls = [];
+    let deleteCalls = 0;
+    const outcome = await worker.processEmbeddingJob(
+      JOB,
+      fakeDeps(calls, {
+        deleteVectors: async () => {
+          deleteCalls++;
+          calls.push("deleteVectors");
+          // Call 1 is the pre-upsert replace; calls 2 and 3 are failing cleanups.
+          if (deleteCalls === 2 || deleteCalls === 3) throw new Error("Pinecone 503");
+        },
+        updateStatus: async (_id: string, status: string) => {
+          calls.push(`status:${status}`);
+          throw new DocumentServiceError("gone", 410);
+        },
+      }) as any,
+      { statusRetryDelayMs: 1 }
+    );
+    assert.strictEqual(outcome, "deleted-during-processing");
+    assert.strictEqual(deleteCalls, 4, "1 replace + 3 cleanup attempts (2 failed, 1 succeeded)");
+  });
+
+  test("SEC-012b: cleanup gives up after 3 attempts and logs loudly", async (t) => {
+    const errors: string[] = [];
+    t.mock.method(console, "error", (...args: unknown[]) => { errors.push(args.map(String).join(" ")); });
+    let cleanupCalls = 0;
+    let replaced = false;
+    const outcome = await worker.processEmbeddingJob(
+      JOB,
+      fakeDeps([], {
+        deleteVectors: async () => {
+          if (!replaced) { replaced = true; return; }
+          cleanupCalls++;
+          throw new Error("Pinecone 503");
+        },
+        updateStatus: async () => {
+          throw new DocumentServiceError("gone", 410);
+        },
+      }) as any,
+      { statusRetryDelayMs: 1 }
+    );
+    assert.strictEqual(outcome, "deleted-during-processing");
+    assert.strictEqual(cleanupCalls, worker.DELETED_DOCUMENT_CLEANUP_ATTEMPTS);
+    assert.strictEqual(worker.DELETED_DOCUMENT_CLEANUP_ATTEMPTS, 3);
+    assert.ok(errors.some((e) => /could NOT be removed after 3 attempts/.test(e)), errors.join("\n"));
+  });
+
+  // RT-007 (Wave 5): the stored reason is a fixed user-safe text; the raw
+  // provider message goes to the (redacted) log only. The two assertions
+  // below were "status:failed:<raw provider message>" before.
   test("embedding provider failure: marked failed with the reason, error rethrown, nothing written", async () => {
     const calls: Calls = [];
     await assert.rejects(
@@ -151,7 +222,7 @@ describe("processEmbeddingJob (ai-service/src/workers/embedding.worker.ts)", () 
       ),
       /Voyage 503/
     );
-    assert.deepStrictEqual(calls, ["claim", "chunk", "embed", "status:failed:Voyage 503 Service Unavailable"]);
+    assert.deepStrictEqual(calls, ["claim", "chunk", "embed", "status:failed:Indexing failed"]);
   });
 
   test("vector store failure after the claim: marked failed (the recovery sweep retries)", async () => {
@@ -168,7 +239,7 @@ describe("processEmbeddingJob (ai-service/src/workers/embedding.worker.ts)", () 
       ),
       /Pinecone timeout/
     );
-    assert.strictEqual(calls.at(-1), "status:failed:Pinecone timeout");
+    assert.strictEqual(calls.at(-1), "status:failed:Indexing failed");
   });
 
   test("failure AND the document was deleted meanwhile: partial vectors are removed", async () => {
@@ -194,7 +265,8 @@ describe("processEmbeddingJob (ai-service/src/workers/embedding.worker.ts)", () 
     const calls: Calls = [];
     await assert.rejects(
       worker.processEmbeddingJob(
-        { ...JOB, extractedText: "" },
+        // SEC-006: text comes from fetchSource, not the job; the chunker yields nothing.
+        JOB,
         fakeDeps(calls, {
           chunk: async () => {
             calls.push("chunk");
@@ -265,6 +337,174 @@ describe("processEmbeddingJob (ai-service/src/workers/embedding.worker.ts)", () 
     ]);
     assert.deepStrictEqual(outcomes.sort(), ["indexed", "skipped"]);
     assert.strictEqual(calls.filter((c) => c === "embed").length, 1);
+  });
+});
+
+describe("SEC-006: the worker embeds the stored text, never the queue entry's", () => {
+  test("a forged job carrying text, uploader and file type: everything written comes from document-service", async () => {
+    const calls: Calls = [];
+    sourceCalls.length = 0;
+    const seen: { chunked: string[]; embedded: string[]; upserts: any[] } = { chunked: [], embedded: [], upserts: [] };
+    const forged = {
+      ...JOB,
+      extractedText: "INJECTED text from Redis",
+      uploadedBy: "attacker",
+      fileType: "docx",
+    };
+    const outcome = await worker.processEmbeddingJob(
+      forged as any,
+      fakeDeps(calls, {
+        chunk: async (text: string) => {
+          seen.chunked.push(text);
+          return text.split("\n\n").map((t, index) => ({ index, text: t, tokenCount: 1 }));
+        },
+        embed: async (texts: string[]) => {
+          seen.embedded.push(...texts);
+          return texts.map((_, index) => ({ index, embedding: [0.1, 0.2] }));
+        },
+        upsertVectors: async (input: any) => {
+          seen.upserts.push(input);
+          return { vectorCount: input.chunks.length };
+        },
+      }) as any
+    );
+    assert.strictEqual(outcome, "indexed");
+    assert.deepStrictEqual(sourceCalls, [{ documentId: JOB.documentId, workspaceId: JOB.workspaceId, claimToken: 7 }]);
+    assert.deepStrictEqual(seen.chunked, [STORED.extractedText]);
+    assert.ok(seen.embedded.every((t) => !t.includes("INJECTED")));
+    assert.strictEqual(seen.upserts[0].uploadedBy, STORED.uploadedBy);
+    assert.strictEqual(seen.upserts[0].fileType, STORED.fileType);
+    assert.ok(!JSON.stringify(seen.upserts).includes("INJECTED"));
+  });
+
+  test("text fetch refused because the claim moved on (409): superseded, nothing written", async () => {
+    const calls: Calls = [];
+    const outcome = await worker.processEmbeddingJob(
+      JOB,
+      fakeDeps(calls, {
+        fetchSource: async () => {
+          throw new DocumentServiceError("claim-not-current", 409);
+        },
+      }) as any
+    );
+    assert.strictEqual(outcome, "superseded");
+    assert.deepStrictEqual(calls, ["claim"]);
+  });
+
+  test("text fetch says the document is gone (410): no vectors are written", async () => {
+    const calls: Calls = [];
+    const outcome = await worker.processEmbeddingJob(
+      JOB,
+      fakeDeps(calls, {
+        fetchSource: async () => {
+          throw new DocumentServiceError("deleted", 410);
+        },
+      }) as any
+    );
+    assert.strictEqual(outcome, "deleted-during-processing");
+    assert.ok(!calls.includes("upsert") && !calls.includes("embed"));
+  });
+
+  test("job validation: pointer jobs and legacy text-carrying jobs are accepted, malformed ids are not", () => {
+    assert.ok(worker.isValidEmbeddingJob(JOB));
+    assert.ok(worker.isValidEmbeddingJob({ ...JOB, ...STORED, extractedText: "legacy inline text" }));
+    for (const bad of [
+      null,
+      "string",
+      { documentId: JOB.documentId },
+      { documentId: "../../etc", workspaceId: JOB.workspaceId },
+      { documentId: JOB.documentId, workspaceId: "x" },
+      { documentId: 5, workspaceId: JOB.workspaceId },
+    ]) {
+      assert.strictEqual(worker.isValidEmbeddingJob(bad), false, JSON.stringify(bad));
+    }
+  });
+});
+
+describe("ISS-037: job watchdog (provider that never answers)", () => {
+  const never = () => new Promise<never>(() => {});
+
+  test("a hung embedding call fails the job at the deadline, with the claim's token; nothing written afterwards", async () => {
+    const calls: Calls = [];
+    const started = Date.now();
+    await assert.rejects(
+      worker.processEmbeddingJob(
+        JOB,
+        fakeDeps(calls, {
+          embed: async () => {
+            calls.push("embed");
+            return never();
+          },
+        }) as any,
+        { jobTimeoutMs: 100 }
+      ),
+      (error: Error) => error.name === "EmbeddingJobTimeoutError"
+    );
+    const elapsed = Date.now() - started;
+    assert.ok(elapsed < 1000, `took ${elapsed} ms`);
+    // RT-007: stored as the fixed reason "Indexing timed out" (was the raw "Embedding timed out after 0 s").
+    assert.deepStrictEqual(calls, ["claim", "chunk", "embed", "status:failed:Indexing timed out"]);
+  });
+
+  test("a hung vector store call is abandoned the same way", async () => {
+    const calls: Calls = [];
+    await assert.rejects(
+      worker.processEmbeddingJob(
+        JOB,
+        fakeDeps(calls, {
+          upsertVectors: async () => {
+            calls.push("upsert");
+            return never();
+          },
+        }) as any,
+        { jobTimeoutMs: 100 }
+      ),
+      /timed out/
+    );
+    assert.deepStrictEqual(calls.slice(-1), ["status:failed:Indexing timed out"]);
+  });
+
+  test("a late provider result after the deadline is ignored (no upsert, no 'indexed')", async () => {
+    const calls: Calls = [];
+    let release: (value: unknown) => void = () => {};
+    await assert.rejects(
+      worker.processEmbeddingJob(
+        JOB,
+        fakeDeps(calls, {
+          embed: (texts: string[]) => {
+            calls.push("embed");
+            return new Promise((resolve) => {
+              release = () => resolve(texts.map((_, index) => ({ index, embedding: [0.1, 0.2] })));
+            });
+          },
+        }) as any,
+        { jobTimeoutMs: 50 }
+      ),
+      /timed out/
+    );
+    release(undefined); // the provider finally answers
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(!calls.includes("upsert") && !calls.includes("status:indexed"), calls.join(","));
+  });
+
+  test("the timeout report is fenced: if the claim was taken over meanwhile, the failure is discarded (superseded)", async () => {
+    const calls: Calls = [];
+    const outcome = await worker.processEmbeddingJob(
+      JOB,
+      fakeDeps(calls, {
+        embed: async () => {
+          calls.push("embed");
+          return never();
+        },
+        updateStatus: async (_id: string, status: string, _error?: string, claimToken?: number) => {
+          calls.push(`status:${status}:token${claimToken}`);
+          throw new DocumentServiceError("Embedding claim is no longer current", 409);
+        },
+      }) as any,
+      { jobTimeoutMs: 50 }
+    );
+    assert.strictEqual(outcome, "superseded");
+    assert.deepStrictEqual(calls.slice(-1), ["status:failed:token7"]);
   });
 });
 

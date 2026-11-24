@@ -13,6 +13,7 @@ export interface TaskDocument {
   createdBy: string;
   importKey?: string;
   importIndex?: number;
+  importHash?: string;
 }
 
 const taskSchema = new Schema(
@@ -96,6 +97,16 @@ const taskSchema = new Schema(
       type: Number,
       default: undefined,
     },
+
+    /**
+     * sha256 of the whole import payload (RT-004). A repeat of the importKey
+     * is a replay only when it carries the same payload. Absent on tasks
+     * imported before this field existed (they keep the count-only rule).
+     */
+    importHash: {
+      type: String,
+      default: undefined,
+    },
   },
   {
     timestamps: true,
@@ -106,6 +117,9 @@ taskSchema.index({
   workspaceId: 1,
   boardId: 1,
 });
+
+// Paged task list, newest first (ISS-043).
+taskSchema.index({ workspaceId: 1, boardId: 1, createdAt: -1, _id: -1 });
 
 // One task per (import, position): a duplicate or concurrent repeat of the
 // same bulk import cannot create a second copy. Partial, so ordinary tasks

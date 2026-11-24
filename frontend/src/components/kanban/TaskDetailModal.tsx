@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useId } from "react";
 import { getTaskById, getTaskActivities, getWorkspaceTasks, updateTask, createTask, deleteTask } from "../../api/task.api";
 import { useWorkspaceMembers } from "../../hooks/useWorkspaceMembers";
+import { useIsWorkspaceOwner } from "../../hooks/useWorkspaceRole";
 import { describeMember } from "../../utils/members";
 import type { Board, Task, TaskActivity } from "../../types/task.types";
 import { Button } from "../ui/button";
@@ -52,6 +53,8 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
   const [task, setTask] = useState<Task | null>(null);
   const [subtasks, setSubtasks] = useState<Task[]>([]);
   const [activities, setActivities] = useState<TaskActivity[]>([]);
+  // Only the workspace owner may delete tasks (SEC-010).
+  const isOwner = useIsWorkspaceOwner();
   // Members (stable user ids + names) for the assignee picker and activity.
   const membersQuery = useWorkspaceMembers(workspaceId);
   // undefined while loading, null if the list could not be loaded.
@@ -318,7 +321,7 @@ export const TaskDetailModal: React.FC<TaskDetailModalProps> = ({
           .then((acts) => setActivities(acts))
           .catch(() => {});
       }
-    } catch (err: any) {
+    } catch {
       setError("Failed to update subtask status.");
     }
   };
@@ -387,7 +390,8 @@ Its activity history will be permanently deleted too. This cannot be undone.`;
           </div>
 
           <div className="flex items-center gap-2">
-            {task && (
+            {/* Owner only (SEC-010): members get no delete control. */}
+            {task && isOwner && (
               <Button
                 variant="ghost"
                 size="sm"

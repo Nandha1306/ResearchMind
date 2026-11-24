@@ -20,14 +20,16 @@ import { CSS } from "@dnd-kit/utilities";
 
 import { useWorkspaceStore } from "../store/workspace.store";
 import {
-  getWorkspaceBoards,
-  getWorkspaceTasks,
+  getWorkspaceBoardsPaged,
+  getWorkspaceTasksPaged,
   updateTask,
   createBoard,
 } from "../api/task.api";
+import { ListTruncatedNotice } from "../components/ui/ListTruncatedNotice";
 import type { Board, Task } from "../types/task.types";
 import { useWorkspaceMembers } from "../hooks/useWorkspaceMembers";
 import { describeMember } from "../utils/members";
+import { formatDueDate } from "../utils/meeting-tasks";
 import { TaskDetailModal } from "../components/kanban/TaskDetailModal";
 import { CreateTaskModal } from "../components/kanban/CreateTaskModal";
 import { Button } from "../components/ui/button";
@@ -176,7 +178,7 @@ const TaskCardItem: React.FC<TaskCardProps> = ({ task, isUpdating, onTaskClick }
         {task.dueDate && (
           <span className="px-2 py-0.5 rounded-md bg-bg-elevated border border-border-default text-text-secondary flex items-center gap-1">
             <Calendar className="w-2.5 h-2.5 text-amber-400" />
-            {new Date(task.dueDate).toLocaleDateString()}
+            {formatDueDate(task.dueDate)}
           </span>
         )}
 
@@ -274,6 +276,9 @@ export const KanbanPage: React.FC = () => {
   const [boards, setBoards] = useState<Board[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState<string>("");
   const [tasks, setTasks] = useState<Task[]>([]);
+  // ISS-043: the list hit the client page ceiling (more exist than were loaded).
+  const [boardsTruncated, setBoardsTruncated] = useState<boolean>(false);
+  const [tasksTruncated, setTasksTruncated] = useState<boolean>(false);
   const [activeDragTask, setActiveDragTask] = useState<Task | null>(null);
   const [updatingTaskIds, setUpdatingTaskIds] = useState<string[]>([]);
 
@@ -332,6 +337,8 @@ export const KanbanPage: React.FC = () => {
     setSelectedBoardId("");
     setError(null);
     setBoardsError(null);
+    setBoardsTruncated(false);
+    setTasksTruncated(false);
 
     if (!currentWorkspace?._id) {
       setBoards([]);
@@ -343,8 +350,9 @@ export const KanbanPage: React.FC = () => {
       setError(null);
       setBoardsError(null);
       try {
-        const workspaceBoards = await getWorkspaceBoards(currentWorkspace._id);
+        const { items: workspaceBoards, truncated } = await getWorkspaceBoardsPaged(currentWorkspace._id);
         setBoards(workspaceBoards);
+        setBoardsTruncated(truncated);
         if (workspaceBoards.length > 0) {
           setSelectedBoardId(workspaceBoards[0]._id);
         }
@@ -373,12 +381,13 @@ export const KanbanPage: React.FC = () => {
       setTasksLoading(true);
       setError(null);
       try {
-        const workspaceTasks = await getWorkspaceTasks(
+        const { items: workspaceTasks, truncated } = await getWorkspaceTasksPaged(
           currentWorkspace._id,
           selectedBoardId,
           null
         );
         setTasks(workspaceTasks);
+        setTasksTruncated(truncated);
       } catch (err: any) {
         const message =
           err.response?.data?.message || err.message || "Failed to load tasks";
@@ -602,6 +611,9 @@ export const KanbanPage: React.FC = () => {
           <span>{error}</span>
         </div>
       )}
+
+      {boardsTruncated && <ListTruncatedNotice shown={boards.length} noun="boards" />}
+      {tasksTruncated && <ListTruncatedNotice shown={tasks.length} noun="tasks on this board" />}
 
       {/* Main Board Content Area */}
       {boardsLoading || tasksLoading ? (

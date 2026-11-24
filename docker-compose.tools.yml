@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------------------
+# OPTIONAL admin tools. Not started by a plain `docker compose up`.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tools.yml up -d mongo-express
+#   docker compose -f docker-compose.yml -f docker-compose.tools.yml stop mongo-express
+#
+# mongo-express logs in to MongoDB as the ROOT user and gives full read/write
+# access to every database to whoever passes its basic auth. It is therefore:
+# - published on 127.0.0.1 only (host port MONGO_EXPRESS_HOST_PORT, default 8081);
+# - protected by basic auth with REQUIRED credentials (MONGO_EXPRESS_USERNAME /
+#   MONGO_EXPRESS_PASSWORD in the root .env; no defaults);
+# - not restarted automatically after a reboot (restart: on-failure).
+# Stop it when you are done.
+# ---------------------------------------------------------------------------
+
+services:
+  mongo-express:
+    # Pinned: basic auth depends on this image's ME_CONFIG_BASICAUTH* semantics.
+    # Re-check them (tests/compose-security.runtime.test.ts) before changing the tag.
+    image: mongo-express:1.0.2
+    container_name: researchmind-mongo-express
+    restart: on-failure
+
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+    ports:
+      - "127.0.0.1:${MONGO_EXPRESS_HOST_PORT:-8081}:8081"
+
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_ROOT_USERNAME:?set MONGO_ROOT_USERNAME in the root .env (see .env.example)}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_ROOT_PASSWORD:?set MONGO_ROOT_PASSWORD in the root .env (see .env.example)}
+
+      ME_CONFIG_BASICAUTH: "true"
+      ME_CONFIG_BASICAUTH_USERNAME: ${MONGO_EXPRESS_USERNAME:?set MONGO_EXPRESS_USERNAME in the root .env (see .env.example)}
+      ME_CONFIG_BASICAUTH_PASSWORD: ${MONGO_EXPRESS_PASSWORD:?set MONGO_EXPRESS_PASSWORD in the root .env (see .env.example)}

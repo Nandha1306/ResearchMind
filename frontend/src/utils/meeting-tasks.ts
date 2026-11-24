@@ -13,6 +13,25 @@ export interface ActionItemInput {
 export const MAX_TASKS_PER_IMPORT = 50;
 const MAX_TITLE_LENGTH = 200;
 
+/** Server limits for meeting notes (packages/validation/schemas/ai.schema.ts), after trimming. */
+export const MIN_MEETING_NOTES_LENGTH = 10;
+export const MAX_MEETING_NOTES_LENGTH = 50_000;
+
+/**
+ * ISS-039: why the server would reject these notes, or null when it accepts
+ * them. Same rule as summarizeMeetingSchema (trim, then 10..50,000 characters).
+ */
+export const meetingNotesProblem = (text: string): string | null => {
+  const length = text.trim().length;
+  if (length < MIN_MEETING_NOTES_LENGTH) {
+    return `Meeting notes must contain at least ${MIN_MEETING_NOTES_LENGTH} characters`;
+  }
+  if (length > MAX_MEETING_NOTES_LENGTH) {
+    return `Meeting notes cannot exceed ${MAX_MEETING_NOTES_LENGTH.toLocaleString("en-US")} characters`;
+  }
+  return null;
+};
+
 /**
  * A due date only when the meeting gave an unambiguous calendar date
  * (YYYY-MM-DD). Free text such as "next Friday" or "03/04" is NOT guessed --
@@ -28,6 +47,18 @@ export const toIsoDueDate = (due: string | null | undefined): string | null => {
     date.getUTCMonth() === month - 1 &&
     date.getUTCDate() === day;
   return valid ? date.toISOString() : null;
+};
+
+/**
+ * Display a due date (ARC-003). Due dates are calendar dates stored as UTC
+ * midnight (see toIsoDueDate and the task forms), so they are formatted in
+ * UTC: in the browser's own zone they showed the previous day west of UTC.
+ * Invalid or missing input gives "".
+ */
+export const formatDueDate = (iso: string | null | undefined, locale?: string): string => {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(locale, { timeZone: "UTC" });
 };
 
 /** FNV-1a: a short, stable fingerprint of the selected items. */

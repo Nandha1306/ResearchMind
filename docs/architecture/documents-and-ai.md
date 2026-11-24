@@ -52,15 +52,16 @@ flowchart TD
 
 `uploadDocument` in `services/document-service/src/services/document.service.ts`:
 
-1. multer saves the file to `uploads/<timestamp>-<original name>`. The extension filter and the 10 MB limit are applied here.
+1. multer saves the file to `UPLOAD_TMP_DIR` (default `<OS temp>/researchmind-uploads`) under a random name `rm-upload-<uuid>.pdf|docx`; the client's file name never becomes part of a path (SEC-024, Wave 5). The extension filter and the 10 MB limit are applied here. At startup document-service deletes its own leftover temp files older than 1 hour from that folder only. The old cwd-relative `services/document-service/uploads` folder is no longer written to and is never swept automatically (user-run script: `src/scripts/legacy-data-hygiene.ts --delete-legacy-uploads`).
 2. `workspaceId` (a form field) is required. The caller must be a member of that workspace (shared membership check; `400`/`403`/`503`). The temporary file is deleted on every rejection.
-3. The file's magic bytes are checked, then the text is extracted.
-4. The original file is uploaded to Cloudinary (folder `researchmind/documents`, `public_id` = the temporary file name without its extension). If that fails, the answer is `502`.
-5. A `Document` record is created. `uploadedBy` comes from the JWT; storage fields, `extractedText` and `embeddingStatus: "pending"` are set by the server.
-6. The embedding job is pushed with `RPUSH` (section 2.3). If the push fails, the document is set to `failed`. No `embeddingError` is recorded on this path, so the UI shows a failure without a reason. The recovery sweep retries it later.
-7. The temporary file is removed and the client gets `201` with the document (including `extractedText`).
+3. The file's magic bytes are checked, then the text is extracted. A PDF must start with `%PDF-`, optionally after a UTF-8 BOM and ASCII whitespace within the first 1024 bytes; anything else before it (for example an HTML page with a PDF appended) is `415` and nothing is stored (SEC-020, Wave 5).
+4. The original file is uploaded to Cloudinary as a **private** asset (folder `researchmind/documents`, `type: "authenticated"`, `public_id` = a random UUID, `overwrite: false`; SEC-005). If that fails, the answer is `502`. The file is only ever delivered through `GET /api/documents/:id/file` (members only; document-service streams it), never by URL.
+5. A `Document` record is created. `uploadedBy` comes from the JWT; storage fields, `extractedText` and `embeddingStatus: "pending"` are set by the server. If creating the record fails, the Cloudinary asset uploaded in step 4 is destroyed again before the error is returned, so no orphaned file remains (SEC-013, Wave 4).
+6. **No extractable text (ARC-001, Wave 4).** When the extracted text is empty once pdf-parse page markers (`-- 1 of 1 --`) are removed, for example a scanned PDF, the record is created with `embeddingStatus: "failed"`, `embeddingError: "No extractable text"` and empty text, and no job is pushed. The UI shows that reason.
+7. Otherwise the embedding job is pushed with `RPUSH` (section 2.3). If the push fails, the document is set to `failed`. No `embeddingError` is recorded on this path, so the UI shows a failure without a reason. The recovery sweep retries it later.
+8. The temporary file is removed and the client gets `201` with the document (including `extractedText`).
 
-`POST /api/documents` (metadata only, not used by the frontend) creates a `pending` record with no file and empty text. It is not queued by the request. The recovery sweep queues it about 10 minutes later. The worker then fails it with "Document contains no usable text", and this repeats until all 3 attempts are used. This is how the code behaves, not an intended feature.
+The metadata-only `POST /api/documents` route was **removed in Wave 4 (ARC-001)**; it created `pending` records without a file or text that were re-queued until their attempts ran out. Existing records of that kind are marked `failed` with `No extractable text` by the recovery sweep ([background-jobs.md](../operations/background-jobs.md#6-recovery-sweep), step 2b). Its unused `packages/validation/schemas/document.schema.ts` (`createDocumentSchema`) was deleted in Wave 5 (ARC-009).
 
 ### 2.2 The Document record
 
@@ -69,13 +70,14 @@ flowchart TD
 | Field | Meaning |
 |---|---|
 | `workspaceId`, `uploadedBy`, `originalName`, `fileType`, `fileSize` | Metadata. `uploadedBy` comes from the JWT. |
-| `cloudinaryUrl`, `cloudinaryPublicId` | Storage location (server-owned) |
+| `cloudinaryPublicId`, `cloudinaryResourceType`, `cloudinaryDeliveryType`, `cloudinaryFormat` | Storage location (server-owned, **never returned to clients**; responses carry `hasFile` instead). `cloudinaryDeliveryType` is `authenticated` for uploads since SEC-005 and null on legacy public assets |
+| `cloudinaryUrl` | Legacy public delivery URL (null for new uploads). Used server-side only, and only on `https://res.cloudinary.com/<cloud>/…` |
 | `extractedText` | Full text. Left out of the list endpoint and returned by `GET /:id`. |
 | `embeddingStatus` | `pending` / `indexing` / `indexed` / `failed` |
 | `embeddingAttempts` | Number of claims made. A manual re-index resets it to 0. |
 | `claimSequence` | Fencing token, incremented on every claim and never reset |
 | `indexingStartedAt` | Time of the current claim |
-| `embeddingError` | Failure reason (at most 500 characters stored; the worker sends at most 300) |
+| `embeddingError` | Failure reason. Since Wave 5 (RT-007) the worker stores fixed texts only (`Indexing failed`, `Indexing timed out`, `Document contains no usable text`); provider error details go to the redacted log, never to the record. API responses show only known reasons; any other stored text (older records) is returned as `Indexing failed`, without rewriting the record |
 | `deletedAt` | Soft-delete marker. When set, the record is hidden from reads and cannot be claimed or marked indexed. |
 
 ### 2.3 Queue and job payload
@@ -83,10 +85,10 @@ flowchart TD
 Queue: the Redis list `researchmind:embedding:jobs` (`services/document-service/src/queues/embedding.queue.ts`). Each job is a JSON string:
 
 ```json
-{ "documentId": "...", "workspaceId": "...", "uploadedBy": "...", "extractedText": "<full text>", "fileType": "pdf" }
+{ "documentId": "...", "workspaceId": "..." }
 ```
 
-The job carries the **whole extracted text**. Jobs are created on upload, on manual re-index and by the recovery sweep. How jobs are delivered, claimed, retried and recovered is covered in [background-jobs.md](../operations/background-jobs.md).
+The job is a **pointer** (SEC-006/ARC-007): no text is written to Redis. The worker fetches the text, uploader and file type for its claim from document-service (`GET /internal/documents/:id/embedding-source`). Jobs are created on upload, on manual re-index and by the recovery sweep. How jobs are delivered, claimed, retried and recovered is covered in [background-jobs.md](../operations/background-jobs.md).
 
 ### 2.4 Worker processing (ai-service)
 
@@ -96,6 +98,7 @@ The job carries the **whole extracted text**. Jobs are created on upload, on man
    - Not claimable (`in-progress`, `already-indexed`, `retry-limit`, `deleted`, `not-found`): the job is skipped.
    - A claim response with no `claimToken` or no `workspaceId` is treated as an error, and the document is not processed.
 2. **Workspace check.** The claimed document's `workspaceId` must equal the job's. Otherwise the document is marked `failed` ("Embedding job did not match the document's workspace") and the job is skipped.
+2a. **Fetch the text.** `GET /internal/documents/:id/embedding-source?workspaceId=&claimToken=` returns `extractedText`, `uploadedBy` and `fileType` for the current claim only. `409` (claim superseded) discards the job; `404`/`410` (deleted) writes nothing. Any text, uploader or file type in the queue entry (older producers) is ignored.
 3. **Chunk.** `chunkText()` (`services/chunking.service.ts`):
    - Normalises line endings and form feeds, removes `-- N of M --` page markers, and collapses whitespace.
    - Splits with LangChain `RecursiveCharacterTextSplitter`: `chunkSize` 400 and `chunkOverlap` 60, measured in *estimated* tokens (`ceil(characters / 4)`), with separators `\n\n`, `\n`, `. `, `! `, `? `, space, and the empty string.
@@ -112,6 +115,7 @@ The job carries the **whole extracted text**. Jobs are created on upload, on man
    - `404`/`410` (deleted meanwhile): the worker deletes the vectors it just wrote.
    - `409` (claim superseded): the result is discarded.
 7. **On error.** The worker reports `{ status: "failed", error: <message, at most 300 characters>, claimToken }` and rethrows. The worker loop logs the error and continues.
+8. **Deadline.** Steps 1–6 run under a job deadline (`EMBEDDING_JOB_TIMEOUT_MS`, 10 min) and per-call limits (Voyage 30 s, Pinecone 20 s, text fetch 30 s). A call that never answers fails the job (step 7) instead of holding the worker; see [background-jobs.md](../operations/background-jobs.md) §3.
 
 ### 2.5 Status states
 
@@ -161,7 +165,7 @@ stateDiagram-v2
 1. Load the document and check that the caller is a member of the document's stored workspace.
 2. Atomically set `deletedAt`. The document is now hidden from reads, cannot be claimed, and cannot be marked indexed. If two deletes race, the second gets `404`.
 3. Ask ai-service to delete the vectors: `DELETE /internal/vectors/workspaces/:workspaceId/documents/:documentId` (`X-Internal-Token`, 15 s timeout). The ids come from the stored record. ai-service checks that both are ObjectIds and runs `deleteMany` filtered on `documentId` in that namespace.
-4. **If vector deletion fails**, `deletedAt` is cleared (rollback) and the client gets `503` "could not be removed from the search index". The document stays visible.
+4. **If vector deletion fails**, `deletedAt` is cleared (rollback) and the client gets `503` "could not be removed from the search index". The document stays visible. **Exception (RT-010, Wave 5):** if the stored record has `claimSequence: 0` (checked on the raw field with `Document.exists`, never through a default), it was never claimed and has no vectors, so the delete continues (warning logged). A legacy record without the field is treated as possibly indexed. Re-index writes with `updateOne`, so it never stamps a default `claimSequence: 0` onto a legacy record.
 5. Destroy the Cloudinary asset, unless **another record shares the same `cloudinaryPublicId`** (guard). A failure here is logged and does not block the deletion. Then delete the record.
 6. If the process stops after step 2, the recovery sweep finishes deletions older than 5 minutes (`STALE_DELETION_MS`) by repeating steps 3 and 5.
 
@@ -176,8 +180,13 @@ A worker that was mid-job when the document was deleted receives `404`/`410` on 
 - Body validation (`packages/validation/schemas/ai.schema.ts`): `workspaceId` must be a 24-hex id; `query` is trimmed and must be 1–2000 characters; `topK` is an integer 1–10, default 5. The service also clamps `topK` to 1–10.
 - Then the membership check (`400`/`403`/`503`).
 - The query is embedded with `voyageQueryEmbeddings.embedQuery` (`inputType: "query"`, same model and dimension). The dimension is checked. On 429 there are up to 3 attempts, waiting 15 s and then 30 s.
-- Pinecone `query` runs in namespace `workspaceId` with `topK` and `includeMetadata: true`. Matches without a score or without metadata are dropped. Each result has `documentId`, `workspaceId`, `chunkIndex`, `text`, `score` and `fileType` from the metadata.
-- **There is no score threshold, no re-ranking, and no filter on `embeddingModel`.**
+- Pinecone `query` runs in namespace `workspaceId` with `topK` and `includeMetadata: true` (bounded by `PINECONE_TIMEOUT_MS`). Matches without a score or without metadata are dropped. Each result has `documentId`, `workspaceId`, `chunkIndex`, `text`, `score` and `fileType` from the metadata.
+- **Live-document check (SEC-012, retrieval side).** The remaining matches' document ids are checked in one batched call to document-service (`POST /internal/documents/live`); matches whose document is deleted, missing or in another workspace (or whose metadata names another workspace) are dropped before anything is returned, prompted or cited. If the check cannot run, retrieval fails closed (search answers `502` with a fixed message since Wave 5, RT-011; the answer stream emits the retrieval error).
+- **Usable matches (Wave 4, `selectUsableMatches`).** Before the live-document check, a match is dropped when:
+  - its stored `embeddingModel` differs from `VOYAGE_MODEL` (ISS-027): vectors from different models are not comparable. Vectors without the label (indexed before the label existed, with `voyage-3`) are kept. After changing `VOYAGE_MODEL`, existing documents are not found until they are re-indexed; a warning is logged with the number of ignored matches.
+  - its score is below `MIN_RELEVANCE_SCORE` (default `0.2`, ISS-028). If nothing is left, the answer takes the "no relevant document chunks" path and cites nothing. The threshold is not calibrated against an evaluation set.
+- The live-document check also returns each document's file name, used as the source title in the prompt (ISS-029).
+- There is no re-ranking.
 
 ---
 
@@ -206,19 +215,17 @@ The client (`frontend/src/utils/ai-stream.ts`) treats only `done` as a complete 
 
 ### Prompt and model call
 
-- Context (`services/context.service.ts`) is built from each retrieved chunk as:
+- Context (`services/context.service.ts`, SEC-011 and ISS-029, Wave 4) wraps each retrieved chunk in a block tagged with a random per-request nonce:
 
   ```text
-  [Source N]
-  Document ID
-  Chunk Index
-  File Type
-  Relevance Score
+  <source-<nonce> id="N" title="<document file name>" type="pdf" relevance="0.8123">
   <chunk text>
+  </source-<nonce>>
   ```
 
-  Blocks are separated by `---`. With no matches, the context is "No relevant document chunks found in this workspace."
-- The system prompt (`prompts/rag.prompt.ts`) tells the model to answer only from the context, to say when the context is insufficient, to use Markdown and LaTeX, and to cite with `[Source N]`.
+  Chunk text and titles are neutralised first (`<`/`>` become `‹`/`›`, `[Source` becomes `[source-text`, the nonce is removed; titles also lose quotes and newlines and are capped at 200 characters), so a document cannot close its block, open another one or forge a citation header. Sources are labelled by file name ("Untitled document" if unknown), never by database id. With no matches, the context is "No relevant document chunks found in this workspace."
+- The system prompt (`prompts/rag.prompt.ts`) tells the model to answer only from the context, to say when the context is insufficient, to use Markdown and LaTeX, to cite with `[Source N]` using only the ids present, and (rule 8) that everything inside a source block is **untrusted data**, never instructions.
+- The frontend renders the answer as Markdown with KaTeX through `MathMarkdown` with hardened options (ARC-002): raw HTML is dropped, images are not rendered, links are kept only for `http(s)` URLs and open with `rel="noopener noreferrer nofollow"`, KaTeX runs without `trust`.
 - The model is called with `grokClient.chat.completions.create({ model: XAI_MODEL, temperature: 0.2, max_tokens: 1500, stream: true })` (`services/grok.service.ts`).
 
 ### Timeouts
@@ -236,7 +243,7 @@ Neither value is validated. A non-numeric value becomes `NaN` (see [security.md]
 
 ### Client disconnects
 
-If the user stops the answer (`AbortController` in `frontend/src/hooks/useAiQuery.ts`) or closes the tab, generation continues to the end and the session is still saved: there is no disconnect handling in the controller (`query.controller.ts` registers no `close` handler). This comes from reading the code; it was not exercised against a live provider.
+If the user stops the answer (`AbortController` in `frontend/src/hooks/useAiQuery.ts`) or closes the tab, the controller's response `close` handler aborts generation (ISS-015, Wave 4): the abort signal reaches the LLM request through `runRagStreamQuery` and `streamGrokResponse`, no further event is written, and **no session is saved — partial answers are never persisted**. A disconnect during retrieval prevents the LLM call. The abort is not logged as an LLM failure. Verified with a stubbed provider (`tests/ai-stream-disconnect.test.ts`).
 
 During shutdown, open streams get the 5 s server grace period and are then closed. The gateway ends the client response when the upstream response closes before completing.
 
@@ -245,9 +252,9 @@ During shutdown, open streams get the 5 s server grace period and are then close
 ## 5. Session history
 
 - Each completed answer is saved as an `AISession` (`services/ai-service/src/models/AISession.ts`) with `workspaceId`, `userId`, `query`, `answer`, `sources` (`documentId`, `chunkIndex`, `score`; `fileType` is not in the schema and is dropped), `aiModel` and timestamps. A failed save is logged and `done.sessionId` is `null`.
-- `GET /api/ai/sessions/workspace/:workspaceId` returns the **20 most recent sessions for the whole workspace**, from every member (newest first), after the membership check.
+- **History is private (SEC-023, Wave 5).** `GET /api/ai/sessions/workspace/:workspaceId` returns, after the membership check, only the caller's own sessions in that workspace (the owner included), newest first, paged (default 20, cap 100, cursor; index `{ workspaceId, userId, createdAt, _id }`). Before Wave 5 it returned the 20 most recent sessions of every member.
 - There is no conversational memory. `ragQuerySchema` accepts an optional `sessionId` (up to 100 characters), but nothing uses it. Each question is answered on its own.
-- Session records are never deleted, including when the documents they cite are deleted.
+- Session records are never deleted, including when the documents they cite are deleted. Since Wave 4 (SEC-012 a) the history route redacts a source whose document is deleted or gone, in place (`{ documentId: "", chunkIndex, score, deleted: true }`), with one batched check per request; if the check cannot run, every source is redacted. The stored answer text is unchanged.
 
 ---
 
@@ -256,7 +263,7 @@ During shutdown, open streams get the 5 s server grace period and are then close
 `services/ai-service/src/services/meeting-summarizer.service.ts`:
 
 - Input: `workspaceId` (membership is checked by `requireWorkspaceMembership`) and `text` (trimmed, 10–50 000 characters). Rate limit: 20 per hour per user at the gateway.
-- One non-streaming call with `temperature: 0.2`, `max_tokens: 4096` (`MEETING_SUMMARY_MAX_TOKENS`), and `timeout: LLM_REQUEST_TIMEOUT_MS`. The system prompt requires JSON only, with exactly these keys:
+- One non-streaming call with `temperature: 0.2`, `max_tokens: 4096` (`MEETING_SUMMARY_MAX_TOKENS`), `timeout: LLM_REQUEST_TIMEOUT_MS` and, since Wave 4, `response_format: { type: "json_object" }` (ISS-030). If the provider rejects the request with a 400 (for example a model without JSON mode), the call is retried **once** without `response_format`; other failures are not retried. The prompt mentions JSON in both messages, as JSON mode requires. JSON mode was not verified against the live provider (user action: one real summary after deploying). The system prompt requires JSON only, with exactly these keys:
   - `meeting_date`
   - `attendees`
   - `summary`
@@ -287,7 +294,7 @@ During shutdown, open streams get the 5 s server grace period and are then close
 |---|---|
 | Voyage `voyage-3` with `outputDimension` 1024, and the SDK's 429 error shapes | Dimension checks and backoff rely on them |
 | Pinecone `deleteMany` by metadata filter on the configured index type | Document deletion and re-indexing rely on it. A 404 is ignored. |
-| Pinecone startup check (`listIndexes`) | If Pinecone is unreachable at startup, the service logs a warning and starts anyway |
+| Pinecone startup check (`listIndexes`) | If Pinecone is unreachable at startup, the service logs a warning and starts anyway. A rejected key (401) stops the server and the worker since Wave 4 (RT-006); this was tested with the SDK's own error object, not a live account |
 | Default LLM model ids (`openai/gpt-oss-120b` on Groq, `grok-4.5` on xAI) and streaming deltas in OpenAI format | Not checked at startup. A wrong id only shows up as `error` events at query time. |
 | Cloudinary `image` delivery for PDFs and `raw` for DOCX, and `destroy` with the matching resource type | Viewing and deleting files rely on them |
 | Answer quality, citation faithfulness and prompt-injection resistance | Not evaluated |

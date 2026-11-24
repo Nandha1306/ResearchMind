@@ -14,6 +14,7 @@ import { startEmbeddingWorker, stopEmbeddingWorker } from "./workers/embedding.w
 import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
 import { closeRedisClient } from "../../../packages/shared/lifecycle/redis";
 import { validateVectorIndexAtStartup } from "./utils/verify-pinecone";
+import { describeErrorForLog } from "../../../packages/shared/errors/safe-error";
 
 /**
  * Standalone embedding worker process (`npm run dev:worker` / `start:worker`).
@@ -47,7 +48,7 @@ const startWorker = async () => {
   } catch (error) {
     console.error(
       "Failed to start embedding worker:",
-      error
+      describeErrorForLog(error)
     );
 
     process.exit(1);

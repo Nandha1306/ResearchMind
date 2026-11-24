@@ -10,7 +10,7 @@ import {
   deleteBoardHandler,
 } from "../controllers/board.controller";
 
-import { requireWorkspaceMembership } from "../middlewares/workspace.middleware";
+import { requireWorkspaceMembership, requireWorkspaceOwner } from "../middlewares/workspace.middleware";
 
 const router = Router();
 
@@ -42,10 +42,11 @@ router.patch(
   updateBoardHandler
 );
 
+/** Delete a board (workspace owner only; SEC-010). */
 router.delete(
   "/workspaces/:workspaceId/boards/:id",
   authenticate,
-  requireWorkspaceMembership,
+  requireWorkspaceOwner("Only the workspace owner can delete boards."),
   deleteBoardHandler
 );
 

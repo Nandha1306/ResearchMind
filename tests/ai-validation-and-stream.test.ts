@@ -168,6 +168,52 @@ describe("P1-A23: meeting summary normalisation and failures (fixture LLM output
     assert.strictEqual(lastRequest.max_tokens, summarizer.MEETING_SUMMARY_MAX_TOKENS);
   });
 
+  test("ISS-030: the request asks for JSON mode, and the prompt mentions JSON", async () => {
+    reply = completion(JSON.stringify({ summary: "s" }));
+    await summarizer.generateMeetingSummary("Meeting notes with enough text.");
+    assert.deepStrictEqual(lastRequest.response_format, { type: "json_object" });
+    assert.match(lastRequest.messages.map((m: any) => m.content).join("\n"), /JSON/);
+  });
+
+  test("ISS-030: a provider 400 in JSON mode is retried once without it; never more, and other failures are not retried", async (t) => {
+    t.mock.method(console, "warn", () => {});
+    t.mock.method(console, "error", () => {});
+    const requests: any[] = [];
+    const saved = grokClient.chat.completions.create;
+    try {
+      grokClient.chat.completions.create = async (request: any) => {
+        requests.push(request);
+        if (request.response_format) {
+          throw Object.assign(new Error("400 response_format json_object is not supported"), { status: 400 });
+        }
+        return completion(JSON.stringify({ summary: "fallback ok" }));
+      };
+      const summary = await summarizer.generateMeetingSummary("Meeting notes with enough text.");
+      assert.strictEqual(summary.summary, "fallback ok");
+      assert.strictEqual(requests.length, 2);
+      assert.deepStrictEqual(requests[0].response_format, { type: "json_object" });
+      assert.strictEqual(requests[1].response_format, undefined);
+
+      requests.length = 0;
+      grokClient.chat.completions.create = async (request: any) => {
+        requests.push(request);
+        throw Object.assign(new Error("400 bad request"), { status: 400 });
+      };
+      await assert.rejects(summarizer.generateMeetingSummary("Meeting notes with enough text."), (e: any) => e.name === "LlmUnavailableError");
+      assert.strictEqual(requests.length, 2, "exactly one fallback attempt, no loop");
+
+      requests.length = 0;
+      grokClient.chat.completions.create = async (request: any) => {
+        requests.push(request);
+        throw Object.assign(new Error("500 upstream"), { status: 500 });
+      };
+      await assert.rejects(summarizer.generateMeetingSummary("Meeting notes with enough text."), (e: any) => e.name === "LlmUnavailableError");
+      assert.strictEqual(requests.length, 1, "a non-400 failure is not retried");
+    } finally {
+      grokClient.chat.completions.create = saved;
+    }
+  });
+
   test("a reply cut off at the token limit is a clear failure, never a partial summary", async () => {
     reply = completion('{"summary": "half a sum', "length");
     await assert.rejects(summarizer.generateMeetingSummary("Meeting notes with enough text."), (e: any) => e.name === "LlmUnavailableError" && e.statusCode === 502);
@@ -189,12 +235,34 @@ describe("P1-A21: gateway ends the client stream when ai-service dies mid-answer
   let gateway: { url: string; close: () => Promise<void> };
   let aiStub: { url: string; close: () => Promise<void> };
   let rateLimitRedis: any;
-  let behaviour: "die" | "complete" = "die";
+  let behaviour: "die" | "complete" | "slow" = "die";
+  // ARC-012: what the slow upstream saw.
+  const slow = { written: 0, closedAt: -1, writtenAtClose: -1 };
 
   before(async () => {
     aiStub = await listen((req, res) => {
       res.writeHead(200, { "Content-Type": "text/event-stream" });
       res.write(`event: token\ndata: ${JSON.stringify({ text: "partial " })}\n\n`);
+      if (behaviour === "slow") {
+        // A long answer: one token every 50 ms, 40 in all (~2 s).
+        const timer = setInterval(() => {
+          if (res.destroyed || res.writableEnded) return;
+          slow.written += 1;
+          res.write(`event: token\ndata: ${JSON.stringify({ text: `t${slow.written}` })}\n\n`);
+          if (slow.written >= 40) {
+            clearInterval(timer);
+            res.end(`event: done\ndata: ${JSON.stringify({ sessionId: "s1", unverifiedCitations: [] })}\n\n`);
+          }
+        }, 50);
+        res.on("close", () => {
+          clearInterval(timer);
+          if (slow.closedAt < 0) {
+            slow.closedAt = Date.now();
+            slow.writtenAtClose = slow.written;
+          }
+        });
+        return;
+      }
       if (behaviour === "die") {
         setTimeout(() => req.socket.destroy(), 50); // crash mid-stream
       } else {
@@ -244,5 +312,54 @@ describe("P1-A21: gateway ends the client stream when ai-service dies mid-answer
     behaviour = "complete";
     const text = await ask();
     assert.match(text, /partial [\s\S]*answer[\s\S]*event: done/);
+  });
+
+  /*
+   * ARC-012 guard: a client that leaves mid-answer must close the upstream
+   * stream too (ai-service then aborts generation and saves nothing, ISS-015,
+   * tests/ai-stream-disconnect.test.ts). http-proxy aborts the upstream
+   * request when the client goes; this pins it before any proxy upgrade.
+   */
+  test("ARC-012: a client disconnect at the gateway closes the upstream stream promptly", async () => {
+    behaviour = "slow";
+    const { default: http } = await import("node:http");
+    const body = JSON.stringify({ workspaceId: WS, query: "q" });
+    const { port, hostname } = new URL(gateway.url);
+    const leftAt = await new Promise<number>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: hostname,
+          port: Number(port),
+          method: "POST",
+          path: "/api/ai/query",
+          agent: false,
+          headers: {
+            "Content-Type": "application/json",
+            "Content-Length": String(Buffer.byteLength(body)),
+            Authorization: `Bearer ${token}`,
+          },
+        },
+        (res) => {
+          let chunks = 0;
+          res.on("data", () => {
+            chunks += 1;
+            if (chunks === 3) {
+              const at = Date.now();
+              req.destroy(); // the user closed the tab
+              resolve(at);
+            }
+          });
+          res.on("end", () => reject(new Error("the stream completed before the client left")));
+        }
+      );
+      req.on("error", () => undefined);
+      req.end(body);
+    });
+    // Wait long enough for the full answer (40 x 50 ms) had it kept going.
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.ok(slow.closedAt >= 0, "the upstream stream was never closed");
+    assert.ok(slow.closedAt - leftAt < 1000, `upstream closed ${slow.closedAt - leftAt} ms after the client left`);
+    assert.strictEqual(slow.written, slow.writtenAtClose, "the upstream kept writing after the close");
+    assert.ok(slow.written < 40, "the upstream produced the whole answer for a client that had left");
   });
 });

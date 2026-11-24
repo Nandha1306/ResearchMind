@@ -26,6 +26,20 @@ let AppError: typeof import("../packages/shared/errors/AppError").AppError;
 
 const sha256 = (value: string) => crypto.createHash("sha256").update(value).digest("hex");
 
+/*
+ * User ids are 24-hex ObjectId strings, as auth-service issues them. Since
+ * Wave 5 (SEC-019 c) every verifier refuses any other userId shape, so the
+ * former "user-1" / "u-9" style fixtures were changed to valid ids; every
+ * assertion is unchanged.
+ */
+const USER_1 = "665f1c2b9d3e4a0000000001";
+const USER_42 = "665f1c2b9d3e4a0000000042";
+const USER_5 = "665f1c2b9d3e4a0000000005";
+const USER_7 = "665f1c2b9d3e4a0000000007";
+const USER_8 = "665f1c2b9d3e4a0000000008";
+const USER_9 = "665f1c2b9d3e4a0000000009";
+const ADMIN_ID = "665f1c2b9d3e4a00000000ad";
+
 before(async () => {
   jwtUtils = await import("../services/auth-service/src/utils/jwt");
   authService = await import("../services/auth-service/src/services/auth.service");
@@ -36,22 +50,22 @@ before(async () => {
 
 describe("JWT utilities (auth-service/src/utils/jwt.ts)", () => {
   test("access token round-trips and carries the userId", () => {
-    const token = jwtUtils.generateAccessToken({ userId: "user-1" });
-    assert.strictEqual(jwtUtils.verifyAccessToken(token).userId, "user-1");
+    const token = jwtUtils.generateAccessToken({ userId: USER_1 });
+    assert.strictEqual(jwtUtils.verifyAccessToken(token).userId, USER_1);
   });
 
   test("a refresh token is rejected where an access token is required", () => {
-    const refresh = jwtUtils.generateRefreshToken({ userId: "user-1" });
+    const refresh = jwtUtils.generateRefreshToken({ userId: USER_1 });
     assert.throws(() => jwtUtils.verifyAccessToken(refresh));
   });
 
   test("alg:none and tampered tokens are rejected (algorithm pinned to HS256)", () => {
-    const unsigned = jwt.sign({ userId: "user-1" }, "", { algorithm: "none" });
+    const unsigned = jwt.sign({ userId: USER_1 }, "", { algorithm: "none" });
     assert.throws(() => jwtUtils.verifyAccessToken(unsigned));
 
-    const valid = jwtUtils.generateAccessToken({ userId: "user-1" });
+    const valid = jwtUtils.generateAccessToken({ userId: USER_1 });
     const [h, , s] = valid.split(".");
-    const forgedPayload = Buffer.from(JSON.stringify({ userId: "admin" })).toString("base64url");
+    const forgedPayload = Buffer.from(JSON.stringify({ userId: ADMIN_ID })).toString("base64url");
     assert.throws(() => jwtUtils.verifyAccessToken(`${h}.${forgedPayload}.${s}`));
   });
 });
@@ -96,7 +110,7 @@ describe("Refresh rotation and reuse detection (auth.service.refreshAccessToken)
   };
 
   test("a known token is claimed atomically and exchanged for a new pair", async () => {
-    const presented = jwtUtils.generateRefreshToken({ userId: "user-42" });
+    const presented = jwtUtils.generateRefreshToken({ userId: USER_42 });
     stubModel({ claimed: { _id: "stored-id", expiresAt: new Date() } });
 
     const result = await authService.refreshAccessToken(presented);
@@ -106,20 +120,20 @@ describe("Refresh rotation and reuse detection (auth.service.refreshAccessToken)
     assert.ok(update.$set.rotatedAt instanceof Date);
     assert.strictEqual(calls.deleteMany, undefined, "must not revoke all sessions on a normal refresh");
     assert.strictEqual(calls.create.length, 1);
-    assert.strictEqual(calls.create[0][0].userId, "user-42");
+    assert.strictEqual(calls.create[0][0].userId, USER_42);
     assert.strictEqual(calls.create[0][0].tokenHash, sha256(result.refreshToken));
     assert.notStrictEqual(result.refreshToken, presented);
-    assert.strictEqual(jwtUtils.verifyAccessToken(result.accessToken).userId, "user-42");
+    assert.strictEqual(jwtUtils.verifyAccessToken(result.accessToken).userId, USER_42);
   });
 
   test("refresh tokens issued in the same second are unique (jti)", () => {
-    const a = jwtUtils.generateRefreshToken({ userId: "user-1" });
-    const b = jwtUtils.generateRefreshToken({ userId: "user-1" });
+    const a = jwtUtils.generateRefreshToken({ userId: USER_1 });
+    const b = jwtUtils.generateRefreshToken({ userId: USER_1 });
     assert.notStrictEqual(a, b);
   });
 
   test("a token rotated moments ago by a concurrent request is rejected WITHOUT revoking sessions", async () => {
-    const presented = jwtUtils.generateRefreshToken({ userId: "user-5" });
+    const presented = jwtUtils.generateRefreshToken({ userId: USER_5 });
     stubModel({ claimed: null, existing: { rotatedAt: new Date() } });
 
     await assert.rejects(authService.refreshAccessToken(presented), (err: any) => {
@@ -132,7 +146,7 @@ describe("Refresh rotation and reuse detection (auth.service.refreshAccessToken)
   });
 
   test("reuse of a validly-signed but unknown token revokes ALL of the user's sessions", async () => {
-    const reused = jwtUtils.generateRefreshToken({ userId: "user-7" });
+    const reused = jwtUtils.generateRefreshToken({ userId: USER_7 });
     stubModel({ claimed: null, existing: null });
 
     await assert.rejects(authService.refreshAccessToken(reused), (err: any) => {
@@ -140,12 +154,12 @@ describe("Refresh rotation and reuse detection (auth.service.refreshAccessToken)
       assert.strictEqual(err.statusCode, 401);
       return true;
     });
-    assert.deepStrictEqual(calls.deleteMany, [[{ userId: "user-7" }]]);
+    assert.deepStrictEqual(calls.deleteMany, [[{ userId: USER_7 }]]);
     assert.strictEqual(calls.create, undefined, "no new token may be issued on reuse");
   });
 
   test("if the new token cannot be stored, the claim is released and the error surfaces", async () => {
-    const presented = jwtUtils.generateRefreshToken({ userId: "user-8" });
+    const presented = jwtUtils.generateRefreshToken({ userId: USER_8 });
     const originalExpiry = new Date(Date.now() + 60_000);
     stubModel({ claimed: { _id: "stored-8", expiresAt: originalExpiry }, createFails: true });
 
@@ -200,13 +214,13 @@ describe("Shared authenticate middleware", () => {
   });
 
   test("a valid access token attaches req.user", () => {
-    const { req, error } = run(`Bearer ${jwtUtils.generateAccessToken({ userId: "u-9" })}`);
+    const { req, error } = run(`Bearer ${jwtUtils.generateAccessToken({ userId: USER_9 })}`);
     assert.strictEqual(error, undefined);
-    assert.strictEqual(req.user.userId, "u-9");
+    assert.strictEqual(req.user.userId, USER_9);
   });
 
   test("an expired token is 401", () => {
-    const expired = jwt.sign({ userId: "u-9" }, process.env.JWT_ACCESS_SECRET!, {
+    const expired = jwt.sign({ userId: USER_9 }, process.env.JWT_ACCESS_SECRET!, {
       algorithm: "HS256",
       expiresIn: -10,
     });

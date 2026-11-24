@@ -102,6 +102,65 @@ export const checkWorkspaceMembership = async (
 };
 
 /**
+ * The caller's access to a workspace: member, and owner. Same outcomes as
+ * checkWorkspaceMembership. `isOwner` is true only when workspace-service
+ * says so explicitly (an older workspace-service without the field means
+ * "not owner": owner-only actions fail closed).
+ */
+export const getWorkspaceAccess = async (
+  workspaceId: string,
+  authHeader?: string,
+  { timeoutMs = MEMBERSHIP_CHECK_TIMEOUT_MS }: CheckOptions = {}
+): Promise<{ isMember: boolean; isOwner: boolean }> => {
+  assertValidWorkspaceId(workspaceId);
+
+  if (!authHeader) {
+    throw new AppError("Authentication required", 401);
+  }
+
+  const response = await callWorkspaceService(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/membership`,
+    authHeader,
+    timeoutMs
+  );
+
+  if (response.status === 401) {
+    throw new AppError("Authentication required", 401);
+  }
+  if (!response.ok) {
+    console.warn(`[workspace-membership] membership check returned ${response.status}`);
+    throw new AppError(CHECK_FAILED_MESSAGE, 503);
+  }
+
+  const body = await readJson(response);
+  if (body?.success !== true || typeof body?.data?.isMember !== "boolean") {
+    throw new AppError(CHECK_FAILED_MESSAGE, 503);
+  }
+
+  const isMember = body.data.isMember;
+  return { isMember, isOwner: isMember && body.data.isOwner === true };
+};
+
+/**
+ * Owner-only actions (SEC-010): resolves when the caller owns the workspace;
+ * otherwise 403 -- "not a member" or `ownerOnlyMessage` -- plus the
+ * 400/401/503 outcomes above.
+ */
+export const assertWorkspaceOwner = async (
+  workspaceId: string,
+  authHeader: string | undefined,
+  ownerOnlyMessage: string
+): Promise<void> => {
+  const { isMember, isOwner } = await getWorkspaceAccess(workspaceId, authHeader);
+  if (!isMember) {
+    throw new AppError("Access denied. You are not a member of this workspace.", 403);
+  }
+  if (!isOwner) {
+    throw new AppError(ownerOnlyMessage, 403);
+  }
+};
+
+/**
  * The user ids of a workspace's members, read with the caller's token (the
  * caller must be a member). Used to validate references to other users, such
  * as a task assignee.

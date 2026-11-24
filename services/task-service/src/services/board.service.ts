@@ -2,6 +2,7 @@ import { Board } from "../models/Board";
 import { Task } from "../models/Task";
 import { TaskActivity } from "../models/TaskActivity";
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { afterCursor, pageSort, toPage, type ListPageRequest } from "../../../../packages/shared/http/list-page";
 
 interface CreateBoardInput {
   workspaceId: string;
@@ -28,12 +29,19 @@ export const createBoard = async ({
 /**
  * Get all boards belonging to a workspace.
  */
+/** Most boards in one list page (ISS-043); also the default page size. */
+export const BOARD_LIST_MAX = 200;
+
 export const getWorkspaceBoards = async (
-  workspaceId: string
+  workspaceId: string,
+  page: ListPageRequest = { limit: BOARD_LIST_MAX, cursor: null }
 ) => {
-  return Board.find({ workspaceId })
-    .sort({ createdAt: 1 })
+  // Oldest first (as before), cursor-paged and bounded (ISS-043).
+  const rows = await Board.find({ workspaceId, ...afterCursor(page.cursor, 1) })
+    .sort(pageSort(1))
+    .limit(page.limit + 1)
     .lean();
+  return toPage(rows as any[], page.limit);
 };
 
 /**
@@ -66,7 +74,8 @@ export const updateBoard = async (
       $set: data,
     },
     {
-      new: true,
+      // ARC-010: replaces Mongoose's deprecated "new" option (same behaviour).
+      returnDocument: "after",
       runValidators: true,
     }
   ).lean();

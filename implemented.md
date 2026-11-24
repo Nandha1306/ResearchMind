@@ -147,7 +147,7 @@ Version numbers are the ranges declared in `package.json`. "In spec?" compares a
 | @langchain/community | `VoyageEmbeddings` wrapper | `ai-service/src/config/voyage.ts` | **Added** (spec implies direct use) |
 | @langchain/textsplitters | `RecursiveCharacterTextSplitter` | `chunking.service.ts` | **Replaces** the spec's hand-written chunker |
 
-**Installed but not imported anywhere in source:** `cookie-parser` (auth-service, a remnant of the cookie design in the spec), `@langchain/pinecone` and `@langchain/core` as direct imports (AI; `core` may still be a peer of the other LangChain packages), `winston` in ai-service and notification-service.
+**Installed but not imported anywhere in source:** `cookie-parser` (auth-service, a remnant of the cookie design in the spec; removed from auth-service in Wave 4, together with the unused `redis`), `@langchain/pinecone` and `@langchain/core` as direct imports (AI; `core` may still be a peer of the other LangChain packages), `winston` in ai-service and notification-service.
 
 **Imported but not declared in that service's `package.json`:** several services rely on npm workspace hoisting. For example `jsonwebtoken` is not listed in `api-gateway`, and `express` and `dotenv` are not listed in `auth-service` or `workspace-service`. This works in the monorepo and would break if a service were installed on its own.
 
@@ -185,7 +185,7 @@ Version numbers are the ranges declared in `package.json`. "In spec?" compares a
 | Cache / queue | Redis for cache, pub/sub, presence, rate limits, queue | Redis 7 for **rate limits and one queue only**. No cache, no pub/sub, no presence |
 | Vector DB | Pinecone | Pinecone. Index name from `PINECONE_INDEX` |
 | LLM | Anthropic Claude (`claude-sonnet-4-20250514`) | **OpenAI-compatible client against Groq or xAI**, chosen by API key prefix, see [§24](#24-external-integrations) |
-| Embeddings | Voyage `voyage-2` | Voyage. Code default `voyage-3`, `.env.example` and docs say `voyage-4`, the local `.env` sets `voyage-3` |
+| Embeddings | Voyage `voyage-2` | Voyage. Code default `voyage-3`; at the 2026-11-02 snapshot some docs still said voyage-4 (corrected since: `services/ai-service/.env.example` and the docs say `voyage-3`) |
 | File storage | Cloudinary or S3 | Cloudinary |
 | Container | Compose for everything | Compose for **MongoDB, Redis and mongo-express only** |
 | Hosting | Railway, Vercel, Atlas, Upstash | None configured |
@@ -492,9 +492,8 @@ The spec's routes (`/app/workspace/:id/...`, `/agent`, `/review`, `/channels/:id
 
 **Orphaned frontend code (not imported by anything):**
 
-- `components/dashboard/PriorityTasksCard.tsx`, `ResearchActivityCard.tsx`, `TeamWorkloadCard.tsx`
-- `components/workspace/InviteTeamStep.tsx`, `ProjectDomainStep.tsx`, `ReviewWorkspaceStep.tsx`, `WorkspaceDetailsStep.tsx`, `WorkspaceStepper.tsx`, and with them `lib/validations/workspace.schema.ts`
-- `components/ui/input.tsx`, `label.tsx`; `App.css`
+- *(Deleted in Wave 5, ARC-009:)* the three mock dashboard cards, the five abandoned workspace-wizard step files with their client schema, `App.css` and the three unused files in `src/assets`. `tests/frontend-dead-code.test.ts` now requires every module to be reachable from `main.tsx`.
+- `components/ui/input.tsx`, `label.tsx` (kept on purpose as shadcn primitives)
 - Exported but uncalled API functions: `searchWorkspaceVectors`, `authApi.getProfile`, `authApi.refreshToken`
 
 **Decorative UI with no behaviour:** the TopBar search box and `⌘K` badge; the notification bell and its always-on red dot; the "RAG Engine Status: Operational" panel, which is hard-coded text and not a health check.
@@ -932,7 +931,7 @@ erDiagram
 | Method and path | Request | Success | Errors |
 |---|---|---|---|
 | `POST /api/documents/upload` | multipart: `file`, `workspaceId` | `201` document, **including `extractedText`** | 400, 401, 403, 500 |
-| `POST /api/documents` | JSON per `createDocumentSchema` | `201`. Creates metadata only and **does not enqueue embedding**. No UI uses it | 400, 401, 403 |
+| `POST /api/documents` | — | **Removed in Wave 4 (ARC-001): now 404.** It used to create metadata-only records that were never indexed | — |
 | `GET /api/documents/workspace/:workspaceId` | | `200` array without `extractedText`, newest first | 401, 403 |
 | `GET /api/documents/:id` | | `200` with `extractedText` | 401, 403, 404 |
 | `DELETE /api/documents/:id` | | `200` deleted document | 401, 403, 404 |
@@ -1354,7 +1353,7 @@ The prompt demands a fixed JSON object with 17 explicit rules (extract only from
 | Format | JWT HS256 | JWT HS256 |
 | Payload | `{ userId, iat, exp }` | `{ userId, iat, exp }` |
 | Secret | `JWT_ACCESS_SECRET`, shared by 6 services | `JWT_REFRESH_SECRET`, auth-service only |
-| Lifetime | `ACCESS_TOKEN_EXPIRES` or 15m | `REFRESH_TOKEN_EXPIRES` or 7d |
+| Lifetime | `ACCESS_TOKEN_EXPIRES` or 5m (15m before Wave 4) | `REFRESH_TOKEN_EXPIRES` or 7d |
 | Client storage | `localStorage` | `localStorage` (**spec: httpOnly cookie**) |
 | Server storage | None | SHA-256 hash in `refreshtokens` |
 
@@ -1513,7 +1512,7 @@ So a duplicate-key error (`E11000`) or a `MulterError` becomes a generic 500, wh
 
 Names like `grokClient` and UI labels saying "Generated by Grok AI" appear regardless, so the UI may claim Grok while actually running on Groq. Which provider the local key selects **requires verification**. The service throws at import if no key is present.
 
-**Embedding model consistency.** The query and document vectors must come from the same model. Changing `VOYAGE_MODEL` without re-indexing leaves old vectors incompatible, and nothing detects that. Documentation disagrees here: code default `voyage-3`, `.env.example` and docs `voyage-4`, spec `voyage-2`, local `.env` `voyage-3`.
+**Embedding model consistency.** The query and document vectors must come from the same model. *(Updated, Wave 4/5:)* vectors store their model, and matches from another model are ignored at retrieval (ISS-027), so a `VOYAGE_MODEL` change needs a re-index for old documents to be found again. The code default and `.env.example` both say `voyage-3`; the spec says `voyage-2`.
 
 ---
 
@@ -1631,7 +1630,9 @@ The spec plans Jest unit tests for the chunker, token service, rate limiter, age
 docker-compose up -d            # mongodb :27017, redis :6379, mongo-express :8081
 
 # 2. Configure
-# Copy each services/<name>/.env.example to .env and frontend/.env.example to frontend/.env
+# Create each services/<name>/.env and frontend/.env from its .env.example ONLY if the .env
+# does not exist yet (cp -n; PowerShell: if (-not (Test-Path ...)) { Copy-Item ... }).
+# Never copy over an existing .env.
 # Generate secrets with: openssl rand -hex 48
 
 # 3. Install and start everything
@@ -1677,7 +1678,7 @@ Only variable names appear here. No real values were copied into this document.
 | `PORT` | All | No | 5000, 5001, 5002, 5003, 5004, 5006 |
 | `JWT_ACCESS_SECRET` | gateway, auth, workspace, document, task, AI | **Boot fails without it** | None |
 | `JWT_REFRESH_SECRET` | auth | **Boot fails without it** | None |
-| `ACCESS_TOKEN_EXPIRES`, `REFRESH_TOKEN_EXPIRES` | auth | No | `15m`, `7d` |
+| `ACCESS_TOKEN_EXPIRES`, `REFRESH_TOKEN_EXPIRES` | auth | No | `5m` (since Wave 4), `7d` |
 | `INTERNAL_SERVICE_TOKEN` | document, AI (boot-checked). auth, workspace (read at runtime) | Partly | None |
 | `MONGO_URI` or `MONGODB_URI` | auth and workspace use `MONGO_URI`; document, task, AI accept either | Yes | Task only has a local fallback |
 | `REDIS_URL` | gateway, document, AI | No | `redis://127.0.0.1:6379` |
@@ -1890,7 +1891,7 @@ graph TD
 | MD and TXT support | SPECIFIED BUT NOT IMPLEMENTED |
 | Document delete | PARTIALLY IMPLEMENTED: vectors are left behind |
 | Re-index | FULLY IMPLEMENTED |
-| `POST /api/documents` | PRESENT BUT UNUSED |
+| `POST /api/documents` | REMOVED (Wave 4, ARC-001) |
 | Embedding worker | FULLY IMPLEMENTED |
 | Dead-letter queue | SPECIFIED BUT NOT IMPLEMENTED |
 | Board API | FULLY IMPLEMENTED (rename and delete have no UI) |
@@ -1906,9 +1907,9 @@ graph TD
 | Chat, presence, Socket.io | SPECIFIED BUT NOT IMPLEMENTED |
 | Notification service | SPECIFIED BUT NOT IMPLEMENTED (empty files) |
 | Redis pub/sub, caching | SPECIFIED BUT NOT IMPLEMENTED |
-| auth-service Redis connection | CONFIGURED BUT NOT INTEGRATED |
-| `createHealthHandler` | PRESENT BUT UNUSED |
-| `generateGrokResponse`, `verifyPineconeIndex`, `verifyAccessToken` | PRESENT BUT UNUSED |
+| auth-service Redis connection | REMOVED (RT-009, Wave 1) |
+| `createHealthHandler` | USED (current tree) by the auth, workspace, document, task and ai-service health routes |
+| `generateGrokResponse` | PRESENT BUT UNUSED (`verifyPineconeIndex` was deleted in Wave 5, ARC-009; token verification is one shared `verifyAccessToken` since Wave 5, SEC-019) |
 | AI service `swagger.json` | PRESENT BUT UNUSED (not mounted) |
 | `shared-config/tsconfig.base.json` | PRESENT BUT UNUSED |
 | Dockerfiles, deployment | SPECIFIED BUT NOT IMPLEMENTED |
@@ -1941,7 +1942,7 @@ graph TD
 | Task assignment from the detail modal | PARTIALLY IMPLEMENTED: stores a name, not an ID |
 | Sources, Analytics, Literature Review, Report Drafter, Settings | SPECIFIED BUT NOT IMPLEMENTED (placeholders) |
 | TopBar search, notification bell | PRESENT BUT UNUSED (decorative) |
-| Orphaned dashboard cards and stepper | PRESENT BUT UNUSED |
+| Orphaned dashboard cards and stepper | DELETED (Wave 5, ARC-009) |
 | Dark mode | PARTIALLY IMPLEMENTED: hard-coded colours remain |
 | Responsive shell | FULLY IMPLEMENTED |
 

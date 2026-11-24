@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
 import { AppError } from "../errors/AppError";
 import { requireSecret } from "../config/secrets";
+import { verifyAccessToken } from "./access-token";
 
 const ACCESS_SECRET = requireSecret("JWT_ACCESS_SECRET");
 
@@ -11,7 +11,10 @@ export interface AuthRequest extends Request {
   };
 }
 
-/** Verify the access token and attach the user to the request. */
+/**
+ * Verify the access token and attach the user to the request. Verification
+ * (HS256, 24-hex userId) is the shared verifyAccessToken (SEC-019, ISS-047).
+ */
 export const authenticate = (
   req: AuthRequest,
   _res: Response,
@@ -29,21 +32,9 @@ export const authenticate = (
   }
 
   const token = authHeader.split(" ")[1];
-  const jwtSecret = ACCESS_SECRET;
 
   try {
-    const decoded = jwt.verify(
-      token,
-      jwtSecret,
-      { algorithms: ["HS256"] }
-    ) as {
-      userId: string;
-    };
-
-    req.user = {
-      userId: decoded.userId,
-    };
-
+    req.user = verifyAccessToken(token, ACCESS_SECRET);
     next();
   } catch {
     next(

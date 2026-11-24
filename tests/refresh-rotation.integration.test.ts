@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import crypto from "node:crypto";
 import { test, describe, before, after } from "node:test";
+import { infraDescribe } from "./helpers/infra";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { setTestSecrets } from "./helpers/test-env";
@@ -46,7 +47,7 @@ const rejectsWith401 = async (promise: Promise<unknown>, pattern?: RegExp) =>
     return true;
   });
 
-describe("Refresh-token rotation (real MongoDB)", { skip: mongoSkip }, () => {
+infraDescribe("Refresh-token rotation (real MongoDB)", mongoSkip, () => {
   test("normal rotation issues a new pair and the old token stops working", async () => {
     const { refreshToken } = await newUser();
     const rotated = await authService.refreshAccessToken(refreshToken);

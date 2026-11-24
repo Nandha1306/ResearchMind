@@ -1,5 +1,6 @@
 import assert from "node:assert";
 import { test, describe, before, after } from "node:test";
+import { infraDescribe } from "./helpers/infra";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { setTestSecrets, listen } from "./helpers/test-env";
@@ -56,7 +57,25 @@ const createWorkspace = async () => {
   return (await res.json()).data as { _id: string; inviteCode: string };
 };
 
-describe("P1-A18: joining a workspace (real MongoDB)", { skip: mongoSkip }, () => {
+/*
+ * SEC-019 (c): a correctly signed token whose userId is an object acted as a
+ * Mongo operator on `members` (`{"$gt":""}` listed every workspace and was a
+ * member everywhere). The verifier now refuses it before any query.
+ */
+infraDescribe("SEC-019: operator-shaped userId in a signed token (real MongoDB)", mongoSkip, () => {
+  test("an object userId gets 401 on the list and the membership route; nothing leaks", async () => {
+    const ws = await createWorkspace();
+    const forged = jwt.sign({ userId: { $gt: "" } }, process.env.JWT_ACCESS_SECRET!, { algorithm: "HS256", expiresIn: "5m" });
+    for (const path of ["/", `/${ws._id}/membership`, `/${ws._id}`]) {
+      const res = await fetch(`${app.url}/api/workspaces${path}`, { headers: { Authorization: `Bearer ${forged}` } });
+      const text = await res.text();
+      assert.strictEqual(res.status, 401, `${path}: ${text}`);
+      assert.ok(!text.includes(ws._id), `${path} leaked the workspace`);
+    }
+  });
+});
+
+infraDescribe("P1-A18: joining a workspace (real MongoDB)", mongoSkip, () => {
   test("a valid code typed in lower case with spaces joins the right workspace", async () => {
     const ws = await createWorkspace();
     const res = await api("POST", "/join", JOINER, { inviteCode: `  ${ws.inviteCode.toLowerCase()} ` });

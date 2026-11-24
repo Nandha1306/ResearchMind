@@ -28,13 +28,17 @@ See also: [../architecture/documents-and-ai.md](../architecture/documents-and-ai
 - A standalone worker running alongside the HTTP service is a second **competing consumer** on the same list. Each `BLPOP` hands a job to exactly one consumer. The atomic claim prevents two consumers from working on the same document at the same time.
 - Inside one process, `startEmbeddingWorker()` is idempotent: a second call returns the loop that is already running. Each worker processes **one job at a time**.
 - Every running document-service instance runs its own sweep. The instances do not coordinate. Duplicate re-queues are absorbed by the claim.
-- `docker-compose.yml` starts only MongoDB, Redis and mongo-express. No repository file defines a production process manager or container for the worker.
+- `docker-compose.yml` starts only MongoDB and Redis (mongo-express is opt-in through `docker-compose.tools.yml`). Redis requires a password, so the producer and the worker need `REDIS_URL=redis://:<REDIS_PASSWORD>@127.0.0.1:6379`. No repository file defines a production process manager or container for the worker.
 
 ---
 
 ## 2. How jobs are created
 
-All producers call `addEmbeddingJob()`, which runs `RPUSH researchmind:embedding:jobs <json>`. The JSON contains `documentId`, `workspaceId`, `uploadedBy`, `extractedText` (the full text) and `fileType`.
+All producers call `addEmbeddingJob()`, which runs `RPUSH researchmind:embedding:jobs <json>`. The JSON is a **pointer only**: `{ "documentId": "...", "workspaceId": "..." }` (SEC-006/ARC-007). No document text is written to Redis.
+
+**Text fetch.** After claiming a document, the worker fetches its text, uploader and file type from document-service: `GET /internal/documents/:id/embedding-source?workspaceId=&claimToken=` with `X-Internal-Token` (`INTERNAL_SERVICE_TOKEN`). document-service answers only for the **current** claim of a non-deleted document in the job's workspace (409 stale claim, 410 deleted, 403 workspace mismatch, 404 unknown), with `Cache-Control: no-store`. Nothing a queue entry carries is trusted.
+
+**Older queue entries.** Entries written by an older document-service still carry `extractedText`, `uploadedBy` and `fileType`. The worker accepts them and ignores those fields: the text is always fetched. **Deploy order:** deploy and restart **ai-service first** (it handles both shapes), then document-service. An old worker would drop pointer-only jobs as invalid; the affected documents stay `pending` until the recovery sweep re-queues them (within about 10 minutes). Never flush the real Redis to clean up; old entries drain normally.
 
 | Trigger | Status before push | If the push fails |
 |---|---|---|
@@ -42,7 +46,7 @@ All producers call `addEmbeddingJob()`, which runs `RPUSH researchmind:embedding
 | Manual re-index (`POST /api/documents/:id/reindex`) | `pending`, `embeddingAttempts: 0`, error cleared. Refused with `409` while a claim under 15 minutes old exists. | Document set to `failed`, "Could not queue the document for indexing". Request answers `503`. |
 | Recovery sweep | Unchanged at push time; updated afterwards (section 6) | Counted as an error and logged. Retried on the next sweep. |
 
-`POST /api/documents` (metadata only) does not push a job. The sweep picks the record up later (see [documents-and-ai.md](../architecture/documents-and-ai.md#21-upload-document-service)).
+`POST /api/documents` (metadata only) was removed in Wave 4 (ARC-001). An upload whose file has no extractable text is stored as `failed` (`No extractable text`) and no job is pushed (see [documents-and-ai.md](../architecture/documents-and-ai.md#21-upload-document-service)).
 
 ---
 
@@ -53,11 +57,13 @@ All producers call `addEmbeddingJob()`, which runs `RPUSH researchmind:embedding
 1. `BLPOP researchmind:embedding:jobs 5`. The 5 s timeout lets the loop notice a stop request.
 2. Discard malformed jobs:
    - Invalid JSON: logged and dropped.
-   - Missing fields, or a `fileType` other than `pdf`/`docx`: logged with the `documentId` only (never the text) and dropped.
+   - `documentId` or `workspaceId` missing or not an ObjectId: logged with the `documentId` only and dropped. Legacy fields (`extractedText`, `uploadedBy`, `fileType`) are ignored.
 
    Dropped jobs are **not** re-queued by the worker. If they belonged to a real document, the sweep picks that document up later.
-3. `processEmbeddingJob(job)`: claim → workspace check → chunk → embed → replace vectors → report. See [documents-and-ai.md §2.4](../architecture/documents-and-ai.md#24-worker-processing-ai-service).
+3. `processEmbeddingJob(job)`: claim → workspace check → **fetch the text for this claim** → chunk → embed → replace vectors → report. See [documents-and-ai.md §2.4](../architecture/documents-and-ai.md#24-worker-processing-ai-service).
 4. Any exception is logged as "Embedding worker error". The loop then waits 1 s and continues; one failed job never stops the worker.
+
+**Watchdog (ISS-037).** Every job has a deadline, `EMBEDDING_JOB_TIMEOUT_MS` (default 10 min, always below the 15 min claim lease). Each provider call is also bounded on its own: Voyage `VOYAGE_DOCUMENT_TIMEOUT_MS` (30 s per batch; the LangChain client retries at most once), Pinecone `PINECONE_TIMEOUT_MS` (20 s per call), the text fetch `DOCUMENT_SOURCE_TIMEOUT_MS` (30 s). A call that never answers is abandoned at its limit or at the job deadline, whichever comes first; no vector is written and no `indexed` is reported after the deadline. The job is reported `failed` (`Embedding timed out after N s`) **with the same claim token**, so if another worker has meanwhile taken the claim over, the report is refused (`409`, outcome `superseded`) and changes nothing. The loop then takes the next job, and the recovery sweep retries the document within its attempt limit. Before this, a hung Voyage request held the only worker for about 36 minutes (6 silent SDK retries × 300 s). Residual: an abandoned call cannot be cancelled, so a timed-out upsert can still land later. For a document that is retried, the next attempt rewrites the same deterministic ids. For a document that was **deleted** in the meantime, nothing rewrites or removes those vectors (a deleted document is never claimed again): they stay in Pinecone as orphans. Retrieval therefore checks every match against document-service's records (one batched `POST /internal/documents/live` per query/search) and drops matches whose document is deleted, missing or in another workspace, so such text is never returned, put into a prompt or cited (SEC-012 retrieval side). Removing the orphaned vectors themselves is not automated.
 
 The worker's Redis client uses `maxRetriesPerRequest: null` and reconnects forever, with backoff `min(attempt × 200 ms, 5 s)`. While Redis is down, the pending `BLPOP` waits.
 
@@ -104,7 +110,7 @@ A worker whose claim expired therefore cannot overwrite the current holder's res
 | Per document | At most **3 claims** (`MAX_EMBEDDING_ATTEMPTS`). Every claim counts, including one whose worker crashed. The sweep re-queues `failed` documents while attempts remain. Once all 3 are used, the document stays `failed` until someone re-indexes it manually, which resets the count. |
 | Permanent errors | Errors such as "Document contains no usable text" are retried like any other until the limit is reached. The code does not distinguish permanent from transient failures. |
 
-There is no dead-letter queue. A document that keeps failing ends in `failed` with its last `embeddingError`. That record is the only place the failure is kept.
+There is no dead-letter queue. A document that keeps failing ends in `failed` with its last `embeddingError`. Since Wave 5 (RT-007) that is a fixed text (`Indexing failed`, `Indexing timed out` or `Document contains no usable text`); the provider's own error goes only to the ai-service log, redacted (`Embedding processing failed for document <id>: <ErrorName> status=… code=…: …`). Look there for the cause.
 
 ---
 
@@ -114,7 +120,13 @@ There is no dead-letter queue. A document that keeps failing ends in `failed` wi
 
 1. **Finish interrupted deletions.** Documents with `deletedAt` set more than 5 minutes ago go through vector delete → Cloudinary destroy (guarded) → record delete.
 2. **Exhausted stale claims.** `indexing` documents with attempts ≥ 3 and a claim older than 15 minutes are set to `failed` with "Indexing failed after 3 attempts".
-3. **Backlog check.** `LLEN` on the queue. If Redis cannot be read, the run stops here. If **100 or more** jobs are waiting, re-queueing is deferred, so that repeated sweeps do not pile up copies of the full text in Redis while workers are down.
+   
+   **2b. Documents without text (ARC-001, Wave 4).** Documents that have no stored text (empty, missing, or only pdf-parse page markers) can never be indexed. They are set to `failed` with `embeddingError: "No extractable text"`, which the UI shows, instead of being re-queued forever:
+   - `pending` documents, and `failed` documents whose last update is older than 10 minutes;
+   - `indexing` documents whose claim is stale (older than 15 minutes) or was never started.
+   
+   The ids and the count are logged (`Marked N document(s) without extractable text as failed: <ids>`), never the content. No record, file or vector is deleted. This step is idempotent. **User-visible change:** existing records of that kind (for example metadata-only records created by the removed `POST /api/documents`, or scanned PDFs uploaded before Wave 4) change from `pending` to `failed` at the first sweep after the update. New uploads without text are stored as `failed` immediately and never queued. The re-queue step below only considers documents that have text.
+3. **Backlog check.** `LLEN` on the queue. If Redis cannot be read, the run stops here. If **100 or more** jobs are waiting, re-queueing is deferred, so that repeated sweeps do not pile up duplicate jobs in Redis while workers are down. (The sweep no longer loads documents' text: jobs are pointers.)
 4. **Re-queue** documents that are not deleted and have attempts left, oldest first, when any of these holds:
    - `indexing`, with a claim older than 15 minutes or no start time recorded
    - `pending` or `failed`, with no update (`updatedAt`) for more than **10 minutes**
@@ -122,7 +134,7 @@ There is no dead-letter queue. A document that keeps failing ends in `failed` wi
    After pushing each job, the sweep updates the document conditionally, using the values it read, so that a claim taken in between is never overwritten:
    - an abandoned claim goes back to `pending` with `indexingStartedAt: null`
    - in every case, `updatedAt` is set to now, which restarts the 10-minute window
-5. A summary is logged if anything happened, for example `Embedding recovery sweep: { requeued, exhausted, deletionsFinished, errors, backlog }`.
+5. A summary is logged if anything happened, for example `Embedding recovery sweep: { requeued, exhausted, textless, deletionsFinished, errors, backlog }`.
 
 A sweep may re-queue a document whose original job is still waiting in a slow queue. The claim makes the duplicate harmless: it is skipped as `in-progress` or `already-indexed`. If the document failed in the meantime, the duplicate starts its next attempt.
 
@@ -148,7 +160,14 @@ When a document is deleted while a worker is processing it:
 
 - The claim is refused (`410`) if the worker had not claimed it yet.
 - If the worker already holds the claim, its final report gets `410`/`404`. The worker then deletes the vectors it may have written (`removeVectorsOfDeletedDocument`).
-- If that cleanup fails, the worker logs `... was deleted during indexing but its vectors could NOT be removed (workspace <id>)`. **No automatic retry exists for this case.** It is the one path where deleted content can remain searchable. To fix it, call ai-service's internal `DELETE /internal/vectors/workspaces/:workspaceId/documents/:documentId` with the internal token.
+- The cleanup is retried: up to **3 attempts**, waiting about 1 s and then 3 s (SEC-012 b, Wave 4).
+- If every attempt fails, the worker logs `... was deleted during indexing but its vectors could NOT be removed after 3 attempts (workspace <id>); they are excluded from retrieval`. The orphaned vectors stay in Pinecone, but retrieval never returns them: every query checks its matches against document-service (`POST /internal/documents/live`) and drops matches of deleted documents. To remove them, call ai-service's internal `DELETE /internal/vectors/workspaces/:workspaceId/documents/:documentId` with the internal token. There is no automatic orphan sweep (accepted residual).
+
+### Deploy order (Wave 4)
+
+- document-service's internal `POST /internal/documents/live` now also returns `liveDocuments: [{ id, name }]` (ISS-029); `liveDocumentIds` is unchanged. ai-service works with either response, so **document-service and ai-service can be updated in either order**.
+- The new MongoDB indexes for paging (documents, tasks, boards, task activities) are built by Mongoose on the existing collections at the next start of document-service and task-service (`syncIndexes`/`autoIndex`). On large collections this takes a moment at startup.
+- The step 2b status change applies to existing records at the first sweep after document-service is updated.
 
 ---
 
@@ -189,7 +208,10 @@ Fixed values in code (no environment override):
 | Backlog cap | 100 |
 | Stale deletion | 5 min |
 | `BLPOP` timeout | 5 s |
-| Internal HTTP timeout | 15 s |
+| Internal HTTP timeout (claim, status) | 15 s |
+| Text fetch timeout (`DOCUMENT_SOURCE_TIMEOUT_MS`) | 30 s |
+| Voyage batch / Pinecone call timeout | 30 s / 20 s |
+| Job deadline (`EMBEDDING_JOB_TIMEOUT_MS`) | 10 min |
 | Embedding batch | 20 chunks |
 | Pinecone upsert batch | 100 vectors |
 
@@ -212,9 +234,11 @@ Voyage AI and Pinecone were **not tested against live accounts**. The rate-limit
 | Worker logs a claim `404` with no reason | `DOCUMENT_SERVICE_URL` points at the wrong service or an old document-service build |
 | Worker logs `Skipping embedding job … in-progress` / `already-indexed` | A duplicate delivery. This is normal after sweeps. |
 | Worker logs `Embedding claim for document <id> was superseded` | The job took longer than 15 minutes. Check Voyage rate limits and document size. |
-| Worker logs `… deleted during indexing but its vectors could NOT be removed` | Remove the vectors by hand. See [Deletion during processing](#deletion-during-processing). |
+| Worker logs `… deleted during indexing but its vectors could NOT be removed after 3 attempts` | The vectors are not retrievable, but still stored. Remove them by hand if needed. See [Deletion during processing](#deletion-during-processing). |
+| A document shows `failed` with `No extractable text` | The file has no text layer (for example a scanned PDF). It cannot be indexed; upload a version with text. |
 | `DELETE /api/documents/:id` answers 503 | Vector deletion failed. Check `AI_SERVICE_URL` and `INTERNAL_SERVICE_TOKEN` in document-service, that ai-service is up, and Pinecone errors in the ai-service log. |
 | ai-service or worker exits at startup with `vector index check failed` | Pinecone was reachable and either the index was not found or its dimension differs from `VOYAGE_EMBEDDING_DIMENSION`. If Pinecone is **unreachable** (or `listIndexes` takes more than 10 s), startup only logs `Could not verify the Pinecone index at startup; continuing` and the check is skipped (`services/ai-service/src/utils/verify-pinecone.ts`). A mismatch then shows up later as failed jobs or failed queries. |
+| ai-service or worker exits at startup with `Pinecone rejected PINECONE_API_KEY (invalid or revoked credentials)` | Pinecone answered 401 (RT-006, Wave 4). Fix `PINECONE_API_KEY` and restart. |
 | ai-service exits on startup with `VOYAGE_API_KEY is not configured` / `PINECONE_…` / `XAI_API_KEY…` | A provider key is missing. The service fails as soon as it imports the module that needs the key. |
 | Shutdown logs `shutdown timed out after 30000 ms` | A job was still running, usually in Voyage backoff. Its document recovers as a crashed claim. |
 | Checking that a workspace has vectors | `npm run verify:vectors -- <documentId> <workspaceId>` (ai-service). **Note:** despite its name and arguments, the script only prints index and namespace statistics (record count). It does not check the given document's vectors. |

@@ -1,4 +1,5 @@
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { describeErrorForLog } from "../../../../packages/shared/errors/safe-error";
 
 /**
  * The only LLM-failure message that is ever sent to a client.
@@ -63,8 +64,8 @@ export const logLlmFailure = (
   reason: LlmFailureReason,
   error?: unknown
 ): void => {
-  const detail =
-    error instanceof Error ? `${error.name}: ${error.message}` : String(error ?? "");
+  // Wave 6 (W6-SEC-02): redacted and bounded like every other provider-error log.
+  const detail = error === undefined || error === null ? "" : describeErrorForLog(error);
 
   console.error(
     `[ai-service] LLM ${operation} failed (reason=${reason})${detail ? ` :: ${detail}` : ""}`

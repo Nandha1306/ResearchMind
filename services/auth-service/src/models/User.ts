@@ -30,6 +30,9 @@ const userSchema = new Schema<IUser>(
       type: String,
       required: true,
       trim: true,
+      // Wave 6 (W6-SEC-04). Safe for existing rows: User.create is the only
+      // write path (nothing re-saves an existing user).
+      maxlength: 100,
     },
 
     /**
@@ -43,6 +46,7 @@ const userSchema = new Schema<IUser>(
       unique: true,
       lowercase: true,
       trim: true,
+      maxlength: 254,
     },
 
     /**

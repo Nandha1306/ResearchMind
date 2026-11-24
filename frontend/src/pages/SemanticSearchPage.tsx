@@ -1,12 +1,12 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { Suspense, lazy, useState, useMemo, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { readInitialQuery } from "../utils/navigation";
 import { useWorkspaceStore } from "../store/workspace.store";
 import { useWorkspaceDocuments } from "../hooks/useDocuments";
 import { useAiQuery } from "../hooks/useAiQuery";
-import { PdfViewerModal } from "../components/documents/PdfViewerModal";
 import type { DocumentItem } from "../types/document.types";
-import { getSafeExternalUrl } from "../utils/fileUtils";
+import { downloadDocumentFile } from "../utils/document-file";
+import { documentApi } from "../api/document.api";
 import type { AISource } from "../utils/sse";
 import {
   Sparkles,
@@ -24,6 +24,12 @@ import {
   BookOpen,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { MathMarkdown } from "../components/ui/MathMarkdown";
+
+// ARC-011: react-pdf and pdf.js load only when a PDF is opened.
+const PdfViewerModal = lazy(() =>
+  import("../components/documents/PdfViewerModal").then((m) => ({ default: m.PdfViewerModal }))
+);
 
 export const SemanticSearchPage: React.FC = () => {
   const { currentWorkspace } = useWorkspaceStore();
@@ -109,12 +115,10 @@ export const SemanticSearchPage: React.FC = () => {
       if (doc.fileType === "pdf") {
         setSelectedPdf(doc);
       } else {
-        // Open only http(s) URLs, without giving the new tab a handle to this
-        // window (a stored URL is not trusted to be safe).
-        const url = getSafeExternalUrl(doc.cloudinaryUrl);
-        if (url) {
-          window.open(url, "_blank", "noopener,noreferrer");
-        }
+        // Private file (SEC-005): fetched through the authenticated API and saved.
+        void downloadDocumentFile(documentApi.getDocumentFile, doc._id, doc.originalName).catch(() => {
+          window.alert(`Could not download "${doc.originalName}". Please try again.`);
+        });
       }
     }
   };
@@ -287,8 +291,9 @@ export const SemanticSearchPage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="text-[13.5px] text-text-primary leading-relaxed whitespace-pre-wrap font-sans min-h-[60px]">
-                  {answer}
+                <div className="text-[13.5px] text-text-primary leading-relaxed font-sans min-h-[60px]">
+                  {/* ARC-002: Markdown + KaTeX with the hardened options. */}
+                  {answer && <MathMarkdown content={answer} className="text-[13.5px]" />}
                   {isStreaming && (
                     <span className="inline-block w-2 h-4 ml-1 bg-accent-primary animate-pulse rounded-sm align-middle" />
                   )}
@@ -367,7 +372,7 @@ export const SemanticSearchPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <Clock className="w-4 h-4 text-accent-primary" />
               <h3 className="text-sm font-bold text-text-primary">
-                Workspace Q&A History
+                Your Q&A History
               </h3>
             </div>
             <span className="text-[10px] text-text-muted bg-bg-elevated px-2 py-0.5 rounded border border-border-subtle font-semibold">
@@ -382,7 +387,8 @@ export const SemanticSearchPage: React.FC = () => {
             </div>
           ) : history.length === 0 ? (
             <div className="py-8 text-center space-y-2">
-              <p className="text-[12px] text-text-secondary">No previous Q&A sessions in this workspace.</p>
+              {/* SEC-023: history is private to the asking user. */}
+              <p className="text-[12px] text-text-secondary">You have no previous Q&A sessions in this workspace.</p>
               <p className="text-[11px] text-text-muted">Ask a question above to start logging sessions.</p>
             </div>
           ) : (
@@ -419,10 +425,12 @@ export const SemanticSearchPage: React.FC = () => {
 
       {/* PDF Viewer Modal */}
       {selectedPdf && (
-        <PdfViewerModal
-          document={selectedPdf}
-          onClose={() => setSelectedPdf(null)}
-        />
+        <Suspense fallback={null}>
+          <PdfViewerModal
+            document={selectedPdf}
+            onClose={() => setSelectedPdf(null)}
+          />
+        </Suspense>
       )}
     </div>
   );

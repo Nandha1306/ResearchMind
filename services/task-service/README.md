@@ -19,7 +19,9 @@ The Task Service stores the boards and tasks of each research workspace, records
   - idempotent when the optional `importKey` is sent: repeating the same import returns the tasks created the first time instead of duplicating them.
 - Every route checks that the caller is a member of the workspace in the URL by asking workspace-service (shared helper `packages/shared/auth/workspace-membership.ts`): malformed workspace id → `400`, not a member → `403`, membership check could not run → `503`.
 - An assignee must be the user id of a member of the workspace; otherwise the request is rejected with `400`.
-- Hosting Swagger UI at `/api-docs/`.
+- Deleting a board or a task is **workspace owner only** (SEC-010); other members get `403`.
+- Internal route `POST /internal/workspaces/:workspaceId/members/:userId/unassign` (shared `INTERNAL_SERVICE_TOKEN`, never proxied by the gateway): called by workspace-service when the owner removes a member; that member's tasks in the workspace are unassigned.
+- Hosting Swagger UI at `/api-docs/` when `API_DOCS_ENABLED=true` (off by default since Wave 5).
 
 ---
 
@@ -52,7 +54,7 @@ Mounted under `/api/tasks` (default port 5004, proxied through API Gateway on po
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET`  | `/health` | Service health check (503 while MongoDB is unavailable) |
-| `GET`  | `/api-docs/` | Swagger UI |
+| `GET`  | `/api-docs/` | Swagger UI (only when `API_DOCS_ENABLED=true`) |
 | `POST` | `/api/tasks/workspaces/:workspaceId/boards` | Create a board |
 | `GET`  | `/api/tasks/workspaces/:workspaceId/boards` | List boards |
 | `GET`  | `/api/tasks/workspaces/:workspaceId/boards/:id` | Get a board |
@@ -73,7 +75,7 @@ Mounted under `/api/tasks` (default port 5004, proxied through API Gateway on po
 Full list, defaults and examples: [docs/reference/environment-variables.md](../../docs/reference/environment-variables.md).
 
 - **Required:** `MONGODB_URI` or `MONGO_URI` (`MONGODB_URI` is read first), `JWT_ACCESS_SECRET` (same value in every service; the service refuses to start without a valid one).
-- **Optional:** `PORT` (default `5004`), `WORKSPACE_SERVICE_URL` (membership checks and assignee validation, default `http://127.0.0.1:5002`; set it when not running locally), `CORS_ORIGIN` (comma-separated; unset allows any origin).
+- **Optional:** `PORT` (default `5004`), `HOST` (default `127.0.0.1`; set `0.0.0.0` for container or multi-host use), `WORKSPACE_SERVICE_URL` (membership checks and assignee validation, default `http://127.0.0.1:5002`; set it when not running locally), `API_DOCS_ENABLED` (`true` serves Swagger UI; off by default, SEC-016). Since Wave 5 this service sends no CORS headers and no longer reads `CORS_ORIGIN` (the gateway applies it, SEC-015).
 
 ---
 
@@ -87,7 +89,7 @@ Full list, defaults and examples: [docs/reference/environment-variables.md](../.
 
 ## 7. Local Development Commands
 
-Run from the repository root: one `npm install` there installs every workspace. The service reads `services/task-service/.env` (copy `.env.example`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
+Run from the repository root: one `npm install` there installs every workspace. The service reads `services/task-service/.env` (create it from `.env.example` only if it does not exist yet: `cp -n services/task-service/.env.example services/task-service/.env`, PowerShell `if (-not (Test-Path services/task-service/.env)) { Copy-Item services/task-service/.env.example services/task-service/.env }`; never copy over an existing `.env`). Status: TESTED = run in the Wave 1–4 audits, UNTESTED = not run.
 
 ```bash
 npm run dev:task                    # live reload (nodemon + ts-node), same as `npm run dev -w task-service`  [UNTESTED]

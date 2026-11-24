@@ -6,7 +6,9 @@ import { getWorkspaceBoards, createBoard, bulkCreateTasks } from "../api/task.ap
 import {
   buildActionItemTasks,
   buildImportKey,
+  MAX_MEETING_NOTES_LENGTH,
   MAX_TASKS_PER_IMPORT,
+  meetingNotesProblem,
 } from "../utils/meeting-tasks";
 
 /** A random id for one generated summary (scopes its import keys). */
@@ -132,7 +134,7 @@ export const MeetingSummarizerPage: React.FC = () => {
   // 2. Summarize Meeting Handler
   const handleSummarize = async () => {
     const trimmed = meetingNotes.trim();
-    if (!currentWorkspace?._id || !trimmed || trimmed.length < 10) return;
+    if (!currentWorkspace?._id || meetingNotesProblem(trimmed) !== null) return;
 
     setSummarizing(true);
     setSummaryError(null);
@@ -267,7 +269,10 @@ export const MeetingSummarizerPage: React.FC = () => {
     );
   }
 
-  const isInputValid = meetingNotes.trim().length >= 10;
+  // ISS-039: the server's 10..50,000-character rule, checked before sending.
+  const notesLength = meetingNotes.trim().length;
+  const isInputValid = meetingNotesProblem(meetingNotes) === null;
+  const notesTooLong = notesLength > MAX_MEETING_NOTES_LENGTH;
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-8 bg-bg-base text-text-primary">
@@ -322,10 +327,12 @@ export const MeetingSummarizerPage: React.FC = () => {
         </CardContent>
 
         <CardFooter className="flex items-center justify-between border-t border-border-default pt-4 bg-bg-elevated/40 rounded-b-xl">
-          <span className="text-xs text-text-secondary">
-            {meetingNotes.trim().length === 0
+          <span className={`text-xs ${notesTooLong ? "text-destructive" : "text-text-secondary"}`} aria-live="polite">
+            {notesLength === 0
               ? "0 characters entered"
-              : `${meetingNotes.trim().length} characters`}
+              : notesTooLong
+                ? `${notesLength.toLocaleString("en-US")} / ${MAX_MEETING_NOTES_LENGTH.toLocaleString("en-US")} characters: ${meetingNotesProblem(meetingNotes)}`
+                : `${notesLength.toLocaleString("en-US")} / ${MAX_MEETING_NOTES_LENGTH.toLocaleString("en-US")} characters`}
           </span>
 
           <Button

@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import mongoose from "mongoose";
+import { assertDisposableMongoUri } from "./infra-guard";
 
 /**
  * Integration tests need a real, DISPOSABLE MongoDB, given as TEST_MONGO_URI
@@ -20,6 +21,11 @@ if (process.env.CI && !TEST_MONGO_URI) {
 }
 if (!TEST_MONGO_URI) {
   console.warn("[tests] TEST_MONGO_URI not set: MongoDB integration suites are SKIPPED");
+}
+// Wave 6 (W6-TEST-19, W6-CI-05/06, A-4): a disposable loopback MongoDB on a
+// non-default port only -- locally AND in CI; credentials need authSource.
+if (TEST_MONGO_URI) {
+  assertDisposableMongoUri("TEST_MONGO_URI", TEST_MONGO_URI);
 }
 
 export const mongoSkip: string | false = TEST_MONGO_URI

@@ -1,4 +1,5 @@
 import { grokClient, XAI_MODEL } from "../config/grok";
+import { timeouts } from "../config/timeouts";
 import {
   MeetingSummary,
 } from "../types/meeting.types";
@@ -129,32 +130,49 @@ export const generateMeetingSummary = async (
   }
 
   try {
-    const response =
-      await grokClient.chat.completions.create({
-        model: XAI_MODEL,
+    const request = {
+      model: XAI_MODEL,
 
-        messages: [
-          {
-            role: "system",
-            content:
-              MEETING_SUMMARY_SYSTEM_PROMPT,
-          },
-          {
-            role: "user",
-            content: `
+      messages: [
+        {
+          role: "system" as const,
+          content:
+            MEETING_SUMMARY_SYSTEM_PROMPT,
+        },
+        {
+          role: "user" as const,
+          content: `
 MEETING NOTES
 
 ${normalizedText}
-`,
-          },
-        ],
 
-        temperature: 0.2,
-        max_tokens: MEETING_SUMMARY_MAX_TOKENS,
-      },
-      {
-        timeout: Number(process.env.LLM_REQUEST_TIMEOUT_MS || 60_000),
-      });
+Return the summary as a single JSON object.
+`,
+        },
+      ],
+
+      temperature: 0.2,
+      max_tokens: MEETING_SUMMARY_MAX_TOKENS,
+    };
+    // Bounded parse with a safe default (ARC-013).
+    const options = { timeout: timeouts.llmRequestMs() };
+
+    /*
+     * ISS-030: ask the provider for JSON mode. The parse and schema checks
+     * below stay the guard. If the provider or model rejects the request with
+     * a 400 (e.g. JSON mode unsupported), retry ONCE without it.
+     */
+    let response;
+    try {
+      response = await grokClient.chat.completions.create(
+        { ...request, response_format: { type: "json_object" as const } },
+        options
+      );
+    } catch (error) {
+      if ((error as { status?: number })?.status !== 400) throw error;
+      console.warn("[ai-service] The LLM provider rejected JSON mode (400); retrying the meeting summary once without it");
+      response = await grokClient.chat.completions.create(request, options);
+    }
 
     const rawContent =
       extractResponseContent(response);

@@ -1,4 +1,5 @@
 import { voyageQueryEmbeddings, VOYAGE_EMBEDDING_DIMENSION } from "../config/voyage";
+import { timeouts, withTimeout } from "../config/timeouts";
 
 /** Generate a semantic embedding for a user's search query with rate limit retry handling. */
 export const generateQueryEmbedding = async (
@@ -16,7 +17,11 @@ export const generateQueryEmbedding = async (
 
   while (attempt < maxAttempts) {
     try {
-      const embedding = await voyageQueryEmbeddings.embedQuery(normalizedQuery);
+      const embedding = await withTimeout(
+        voyageQueryEmbeddings.embedQuery(normalizedQuery),
+        timeouts.voyageQueryMs(),
+        "Voyage query embedding"
+      );
 
       // Same validated value used for document embeddings and the index check.
       const expectedDimension = VOYAGE_EMBEDDING_DIMENSION;

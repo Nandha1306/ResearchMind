@@ -2,42 +2,37 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-import { assertRequiredSecrets } from "../../../packages/shared/config/secrets";
-
 /*
- * Validate security-critical configuration BEFORE anything else is wired up.
- * Fails closed with the variable NAME only -- never the value.
+ * Validate security-critical configuration BEFORE anything else is wired up
+ * (secrets, INTERNAL_SERVICE_TOKEN, distinct JWT secrets, token lifetimes;
+ * see preflight.ts). Fails closed with the variable NAME only -- never the
+ * value. Keep this the first import after dotenv so it runs before app.ts
+ * under every loader.
  */
-assertRequiredSecrets("auth-service", ["JWT_ACCESS_SECRET", "JWT_REFRESH_SECRET"]);
+import "./preflight";
 
 import app from "./app";
 import { connectDB } from "./config/db";
-import { connectRedis, closeRedis } from "./config/redis";
 import { disconnectMongo } from "../../../packages/shared/lifecycle/mongo";
 import { registerGracefulShutdown } from "../../../packages/shared/lifecycle/shutdown";
+import { startHttpServer } from "../../../packages/shared/lifecycle/listen";
 
 const PORT = process.env.PORT || 5001;
 
 const startServer = async () => {
   await connectDB();
 
-  // No auth-service route uses Redis today, so it must not block startup:
-  // node-redis's connect() waits (retrying) until Redis is reachable, which
-  // left the service unable to listen whenever Redis was down. The client
-  // connects in the background and logs its own success or failure.
-  void connectRedis();
+  // auth-service does not use Redis. Its former client was never used by any
+  // route and only flooded the log during Redis outages (RT-009), so it was
+  // removed.
 
-  const server = app.listen(PORT, () => {
-    console.log(`Auth Service running on port ${PORT}`);
-  });
+  // HOST (default 127.0.0.1); exits 1 if the port cannot be bound (SEC-004, RT-002).
+  const server = startHttpServer(app, { serviceName: "Auth Service", port: PORT });
 
   registerGracefulShutdown({
     serviceName: "auth-service",
     server,
-    steps: [
-      { name: "mongodb", close: disconnectMongo },
-      { name: "redis", close: closeRedis },
-    ],
+    steps: [{ name: "mongodb", close: disconnectMongo }],
   });
 };
 

@@ -15,6 +15,14 @@
 >   provider calls replaced, and was not verified against live Voyage,
 >   Pinecone or Groq/xAI accounts.
 > See [documents and AI pipeline](../architecture/documents-and-ai.md).
+>
+> **Status note (2026-11-13, Wave 4):** the context builder no longer emits
+> plain `[Source N]` headers: each chunk is wrapped in a nonce-tagged
+> `<source-…>` block labelled with the document's file name, and document text
+> is treated as untrusted (SEC-011, ISS-029). Matches below
+> `MIN_RELEVANCE_SCORE` (default 0.2) are dropped (ISS-028), sources of deleted
+> documents are redacted in the session history (SEC-012), and a client
+> disconnect stops generation without saving (ISS-015).
 
 ## Context and Problem Statement
 
@@ -23,7 +31,7 @@ ResearchMind requires a high-performance Retrieval-Augmented Generation (RAG) pi
 ## Decision Drivers
 
 * **Multi-Tenant Isolation**: Workspace documents and vector embeddings must be strictly isolated.
-* **Retrieval Quality**: High-precision 1024-dimension vector embeddings using Voyage AI (`voyage-4`).
+* **Retrieval Quality**: High-precision 1024-dimension vector embeddings using Voyage AI (`voyage-3`, the configured default; corrected from `voyage-4` on 2026-11-13).
 * **Real-time UX**: Low-latency token streaming to the frontend via Server-Sent Events (SSE).
 * **Auditability & Persistence**: Full interaction logging (query, answer, sources, user ID, workspace ID) in MongoDB (`researchmind_ai`).
 * **Debugging**: Preserving `POST /api/ai/search` as a pure vector retrieval debugging endpoint independent of `POST /api/ai/query`.
@@ -42,14 +50,14 @@ Chosen option: **Option 2 (Pinecone Namespaces) + Server-Sent Events (SSE)**.
 
 1. **Embedding & Vector Storage**:
    - Background worker processes jobs from Redis queue `researchmind:embedding:jobs`.
-   - Voyage AI (`voyage-4`, 1024 dims) generates embeddings for document chunks.
+   - Voyage AI (`voyage-3` by default, `VOYAGE_MODEL`; 1024 dims) generates embeddings for document chunks. Each vector records its `embeddingModel`, and retrieval ignores vectors from another model (Wave 4, ISS-027).
    - Embeddings and metadata are stored in Pinecone under `namespace = workspaceId`.
 
 2. **Query Processing & Streaming (`POST /api/ai/query`)**:
-   - API Gateway verifies JWT authentication and validates workspace membership via Workspace Service (`:5002`).
+   - API Gateway verifies JWT authentication and validates workspace membership via Workspace Service (`:5002`). *(Superseded, see the status notes: the gateway verifies the JWT only; ai-service checks membership itself.)*
    - Query vectorized with Voyage AI `embedQuery()`.
    - Pinecone searches top-K vector chunks within `namespace(workspaceId)`.
-   - RAG Context Builder constructs structured context with `[Source N]` references.
+   - RAG Context Builder constructs structured context with `[Source N]` references. *(Superseded, see the 2026-11-13 status note: nonce-tagged `<source-…>` blocks labelled with the file name.)*
    - High-speed LLM (Groq / xAI) streams token deltas using Server-Sent Events (`Content-Type: text/event-stream`).
    - Event protocol sequence: `start` $\rightarrow$ `sources` $\rightarrow$ `token` $\rightarrow$ `done`.
 
@@ -58,6 +66,6 @@ Chosen option: **Option 2 (Pinecone Namespaces) + Server-Sent Events (SSE)**.
 
 ## Consequences
 
-* **Positive**: Strict tenant isolation enforced at both the API Gateway/Workspace Membership level and Pinecone namespace level.
+* **Positive**: Strict tenant isolation enforced at both the API Gateway/Workspace Membership level and Pinecone namespace level. *(Superseded: membership is checked by each service against workspace-service, not by the gateway; Pinecone namespaces are per workspace.)*
 * **Positive**: SSE provides lightweight, unidirectional streaming over standard HTTP without WebSocket overhead.
-* **Positive**: Complete compliance verified by 33-phase end-to-end automated test suite.
+* **Positive**: Complete compliance verified by 33-phase end-to-end automated test suite. *(Superseded: no such suite exists; see the status note and [testing](../testing.md).)*

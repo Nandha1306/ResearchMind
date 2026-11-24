@@ -1,14 +1,16 @@
 import axiosInstance from "./axios";
 import type { DocumentItem, DocumentApiResponse } from "../types/document.types";
+import { fetchAllPages, type GetFn, type PagedList } from "./paging";
+
+const listGet: GetFn = (url, config) => axiosInstance.get(url, config);
 
 export const documentApi = {
-  /** Fetch all documents belonging to a workspace. */
-  getWorkspaceDocuments: async (workspaceId: string): Promise<DocumentItem[]> => {
-    const response = await axiosInstance.get<DocumentApiResponse<DocumentItem[]>>(
-      `/documents/workspace/${workspaceId}`
-    );
-    return response.data.data;
-  },
+  /**
+   * Fetch the documents of a workspace, newest first, following the server's
+   * page cursor (ISS-043). `truncated` is true when the page ceiling was hit.
+   */
+  getWorkspaceDocuments: async (workspaceId: string): Promise<PagedList<DocumentItem>> =>
+    fetchAllPages<DocumentItem>(listGet, `/documents/workspace/${workspaceId}`),
 
   /** Upload a PDF or DOCX file to a workspace. */
   uploadDocument: async (workspaceId: string, file: File): Promise<DocumentItem> => {
@@ -27,6 +29,18 @@ export const documentApi = {
       }
     );
     return response.data.data;
+  },
+
+  /**
+   * Fetch a document's file (members only). Goes through the authenticated
+   * client, so an expired access token is refreshed and the request retried;
+   * the token is never placed in a URL.
+   */
+  getDocumentFile: async (documentId: string): Promise<Blob> => {
+    const response = await axiosInstance.get<Blob>(`/documents/${documentId}/file`, {
+      responseType: "blob",
+    });
+    return response.data;
   },
 
   /** Delete a document by ID. */

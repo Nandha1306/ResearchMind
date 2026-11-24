@@ -1,26 +1,24 @@
 import multer from "multer";
 import path from "path";
-import fs from "fs";
 import { AppError } from "../../../../packages/shared/errors/AppError";
+import { ensureUploadTmpDir, newUploadTempName, resolveUploadTmpDir } from "../utils/upload-tmp";
 
-const uploadDir = "uploads/";
+/*
+ * SEC-024 (a): uploads are written to UPLOAD_TMP_DIR (default: OS temp +
+ * researchmind-uploads), not a cwd-relative folder inside the repository,
+ * under a random name -- the client's file name never becomes part of a path.
+ */
+export const UPLOAD_TMP_DIR = resolveUploadTmpDir();
+ensureUploadTmpDir(UPLOAD_TMP_DIR);
 
-/** Ensure uploads directory exists. */
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-/** Store uploaded files temporarily in the uploads folder. */
+/** Store uploaded files temporarily until they are parsed and stored. */
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
-    cb(null, uploadDir);
+    cb(null, UPLOAD_TMP_DIR);
   },
 
   filename: (_req, file, cb) => {
-    const uniqueName =
-      `${Date.now()}-${file.originalname}`;
-
-    cb(null, uniqueName);
+    cb(null, newUploadTempName(path.extname(file.originalname)));
   },
 });
 

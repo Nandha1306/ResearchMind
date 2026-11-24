@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../middlewares/auth.middleware";
-import { create, getAll, join, checkMembership, getById, getMembers } from "../controllers/workspace.controller";
+import { create, getAll, join, checkMembership, getById, getMembers, removeMember, readmitMember } from "../controllers/workspace.controller";
 
 import { validate } from "../../../../packages/validation/validation";
 import { createWorkspaceSchema , joinWorkspaceSchema } from "../../../../packages/validation/schemas/workspace.schema";
@@ -45,6 +45,23 @@ router.get(
   "/:workspaceId/members",
   authenticate,
   getMembers
+);
+
+/**
+ * Remove a member (workspace owner only; the owner cannot be removed). Also
+ * rotates the invite code and blocks the user from rejoining.
+ */
+router.delete(
+  "/:workspaceId/members/:userId",
+  authenticate,
+  removeMember
+);
+
+/** Lift a removal so the user may join again with the current code (owner only). */
+router.post(
+  "/:workspaceId/members/:userId/readmit",
+  authenticate,
+  readmitMember
 );
 
 export default router;

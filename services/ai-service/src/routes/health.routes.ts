@@ -4,15 +4,21 @@ import { createHealthHandler } from "../../../../packages/shared/health/healthCh
 
 const router = Router();
 
+const redisReady = () => redis.status === "ready";
+
 /**
- * Check whether the AI service and its dependencies are healthy.
- *
- * MongoDB (session persistence) and Redis (embedding worker queue) are both
- * reported; previously MongoDB was not checked at all.
+ * GET /health -- liveness (ARC-008). The HTTP API (Q&A, search, summaries,
+ * history) needs MongoDB but not Redis: with Redis down it answers 200
+ * `status: "degraded"`, `redis: "down"`, so an orchestrator does not restart
+ * a working API during a Redis blip. MongoDB down is still 503.
  */
-router.get(
-  "/",
-  createHealthHandler("ai-service", () => redis.status === "ready")
-);
+router.get("/", createHealthHandler("ai-service", redisReady, { redisRequired: false }));
+
+/**
+ * GET /health/ready -- strict readiness: 503 unless MongoDB AND Redis are up
+ * (the embedding worker consumes its queue from Redis). Monitors that should
+ * alert on the worker use this one.
+ */
+router.get("/ready", createHealthHandler("ai-service", redisReady));
 
 export default router;

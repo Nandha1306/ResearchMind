@@ -30,8 +30,26 @@ describe("A10: file signature checks (document-service/src/utils/file-signature.
 
   test("recognises PDF and ZIP (DOCX) headers", () => {
     assert.ok(matchesDocumentSignature(Buffer.from("%PDF-1.7\n..."), "pdf"));
-    assert.ok(matchesDocumentSignature(Buffer.concat([Buffer.from("junk before header "), Buffer.from("%PDF-1.4")]), "pdf"));
+    // SEC-020 (Wave 5, R3): this assertion was FLIPPED. Junk before "%PDF-" used
+    // to be accepted (header search anywhere in the first 1 KB), which let an
+    // HTML/PDF polyglot through; now only an optional UTF-8 BOM and/or ASCII
+    // whitespace may precede the header.
+    assert.ok(!matchesDocumentSignature(Buffer.concat([Buffer.from("junk before header "), Buffer.from("%PDF-1.4")]), "pdf"));
     assert.ok(matchesDocumentSignature(Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x14, 0x00]), "docx"));
+  });
+
+  test("SEC-020: an HTML-then-%PDF polyglot is refused; a BOM- or whitespace-prefixed PDF is accepted", async () => {
+    const polyglot = Buffer.from("<html><script>alert(1)</script></html>\n%PDF-1.4\n1 0 obj\n");
+    assert.ok(!matchesDocumentSignature(polyglot, "pdf"));
+    assert.ok(!matchesDocumentSignature(Buffer.from("text\n%PDF-1.4"), "pdf"));
+    assert.ok(matchesDocumentSignature(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("%PDF-1.7")]), "pdf"));
+    assert.ok(matchesDocumentSignature(Buffer.from("\r\n \t%PDF-1.5"), "pdf"));
+    assert.ok(matchesDocumentSignature(Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("\n  %PDF-1.6")]), "pdf"));
+    // Whitespace must end before the 1024-byte window.
+    assert.ok(!matchesDocumentSignature(Buffer.concat([Buffer.alloc(1100, 0x20), Buffer.from("%PDF-1.4")]), "pdf"));
+    const file = path.join(dir, "polyglot.pdf");
+    await fs.writeFile(file, polyglot);
+    await assert.rejects(assertFileMatchesType(file, "pdf"), (e: any) => e instanceof AppError && e.statusCode === 415);
   });
 
   test("rejects mismatched content", () => {
@@ -91,6 +109,56 @@ describe("A09: embedding configuration and index compatibility", () => {
 
     const missing = checkIndexCompatibility(indexes, "other-index", 1024);
     assert.ok(!missing.ok && /not found/.test(missing.reason));
+  });
+
+  /*
+   * RT-006: a rejected Pinecone key at startup is fatal (the server and the
+   * worker exit through their existing catch); an unreachable Pinecone stays
+   * "unverified" so a transient outage does not keep the service down.
+   */
+  describe("RT-006: startup check distinguishes a rejected key from an outage", () => {
+    let pinecone: any;
+    let originalListIndexes: any;
+    let validate: typeof import("../services/ai-service/src/utils/verify-pinecone").validateVectorIndexAtStartup;
+    let indexName: string;
+    let dimension: number;
+
+    before(async () => {
+      ({ pinecone, PINECONE_INDEX_NAME: indexName } = await import("../services/ai-service/src/config/pinecone"));
+      ({ VOYAGE_EMBEDDING_DIMENSION: dimension } = await import("../services/ai-service/src/config/voyage"));
+      ({ validateVectorIndexAtStartup: validate } = await import("../services/ai-service/src/utils/verify-pinecone"));
+      originalListIndexes = pinecone.listIndexes;
+    });
+    after(() => {
+      pinecone.listIndexes = originalListIndexes;
+    });
+
+    test("a 401 (PineconeAuthorizationError) rejects with a clear message naming PINECONE_API_KEY, without the key", async (t) => {
+      t.mock.method(console, "warn", () => {});
+      const { Errors } = await import("@pinecone-database/pinecone");
+      pinecone.listIndexes = async () => {
+        throw Errors.mapHttpStatusError({ status: 401, url: "https://api.pinecone.io/indexes" } as any);
+      };
+      await assert.rejects(validate(), (error: Error) => {
+        assert.match(error.message, /Pinecone rejected PINECONE_API_KEY/);
+        assert.ok(!error.message.includes(process.env.PINECONE_API_KEY!), "the key value is in the message");
+        return true;
+      });
+    });
+
+    test("a network error stays 'unverified'", async (t) => {
+      t.mock.method(console, "warn", () => {});
+      pinecone.listIndexes = async () => {
+        throw new TypeError("fetch failed");
+      };
+      assert.strictEqual(await validate(), "unverified");
+    });
+
+    test("a matching index is 'verified'", async (t) => {
+      t.mock.method(console, "log", () => {});
+      pinecone.listIndexes = async () => ({ indexes: [{ name: indexName, dimension, metric: "cosine" }] });
+      assert.strictEqual(await validate(), "verified");
+    });
   });
 });
 

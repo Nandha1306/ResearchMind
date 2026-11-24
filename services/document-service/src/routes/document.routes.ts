@@ -1,20 +1,17 @@
 import { Router } from "express";
-import { getDocuments, getDocument, createDocumentHandler, deleteDocumentHandler, reindexDocumentHandler } from "../controllers/document.controller";
-import { validate } from "../../../../packages/validation/validation";
-import { createDocumentSchema } from "../../../../packages/validation/schemas/document.schema";
+import { getDocuments, getDocument, deleteDocumentHandler, reindexDocumentHandler } from "../controllers/document.controller";
 import { upload } from "../middlewares/upload.middleware";
 import { uploadDocument } from "../controllers/upload.controller";
+import { streamDocumentFile } from "../controllers/document-file.controller";
 import { authenticate } from "../../../../packages/shared/auth/authenticate";
 
 const router = Router();
 
-/** Create workspace document metadata. */
-router.post(
-  "/",
-  authenticate,
-  validate(createDocumentSchema),
-  createDocumentHandler
-);
+/*
+ * ARC-001: the metadata-only `POST /api/documents` was removed. No client
+ * used it; it created records with no file and no text that the recovery
+ * sweep kept re-queuing. Documents are created only by POST /upload.
+ */
 
 /** Get workspace documents. */
 router.get(
@@ -28,6 +25,16 @@ router.get(
   "/:id",
   authenticate,
   getDocument
+);
+
+/**
+ * Stream the document's file (members only; SEC-005). The only way a client
+ * gets a document's bytes: no storage URL is ever returned.
+ */
+router.get(
+  "/:id/file",
+  authenticate,
+  streamDocumentFile
 );
 
 /** Delete document. */

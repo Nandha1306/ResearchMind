@@ -3,9 +3,22 @@ import { AppError } from "../../../../packages/shared/errors/AppError";
 
 export type SupportedDocumentType = "pdf" | "docx";
 
-/** PDF readers accept the "%PDF-" header anywhere in the first 1024 bytes. */
+/**
+ * PDF header (SEC-020). PDF readers tolerate the "%PDF-" header anywhere in
+ * the first 1024 bytes, which lets an HTML/PDF polyglot pass. Only an
+ * optional UTF-8 byte-order mark and/or ASCII whitespace may precede it
+ * (some generators emit those); anything else -- HTML, text -- is refused.
+ */
 const PDF_HEADER = Buffer.from("%PDF-");
 const PDF_HEADER_SEARCH_BYTES = 1024;
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+const ASCII_WHITESPACE = new Set([0x09, 0x0a, 0x0c, 0x0d, 0x20]);
+
+const pdfHeaderOffset = (head: Buffer): number => {
+  let offset = head.subarray(0, UTF8_BOM.length).equals(UTF8_BOM) ? UTF8_BOM.length : 0;
+  while (offset < head.length && ASCII_WHITESPACE.has(head[offset])) offset++;
+  return offset;
+};
 
 /** DOCX files are ZIP archives; every ZIP local file header starts "PK\x03\x04". */
 const ZIP_LOCAL_HEADER = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
@@ -19,7 +32,9 @@ export const matchesDocumentSignature = (
   type: SupportedDocumentType
 ): boolean => {
   if (type === "pdf") {
-    return head.subarray(0, PDF_HEADER_SEARCH_BYTES).includes(PDF_HEADER);
+    const window = head.subarray(0, PDF_HEADER_SEARCH_BYTES);
+    const offset = pdfHeaderOffset(window);
+    return window.subarray(offset, offset + PDF_HEADER.length).equals(PDF_HEADER);
   }
   return head.subarray(0, ZIP_LOCAL_HEADER.length).equals(ZIP_LOCAL_HEADER);
 };

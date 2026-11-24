@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from "react";
+import React, { Suspense, lazy, useState, useMemo } from "react";
 import { useWorkspaceStore } from "../store/workspace.store";
+import { useIsWorkspaceOwner } from "../hooks/useWorkspaceRole";
 import { useWorkspaceDocuments, useUploadDocument, useDeleteDocument, useReindexDocument } from "../hooks/useDocuments";
 import { DocumentToolbar } from "../components/documents/DocumentToolbar";
 import type { FilterOption } from "../components/documents/DocumentToolbar";
@@ -8,16 +9,22 @@ import { DocumentSkeleton } from "../components/documents/DocumentSkeleton";
 import { DocumentEmptyState } from "../components/documents/DocumentEmptyState";
 import { DocumentErrorState } from "../components/documents/DocumentErrorState";
 import { UploadDocumentModal } from "../components/documents/UploadDocumentModal";
-import { PdfViewerModal } from "../components/documents/PdfViewerModal";
 import type { DocumentItem } from "../types/document.types";
 import { Plus, FileText, Sparkles, AlertCircle, X } from "lucide-react";
 import { Button } from "../components/ui/button";
+import { ListTruncatedNotice } from "../components/ui/ListTruncatedNotice";
+
+// ARC-011: react-pdf and pdf.js load only when a PDF is opened.
+const PdfViewerModal = lazy(() =>
+  import("../components/documents/PdfViewerModal").then((m) => ({ default: m.PdfViewerModal }))
+);
 
 export const DocumentsPage: React.FC = () => {
   const { currentWorkspace } = useWorkspaceStore();
   const workspaceId = currentWorkspace?._id;
+  const isOwner = useIsWorkspaceOwner();
 
-  const { data: documents = [], isLoading, isError, error, refetch } = useWorkspaceDocuments(workspaceId);
+  const { data: documents = [], truncated, isLoading, isError, error, refetch } = useWorkspaceDocuments(workspaceId);
   const uploadMutation = useUploadDocument(workspaceId);
   const deleteMutation = useDeleteDocument(workspaceId);
   const reindexMutation = useReindexDocument(workspaceId);
@@ -130,6 +137,8 @@ export const DocumentsPage: React.FC = () => {
             filteredCount={filteredDocuments.length}
           />
 
+          {truncated && <ListTruncatedNotice shown={documents.length} noun="documents" />}
+
           {actionError && (
             <div
               role="alert"
@@ -153,7 +162,10 @@ export const DocumentsPage: React.FC = () => {
             <DocumentGrid
               documents={filteredDocuments}
               onSelectDocument={(doc) => setSelectedPdf(doc)}
-              onDeleteDocument={(doc) => void runDocumentAction(doc, deleteMutation, "delete")}
+              // Owner only (SEC-010): members get no delete control.
+              onDeleteDocument={
+                isOwner ? (doc) => void runDocumentAction(doc, deleteMutation, "delete") : undefined
+              }
               onReindexDocument={(doc) => void runDocumentAction(doc, reindexMutation, "re-index")}
               busyDocumentIds={busyDocumentIds}
             />
@@ -190,10 +202,12 @@ export const DocumentsPage: React.FC = () => {
 
       {/* 4. In-App PDF Viewer Modal */}
       {selectedPdf && (
-        <PdfViewerModal
-          document={selectedPdf}
-          onClose={() => setSelectedPdf(null)}
-        />
+        <Suspense fallback={null}>
+          <PdfViewerModal
+            document={selectedPdf}
+            onClose={() => setSelectedPdf(null)}
+          />
+        </Suspense>
       )}
     </div>
   );
