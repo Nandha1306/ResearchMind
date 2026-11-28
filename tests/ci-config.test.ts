@@ -383,7 +383,9 @@ describe("CI workflow: compose-runtime and audit jobs (D-5, D-6, A-17, A-22)", (
     assert.strictEqual(job.env.TEST_COMPOSE_RUNTIME, "1");
     assert.strictEqual(job.env.TEST_COMPOSE_PROJECT, "rmcitest");
     assert.strictEqual(job.env.TEST_COMPOSE_PORT_BASE, "15940");
-    assert.strictEqual(job.env.TMPDIR, "${{ runner.temp }}");
+    const suiteStep = job.steps.find((s: { name?: string }) => s.name === "Compose runtime suite");
+    assert.ok(suiteStep, "Compose runtime suite step missing");
+    assert.strictEqual(suiteStep.env?.TMPDIR, "${{ runner.temp }}");
     assert.ok(Number(job["timeout-minutes"]) <= 20);
     assert.match(runOf("compose-runtime", "Docker Compose is at least 2.24 (the override uses !reset)"), /b < 24/);
     assert.match(runOf("compose-runtime", "Compose gate (0 fail, 0 skip, at least 12 tests)"), /--min-tests 12 --skips 0$/);
@@ -411,5 +413,59 @@ describe("CI workflow: compose-runtime and audit jobs (D-5, D-6, A-17, A-22)", (
     assert.ok(steps.includes("npm audit --omit=dev --audit-level=moderate"));
     assert.doesNotMatch(steps.join("\n"), /npm ci|npm install/, "audit runs from package-lock.json alone");
     assert.match(runOf("audit", "Full dependency tree (report only)"), /npm audit --json > npm-audit-full\.json/);
+  });
+});
+
+/*
+ * GitHub only allows some expression contexts at each level of a workflow
+ * (docs: "Contexts" -> "Context availability"). A context used where it is not
+ * available makes the WHOLE workflow file invalid: GitHub then reports a
+ * failed run after 0 s and no job runs. That is what happened on the first
+ * push (runner.temp in jobs.compose-runtime.env). YAML parsing alone does not
+ * catch it, so check the levels the workflow uses.
+ */
+describe("CI workflow: expression contexts are available where they are used", () => {
+  const contextsIn = (value: unknown): string[] => {
+    const found: string[] = [];
+    for (const m of String(value ?? "").matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+      const body = m[1].replace(/'[^']*'/g, "");
+      for (const c of body.matchAll(/(?<![\w.-])([a-z_]+)(?=\.|\()/g)) found.push(c[1]);
+    }
+    return found;
+  };
+  // Functions that may appear in expressions (not contexts).
+  const FUNCTIONS = new Set(["always", "cancelled", "success", "failure", "contains", "startsWith", "endsWith", "format", "join", "toJSON", "fromJSON", "hashFiles"]);
+  const check = (where: string, value: unknown, allowed: string[]) => {
+    for (const c of contextsIn(value)) {
+      if (FUNCTIONS.has(c)) continue;
+      assert.ok(allowed.includes(c), `${where} uses the "${c}" context, which GitHub does not allow there (allowed: ${allowed.join(", ")})`);
+    }
+  };
+
+  test("workflow-level env and concurrency use only github/inputs/vars/secrets", () => {
+    for (const [k, v] of Object.entries(wf.env ?? {})) check(`env.${k}`, v, ["github", "secrets", "inputs", "vars"]);
+    for (const [k, v] of Object.entries(wf.concurrency ?? {})) check(`concurrency.${k}`, v, ["github", "inputs", "vars"]);
+  });
+
+  test("job-level env, if, runs-on and timeout-minutes do not use runner, steps, env or job", () => {
+    const JOB_LEVEL = ["github", "needs", "strategy", "matrix", "vars", "secrets", "inputs"];
+    for (const [name, job] of Object.entries<any>(wf.jobs)) {
+      for (const [k, v] of Object.entries(job.env ?? {})) check(`jobs.${name}.env.${k}`, v, JOB_LEVEL);
+      check(`jobs.${name}.if`, job.if, ["github", "needs", "vars", "inputs"]);
+      check(`jobs.${name}.runs-on`, job["runs-on"], JOB_LEVEL);
+      check(`jobs.${name}.timeout-minutes`, job["timeout-minutes"], JOB_LEVEL);
+    }
+  });
+
+  test("step-level env and if use only contexts available to steps", () => {
+    const STEP_LEVEL = ["github", "needs", "strategy", "matrix", "job", "runner", "env", "vars", "secrets", "steps", "inputs"];
+    for (const [name, job] of Object.entries<any>(wf.jobs)) {
+      for (const step of job.steps ?? []) {
+        const id = `jobs.${name}.steps["${step.name ?? step.uses}"]`;
+        for (const [k, v] of Object.entries(step.env ?? {})) check(`${id}.env.${k}`, v, STEP_LEVEL);
+        check(`${id}.if`, step.if, STEP_LEVEL);
+        for (const [k, v] of Object.entries(step.with ?? {})) check(`${id}.with.${k}`, v, STEP_LEVEL);
+      }
+    }
   });
 });

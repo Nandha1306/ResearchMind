@@ -226,9 +226,6 @@ jobs:
       TEST_COMPOSE_RUNTIME: "1"
       TEST_COMPOSE_PROJECT: rmcitest
       TEST_COMPOSE_PORT_BASE: "15940"
-      # The suite writes its generated compose env file to os.tmpdir():
-      # keep it in RUNNER_TEMP, outside the checkout (R8).
-      TMPDIR: ${{ runner.temp }}
       MONGO_URI: mongodb://127.0.0.1:6598/rmtest_unused
       REDIS_URL: redis://127.0.0.1:6399
     steps:
@@ -262,6 +259,11 @@ jobs:
             fi
           done
       - name: Compose runtime suite
+        env:
+          # The suite writes its generated compose env file to os.tmpdir():
+          # keep it in RUNNER_TEMP, outside the checkout (R8). Set at step
+          # level: GitHub does not allow the runner context in job-level env.
+          TMPDIR: ${{ runner.temp }}
         run: |
           mkdir -p reports
           npx tsx --test \

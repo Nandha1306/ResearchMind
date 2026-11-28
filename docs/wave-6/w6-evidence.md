@@ -384,6 +384,12 @@ No production advisory was added (A-10). The 2 high (`shadcn` and its nested `zo
 
 **Job design:** `static` (20 min), `build` (20), `test` (45), `compose-runtime` (20), `audit` (10). Triggers: pull requests into `develop`/`main`, pushes to `develop`/`main`, `workflow_dispatch`; never `pull_request_target`; no `secrets.*`; `permissions: contents: read`; `persist-credentials: false`; `bash -eo pipefail`; concurrency cancels superseded PR runs. Masking rule (A-8): no `continue-on-error`; only the three named report/cleanup steps use `set +e` … `exit 0`. **Correction (Stage E, W6-R6-01):** as first written, the test's regex could not match `|| :` and did not see `|| echo` / `|| exit 0` or an `if: ${{ false }}` on a gate; it now rejects every shell-level `||` outside those steps and requires gate/stage/scan/tree-clean steps to have no `if` or exactly `${{ !cancelled() }}` (section "Stage E corrections" at the end). The `audit` job runs from `package-lock.json` alone (no `npm ci`, A-22). Required checks for branch protection: `static`, `build`, `test`, `compose-runtime`, `audit` (user action).
 
+**First GitHub result (2026-11-24, push of commit `06841d4`, run 45450342972): FAILED after 0 s, "workflow file issue".** No job ran. Cause: `jobs.compose-runtime.env.TMPDIR: ${{ runner.temp }}`. GitHub does not allow the `runner` context in job-level `env`, so it rejects the whole file. The YAML parse and `ci-config.test.ts` could not see this. Fixed 2026-11-28 in the working tree, not yet committed:
+- `TMPDIR` moved to the step-level `env` of "Compose runtime suite", where `runner` is allowed.
+- `ci-config.test.ts` gained three context-availability tests (workflow, job and step level). They give 39/39 on the fixed file, and 2 failures on the pushed file, naming `jobs.compose-runtime.env.TMPDIR`.
+- `actionlint` has still not been run: the local run via its Docker image was not permitted in this session.
+- The push trigger covers only `develop`/`main`, so the next real run is the pull request into `develop`.
+
 **Expected first-run risks (cannot be verified here):** Linux `npm ci` (the lock carries the linux-x64-gnu binaries), timing thresholds on 2–4 vCPUs (W6-TEST-14), the compose suite's LAN test on the runner (**correction, W6-R6-02:** as first written that test returned early with only a diagnostic and therefore PASSED without a LAN IPv4, so the 0-skip gate could not catch it; since Stage E it fails under `CI` and records a counted skip elsewhere), cold image pulls, masking in the Actions log.
 
 ---
